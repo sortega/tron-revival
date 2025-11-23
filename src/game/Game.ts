@@ -132,29 +132,33 @@ export class Game {
       player.update();
     }
 
-    // Draw trails and check collisions
+    // Check collisions FIRST, then draw trails
     for (let i = 0; i < this.players.length; i++) {
       const player = this.players[i];
       if (!player) continue;
 
       if (player.vivo) {
-        // Draw trail at player's current position
-        this.renderer.drawTrailPixel(player.x, player.y, player.color);
+        // Check for collisions at NEW position BEFORE drawing
+        const collision = this.collisionDetector.checkPlayerCollision(player);
 
-        // Check for collisions
         const oldPos = oldPositions[i];
+        let diagonalCollision = false;
         if (oldPos) {
-          const diagonalCollision = this.collisionDetector.checkDiagonalCollision(
+          diagonalCollision = this.collisionDetector.checkDiagonalCollision(
             player,
             oldPos.x,
             oldPos.y
           );
+        }
 
-          const collision = this.collisionDetector.checkPlayerCollision(player);
-
-          if (collision || diagonalCollision) {
-            player.vivo = false;
-            console.log(`💥 ${player.name} crashed!`);
+        if (collision || diagonalCollision) {
+          player.vivo = false;
+          console.log(`💥 ${player.name} crashed!`);
+        } else {
+          // Only draw trail if still alive
+          // Draw at OLD position (where player was last frame)
+          if (oldPos && (oldPos.x !== player.x || oldPos.y !== player.y)) {
+            this.renderer.drawTrailPixel(oldPos.x, oldPos.y, player.color);
           }
         }
       }
