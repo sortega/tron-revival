@@ -1,0 +1,26 @@
+{
+  "name": "tron-revival",
+  "version": "0.1.0",
+  "description": "Modern web revival of Teratron - a multiplayer Tron-style game with P2P networking",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:48674/git/sortega/tron-revival"
+  },
+  "keywords": ["game", "tron", "multiplayer", "p2p", "webrtc", "retro"],
+  "author": "Sebastian Ortega",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.5"
+  }
+}
