@@ -51,20 +51,40 @@ This document outlines the high-level architecture for the modern web implementa
 - Reduces bundle size and complexity
 - Easier to optimize performance
 
-### Backend Framework
+### Networking
 
-**Node.js + Express + Socket.io**
-- **Express**: HTTP server for static files and room management
-- **Socket.io**: WebSocket communication with fallbacks
-  - Automatic reconnection
-  - Event-based API
-  - Room support built-in
-  - Widely used and stable
+**Pure Peer-to-Peer - No Custom Server!**
 
-**Alternative**: Raw WebSocket API
-- More control, less abstraction
-- Consider if Socket.io proves too heavy
-- Defer decision to implementation phase
+Use existing P2P infrastructure - zero server-side code to write or host!
+
+**PeerJS** (or similar service)
+- **What it provides:**
+  - Free public signaling server (already running!)
+  - Simple WebRTC abstraction
+  - Room/peer ID system
+  - Automatic connection management
+- **What we write:** Client-side code only (TypeScript)
+- **Cost:** $0 (uses PeerJS's free public server)
+
+**How it works:**
+1. Include PeerJS library in client
+2. Create peer with unique ID (or random if host)
+3. Share peer ID via URL: `http://teratron.com/?room=abc123`
+4. Other players connect to peer ID
+5. Direct P2P connections established automatically
+6. No custom server code needed!
+
+**Alternatives to PeerJS:**
+- **Simple-peer**: Lower-level, more control
+- **Trystero**: Serverless P2P using public infrastructure (BitTorrent, IPFS, etc.)
+- **Gun.js**: Decentralized database with P2P sync
+- Roll our own minimal signaling (only if needed later)
+
+**Decision: Start with PeerJS**
+- Simplest to implement
+- Proven, widely used
+- Free public infrastructure
+- Can replace later if needed
 
 ### Build Tools
 
@@ -82,37 +102,48 @@ This document outlines the high-level architecture for the modern web implementa
 ### High-Level Overview
 
 ```
-┌─────────────────┐         ┌─────────────────┐
-│  Client (Web)   │◄───────►│  Game Server    │
-│                 │  WS/WS  │   (Node.js)     │
-│  - Rendering    │         │                 │
-│  - Input        │         │  - Game State   │
-│  - Prediction   │         │  - Physics      │
-│  - Interpolation│         │  - Validation   │
-└─────────────────┘         └─────────────────┘
-        │                            │
-        │                            │
-        ▼                            ▼
-┌─────────────────┐         ┌─────────────────┐
-│  Local State    │         │  Room Manager   │
-│  - Predicted    │         │  - Lobbies      │
-│  - Rendering    │         │  - Sessions     │
-└─────────────────┘         └─────────────────┘
+                    ┌────────────────────────┐
+                    │ PeerJS Public Servers  │ (Free, already running!)
+                    │  (Signaling only)      │
+                    └───────────┬────────────┘
+                                │ (Initial connection setup only)
+                   ┌────────────┼────────────┐
+                   │            │            │
+                   ▼            ▼            ▼
+         ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+         │ Host Client │ │  Client 2   │ │  Client 3   │
+         │             │◄┼────────────►│ │             │
+         │ - Game Loop │ │ WebRTC P2P  │◄┤ WebRTC P2P │
+         │ - Authority │ │             │ │             │
+         │ - Rendering │ │ - Rendering │ │ - Rendering │
+         └─────────────┘ └─────────────┘ └─────────────┘
+
+         After initial setup, all communication is direct P2P
+         No custom server needed - just static file hosting!
 ```
 
-### Client-Server Model
+### Peer-to-Peer Model with Host Authority
 
-**Authoritative Server**
-- Server is the source of truth for game state
-- All game logic runs on server
-- Clients send inputs, receive state updates
-- Server validates all actions
+**Host Client (Authoritative)**
+- One client (first to create room) acts as authoritative host
+- Runs complete game logic locally
+- Broadcasts game state to all connected peers via WebRTC
+- Processes all inputs (own + received from peers)
+- Source of truth for game state
 
-**Why authoritative?**
-- Prevents cheating
-- Ensures consistency across clients
-- Simpler conflict resolution
-- Standard for multiplayer games
+**Guest Clients**
+- Connect to host and other peers via WebRTC
+- Send inputs to host
+- Receive state updates from host
+- Render game state locally
+- Optional: Can connect to each other for redundancy/chat
+
+**Why peer-to-peer with host authority?**
+- **Zero server costs**: No dedicated game servers needed
+- **Simpler operations**: Just static file hosting + minimal signaling
+- **Low latency**: Direct connections, no server hop for game data
+- **Perfect for 2-4 players**: WebRTC mesh scales well at this size
+- **Still authoritative**: Host prevents cheating, ensures consistency
 
 ### Network Architecture
 
@@ -120,72 +151,95 @@ See detailed design: [multiplayer.md](./multiplayer.md) *(to be created)*
 
 **Key decisions:**
 - **Room-based matchmaking**: Players create/join rooms via shareable links
-- **State synchronization**: Server broadcasts game state at fixed rate (e.g., 30-60 Hz)
-- **Input handling**: Clients send input events, server processes immediately
+- **WebRTC signaling**: Use signaling server only for initial connection setup
+- **P2P game data**: All game traffic goes directly between clients
+- **Host authority**: Host client runs game loop and broadcasts state
+- **Input handling**:
+  - Guest clients send inputs to host
+  - Host processes all inputs and updates state
+  - Host broadcasts state to all guests
 - **Latency handling**:
-  - Client-side prediction for local player
-  - Server reconciliation for corrections
+  - Client-side prediction for local player (on all clients)
+  - Host reconciliation for corrections
   - Interpolation for remote players
 
 **Room System:**
 ```
-Room ID (generated) → http://teratron.example.com/room/abc123
+Shareable Link: http://teratron.example.com/?room=abc123xyz
 
-Players join → Lobby (waiting room)
-            → Game (active match)
-            → Results (post-game)
+Create Room:
+  Player 1 → Creates PeerJS peer with ID "abc123xyz" → Becomes Host
+          → Gets shareable link with peer ID
+
+Join Room:
+  Player 2+ → Opens link → Extracts peer ID from URL
+          → Creates own PeerJS peer → Connects to host peer ID
+          → PeerJS handles WebRTC setup automatically
+          → Direct P2P connection established
 ```
+
+**Connection Flow (using PeerJS):**
+```typescript
+// Host creates room
+const hostPeer = new Peer('room-abc123xyz'); // Or random ID
+const shareableLink = `${window.location.origin}/?room=${hostPeer.id}`;
+// Share link with friends!
+
+// Guest joins room
+const roomId = new URLSearchParams(window.location.search).get('room');
+const guestPeer = new Peer(); // Random ID for guest
+const conn = guestPeer.connect(roomId); // Connect to host
+
+// Direct P2P communication established!
+// PeerJS handled all the WebRTC signaling
+```
+
+**Yes, shareable links work perfectly with pure P2P!**
+- No custom server needed
+- PeerJS provides the signaling
+- Room ID is just the host's peer ID
+- Share via URL, Discord, text message, etc.
 
 ## Code Organization
 
-### Monorepo Structure
+### Project Structure (Simplified!)
 
 ```
 tron-revival/
-├── packages/
-│   ├── client/          # Browser game client
-│   │   ├── src/
-│   │   │   ├── game/    # Core game rendering & logic
-│   │   │   ├── network/ # Network client
-│   │   │   ├── ui/      # Menus, lobby, etc.
-│   │   │   └── main.ts
-│   │   └── index.html
-│   │
-│   ├── server/          # Game server
-│   │   ├── src/
-│   │   │   ├── game/    # Server-side game logic
-│   │   │   ├── network/ # WebSocket server
-│   │   │   ├── rooms/   # Room management
-│   │   │   └── main.ts
-│   │   └── package.json
-│   │
-│   └── shared/          # Shared code (types, constants, utilities)
-│       ├── src/
-│       │   ├── types/   # Game state types, network messages
-│       │   ├── constants.ts
-│       │   └── utils.ts
-│       └── package.json
+├── src/                     # All TypeScript code (client-side only!)
+│   ├── game/                # Core game logic (runs on host)
+│   │   ├── engine/          # Game loop, physics, collision
+│   │   ├── entities/        # Players, items, projectiles
+│   │   └── maps/            # Map loading, hazards
+│   ├── render/              # Canvas rendering
+│   ├── network/             # P2P connections (PeerJS wrapper)
+│   │   ├── host.ts          # Host-specific logic
+│   │   ├── guest.ts         # Guest-specific logic
+│   │   └── peer-manager.ts  # PeerJS connection management
+│   ├── ui/                  # Menus, lobby, HUD
+│   ├── types/               # TypeScript type definitions
+│   ├── constants.ts         # Game constants
+│   ├── utils.ts             # Shared utilities
+│   └── main.ts              # Entry point
 │
-├── design/              # Design documents (this folder)
-├── old-tron/            # Original game reference
-├── assets/              # Game assets (graphics, sounds)
+├── public/                  # Static assets
+│   ├── assets/              # Graphics, sounds, fonts
+│   └── index.html
+│
+├── design/                  # Design documents
+├── old-tron/                # Original game reference
 ├── CLAUDE.md
-├── package.json         # Root package for monorepo
+├── package.json             # Single package!
+├── tsconfig.json
+├── vite.config.ts
 └── README.md
 ```
 
-### Shared Code
-
-**What goes in `shared/`:**
-- Type definitions (game state, network messages)
-- Constants (map dimensions, item types, speeds)
-- Pure utility functions (collision detection, coordinate math)
-- Game rules that must match client/server
-
-**What doesn't:**
-- Rendering code (client only)
-- Network server logic (server only)
-- DOM manipulation (client only)
+**No monorepo needed!**
+- Just one package: the client
+- All TypeScript code is client-side
+- No server code to maintain
+- Simpler project structure
 
 ### Key Modules
 
@@ -197,57 +251,61 @@ See detailed designs:
 
 ## Game Loop Architecture
 
-### Server Game Loop
+### Host Client Game Loop
 
 ```typescript
-// Authoritative game loop on server
-const TICK_RATE = 60; // Server updates per second
+// Authoritative game loop runs on host client
+const TICK_RATE = 60; // Game updates per second
 const TICK_INTERVAL = 1000 / TICK_RATE;
 
-function serverTick() {
-  // 1. Process player inputs (queued from network)
-  processInputs();
+function hostGameTick() {
+  // 1. Process all player inputs (own + received from peers)
+  processAllInputs();
 
-  // 2. Update game state
+  // 2. Update game state (authoritative)
   updatePlayers();
   updateProjectiles();
   updateItems();
   checkCollisions();
 
-  // 3. Broadcast state to all clients
-  broadcastGameState();
+  // 3. Broadcast state to all connected peers via WebRTC
+  broadcastGameStateToGuests();
 
-  // 4. Schedule next tick
-  setTimeout(serverTick, TICK_INTERVAL);
+  // 4. Render locally
+  renderFrame();
+
+  // 5. Schedule next tick
+  setTimeout(hostGameTick, TICK_INTERVAL);
 }
 ```
 
-### Client Game Loop
+### Guest Client Loop
 
 ```typescript
-// Client rendering loop (separate from server tick)
-function clientLoop(timestamp) {
-  // 1. Send inputs to server
-  sendPendingInputs();
+// Guest rendering loop (receives state from host)
+function guestLoop(timestamp) {
+  // 1. Send inputs to host via WebRTC
+  sendInputsToHost();
 
-  // 2. Apply client-side prediction
+  // 2. Apply client-side prediction for local player
   predictLocalPlayer();
 
-  // 3. Interpolate remote entities
-  interpolateRemotePlayers();
+  // 3. Interpolate state updates from host
+  interpolateGameState();
 
   // 4. Render current frame
   render();
 
   // 5. Request next frame
-  requestAnimationFrame(clientLoop);
+  requestAnimationFrame(guestLoop);
 }
 ```
 
 **Decoupling:**
-- Server ticks at fixed rate (e.g., 60 Hz)
-- Client renders at display refresh rate (60-144 Hz)
-- Interpolation/extrapolation bridges the gap
+- Host ticks at fixed rate (60 Hz) running game logic + rendering
+- Guests render at display refresh rate (60-144 Hz)
+- Guests interpolate between host state updates
+- Local input prediction makes controls feel responsive
 
 ## State Management
 
@@ -375,7 +433,7 @@ See [collision.md](./collision.md) for full algorithm.
 
 ## Input Handling
 
-### Client Side
+### All Clients (Local Input)
 
 ```typescript
 interface Input {
@@ -387,48 +445,82 @@ interface Input {
 }
 ```
 
-**Input buffering:**
+**Input buffering (all clients):**
 - Queue inputs locally
-- Send to server immediately
-- Keep history for prediction/reconciliation
+- Apply immediately for prediction
+- Keep history for reconciliation
 
-### Server Side
+### Guest Clients → Host
+
+**Sending inputs:**
+- Send input to host via WebRTC data channel immediately
+- Use unreliable channel for responsiveness
+- Include sequence number for ordering
+
+### Host (Input Processing)
 
 **Input processing:**
-1. Receive input from network
-2. Validate (is this player alive? is action legal?)
-3. Apply to game state
-4. Include in next state broadcast
+1. Receive inputs from all guests via WebRTC
+2. Combine with own inputs
+3. Validate (is player alive? is action legal?)
+4. Apply all inputs to authoritative game state
+5. Broadcast updated state to all guests
 
-**Anti-cheat:**
-- Server validates all inputs
+**Anti-cheat (limited in P2P):**
+- Host validates inputs (basic sanity checks)
 - Rate limiting on input frequency
-- Sanity checks on player state changes
+- Note: Full anti-cheat harder in P2P (host could cheat)
+  - Acceptable for friendly games
+  - Could add peer validation later if needed
 
 ## Networking Protocol
 
-### Message Types
+### PeerJS Connection (Handled Automatically!)
 
+PeerJS handles all the WebRTC signaling automatically. We just need to:
 ```typescript
-// Client → Server
-type ClientMessage =
-  | { type: 'join', playerName: string }
-  | { type: 'input', input: Input }
-  | { type: 'ready' }
-  | { type: 'leave' };
+// Host
+const peer = new Peer('room-abc123');
+peer.on('connection', (conn) => {
+  // New player connected!
+  conn.on('data', handleGuestMessage);
+});
 
-// Server → Client
-type ServerMessage =
-  | { type: 'joined', playerId: string, gameState: GameState }
-  | { type: 'state', state: GameState | DeltaState }
-  | { type: 'event', event: GameEvent } // Player died, item spawned, etc.
-  | { type: 'error', message: string };
+// Guest
+const peer = new Peer();
+const conn = peer.connect('room-abc123');
+conn.on('data', handleHostMessage);
 ```
 
-**Event-driven:**
-- Use Socket.io events or similar
-- Type-safe message parsing
-- Versioning for protocol changes
+### Game Messages (Peer-to-Peer via PeerJS)
+
+```typescript
+// Guest → Host (via WebRTC)
+type GuestToHostMessage =
+  | { type: 'input', input: Input }
+  | { type: 'ready' }
+  | { type: 'chat', message: string }; // Optional
+
+// Host → Guest (via WebRTC)
+type HostToGuestMessage =
+  | { type: 'state', state: GameState | DeltaState, frame: number }
+  | { type: 'start_game', countdown: number }
+  | { type: 'event', event: GameEvent } // Player died, item spawned, etc.
+  | { type: 'end_game', winner: string };
+```
+
+**Protocol notes:**
+- PeerJS handles all WebRTC setup automatically
+- We send/receive plain JavaScript objects (PeerJS handles serialization)
+- Data is sent over PeerJS's data channel (WebRTC underneath)
+- Type-safe message parsing with TypeScript discriminated unions
+- Optional: Add version field for protocol evolution
+
+**PeerJS Benefits:**
+- No WebRTC boilerplate (offers, answers, ICE candidates handled)
+- Automatic serialization (just send objects)
+- Connection state management
+- Fallback to older browsers
 
 See [multiplayer.md](./multiplayer.md) for complete protocol spec.
 
@@ -437,9 +529,9 @@ See [multiplayer.md](./multiplayer.md) for complete protocol spec.
 ### Target Performance
 
 - **Client rendering**: 60 FPS minimum, 120+ ideal
-- **Server tick rate**: 60 Hz (matches original 70 FPS closely)
-- **Network latency**: Playable up to 100ms, good under 50ms
-- **Bandwidth**: <50 KB/s per client (optimized)
+- **Host tick rate**: 60 Hz (matches original 70 FPS closely)
+- **Network latency**: Playable up to 100ms, good under 50ms (P2P is often better!)
+- **Bandwidth**: <30 KB/s per client (P2P, optimized)
 
 ### Optimization Strategies
 
@@ -453,6 +545,7 @@ See [multiplayer.md](./multiplayer.md) for complete protocol spec.
 - Delta compression for state updates
 - Binary protocol instead of JSON (if needed)
 - Adaptive update rate based on action intensity
+- Use unreliable data channels for non-critical data
 
 **Memory:**
 - Object pooling for projectiles, particles
@@ -461,12 +554,20 @@ See [multiplayer.md](./multiplayer.md) for complete protocol spec.
 
 ### Scaling
 
-**Initial target:** 2-4 players per game (matches original)
+**Game size:** 2-4 players per room (matches original)
 
-**Room capacity:**
-- Single server should handle 100+ concurrent rooms
-- Each room is independent (no cross-room state)
-- Horizontal scaling: Add more servers, use room routing
+**P2P Mesh topology:**
+- Works perfectly for small player counts
+- Each client connects to all others (mesh)
+- 4 players = 6 total connections (manageable)
+- No server bottleneck for game data
+
+**PeerJS public servers:**
+- PeerJS cloud service handles all signaling (free!)
+- Can support thousands of concurrent connections
+- Once P2P connected, PeerJS server not actively used
+- If PeerJS ever has issues, can switch to self-hosted PeerServer
+- Or use alternative service (Trystero, simple-peer, etc.)
 
 ## Asset Pipeline
 
@@ -519,16 +620,18 @@ See [multiplayer.md](./multiplayer.md) for complete protocol spec.
 ### Phase 2: Multiplayer Foundation
 *Goal: Get basic online play working*
 
-- Client-server architecture
-- Room system (create/join)
+- PeerJS integration (super simple!)
+- Room system (create/join via shareable links)
+- Host/guest architecture
 - Basic state synchronization
 - 2-player networked game
 - Simple prediction/interpolation
 
 **Deliverables:**
-- 2-player online demo
-- Network protocol established
-- Room management working
+- 2-player online demo via PeerJS
+- P2P protocol working
+- Shareable room links
+- No server deployment needed!
 
 ### Phase 3: Complete Feature Set
 *Goal: Implement all original game features*
@@ -561,84 +664,152 @@ See [multiplayer.md](./multiplayer.md) for complete protocol spec.
 
 ## Deployment
 
-### Hosting Options
+### Hosting (Incredibly Simple!)
 
-**Client:**
-- Static hosting (Vercel, Netlify, GitHub Pages)
-- CDN distribution
+**Client (Static Files) - That's It!**
+- Static hosting (Vercel, Netlify, GitHub Pages, Cloudflare Pages)
+- CDN distribution for global reach
 - Simple build: `npm run build` → static files
+- **Cost: FREE**
 
-**Server:**
-- VPS (DigitalOcean, Linode, AWS EC2)
-- Container platform (Docker, Fly.io)
-- Needs WebSocket support
-- Modest requirements (1-2 CPU cores, 1-2 GB RAM to start)
+**No Server Needed!**
+- PeerJS cloud handles all signaling (free!)
+- No backend code to deploy
+- No databases to manage
+- No server monitoring
 
 ### Infrastructure
 
 ```
                     ┌──────────────┐
-   Players ────────►│  CDN/Static  │
-                    │  (Client)    │
+   Players ────────►│  CDN/Static  │ (Just HTML/CSS/JS)
+                    │  Hosting     │
                     └──────┬───────┘
+                           │
+            (Loads PeerJS library from CDN)
                            │
                            ▼
                     ┌──────────────┐
-                    │ Game Server  │◄──── WebSocket
-                    │  (Node.js)   │
-                    └──────────────┘
+                    │   PeerJS     │ (Free public service)
+                    │   Cloud      │
+                    └──────┬───────┘
+                           │
+                    (Initial setup only)
+                           │
+                           ▼
+              ┌────────────┴────────────┐
+              │   WebRTC P2P Mesh       │
+              │  (Direct connections)   │
+              │  Player 1 ↔ Player 2    │
+              │  Player 1 ↔ Player 3    │
+              │  Player 2 ↔ Player 3    │
+              └─────────────────────────┘
 ```
 
-**Simplest setup:**
-- Client: Vercel/Netlify (free tier)
-- Server: Single VPS ($5-10/month)
-- Domain: Point to both (separate subdomains or paths)
+**Deployment Options (all FREE!):**
 
-### Environment Configuration
+1. **GitHub Pages** (easiest)
+   ```bash
+   npm run build
+   npm run deploy  # Pushes to gh-pages branch
+   # Done! Live at: https://username.github.io/tron-revival
+   ```
+
+2. **Vercel** (automatic)
+   - Connect GitHub repo
+   - Auto-deploys on push
+   - Custom domain support
+   - https://tron-revival.vercel.app
+
+3. **Netlify** (drag & drop)
+   - Drag dist/ folder
+   - Or connect Git repo
+   - https://tron-revival.netlify.app
+
+**Total infrastructure cost: $0/month** 🎉
+
+### Configuration
 
 ```typescript
-// Client config
+// Minimal config needed
 const config = {
-  serverUrl: process.env.VITE_SERVER_URL || 'ws://localhost:3000',
-  // ...
-};
+  // PeerJS cloud (free)
+  peerServerHost: 'peerjs.com',
+  peerServerPort: 443,
+  peerServerPath: '/',
+  peerServerSecure: true,
 
-// Server config
-const config = {
-  port: process.env.PORT || 3000,
-  corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:5173'],
-  // ...
+  // Or use custom PeerServer if needed (optional)
+  // peerServerHost: 'your-peerserver.com',
 };
 ```
+
+**No environment variables needed!** (unless using custom PeerServer)
 
 ## Open Questions
 
 These will be resolved during implementation:
 
-1. **Exact network update rate:** 30 Hz, 60 Hz, or adaptive?
+1. **Host update rate:** 30 Hz, 60 Hz, or adaptive?
 2. **State snapshot frequency:** How often to send full state vs deltas?
-3. **Client prediction scope:** Predict just local player, or all entities?
-4. **Binary vs JSON protocol:** Optimize if needed
-5. **Multiple canvas layers:** Single or multiple canvases?
-6. **Asset loading strategy:** Preload all, or lazy load by map?
-7. **Browser testing scope:** How far back do we support? (probably just evergreen)
+3. **PeerJS reliability:** Use PeerJS's default settings or configure data channels?
+4. **Client prediction scope:** Predict just local player, or all entities?
+5. **Data format:** JSON (easier to debug) or binary (more efficient)?
+6. **Multiple canvas layers:** Single or multiple canvases?
+7. **Asset loading strategy:** Preload all, or lazy load by map?
+8. **Browser testing scope:** How far back do we support? (probably just evergreen)
+9. **Host migration:** What happens if host disconnects? (probably just end game for MVP)
+10. **PeerServer fallback:** Self-host PeerServer if PeerJS cloud has issues, or use alternative?
 
 ## Next Steps
 
 1. Create detailed design documents:
-   - [ ] `multiplayer.md` - Network protocol and synchronization
+   - [ ] `multiplayer.md` - PeerJS P2P protocol and synchronization
    - [ ] `game-state.md` - Complete state structure and transitions
    - [ ] `rendering.md` - Canvas rendering implementation
    - [ ] `collision.md` - Collision detection algorithms
 
-2. Set up project structure:
-   - [ ] Initialize monorepo
+2. Set up project (super simple!):
+   - [ ] `npm create vite@latest tron-revival -- --template vanilla-ts`
+   - [ ] `npm install peerjs` (only dependency!)
+   - [ ] Set up folder structure (src/game, src/render, src/network, etc.)
    - [ ] Configure TypeScript
-   - [ ] Set up build tools (Vite)
-   - [ ] Create package scaffolding
 
 3. Begin Phase 1 implementation:
-   - [ ] Basic game loop
+   - [ ] Basic game loop (single player / local multiplayer first)
    - [ ] Player movement
    - [ ] Trail rendering
    - [ ] Collision detection
+
+## Summary of Pure P2P Architecture Benefits
+
+**Cost savings:**
+- **Zero infrastructure costs** - no servers at all!
+- Free static hosting (GitHub Pages, Vercel, Netlify)
+- PeerJS cloud handles signaling (free!)
+- Total: **$0/month** to run
+
+**Simplicity:**
+- **Single TypeScript codebase** - no backend code
+- One package.json, one build command
+- No server deployment, monitoring, or maintenance
+- Just: `npm run build` → upload to static host → done!
+
+**Performance:**
+- Lower latency (direct P2P connections, no server hop)
+- No server bottleneck for game data
+- Scales naturally (each game is independent)
+
+**Developer Experience:**
+- All code in one language (TypeScript)
+- No API contracts to maintain
+- Simpler debugging (all code runs in browser)
+- Faster iteration (no server restarts)
+
+**Tradeoffs (acceptable for this game):**
+- Host can theoretically cheat → Fine for friendly games
+- Host leaving ends game → Add migration later if needed
+- Limited to 2-4 players → Perfect for our game design!
+- Relies on PeerJS service → Can self-host PeerServer if needed
+
+**This is the ideal architecture for a small multiplayer game like Teratron!**
