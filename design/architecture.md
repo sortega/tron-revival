@@ -94,8 +94,9 @@ Use existing P2P infrastructure - zero server-side code to write or host!
   - Fast HMR for development
   - Simple configuration
 
-- **Package Manager**: npm or pnpm
-  - Monorepo structure with workspaces
+- **Package Manager**: npm
+  - Universal, comes with Node.js
+  - Simple setup for single-package project
 
 ## System Architecture
 
