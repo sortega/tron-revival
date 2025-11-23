@@ -55,6 +55,9 @@ function startGame() {
     game.stop();
   }
 
+  // Clear the game container to remove old canvas
+  gameContainer.innerHTML = '';
+
   game = new Game(gameContainer, 2); // 2-player demo
   game.start();
 }
