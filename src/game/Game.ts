@@ -17,8 +17,6 @@ export class Game {
   private renderer: Renderer;
   private players: Player[] = [];
   private running = false;
-  private frameCount = 0;
-  private readonly GRACE_PERIOD = 10; // Frames before collision detection starts
 
   constructor(container: HTMLElement, numPlayers: number = 2) {
     // Initialize renderer
@@ -99,7 +97,6 @@ export class Game {
     if (this.running) return;
 
     this.running = true;
-    this.frameCount = 0; // Reset frame counter
     this.gameLoop.start();
     console.log('🎮 Game started!');
   }
@@ -117,17 +114,6 @@ export class Game {
    * Update game state
    */
   private update(_deltaTime: number): void {
-    this.frameCount++;
-
-    // Debug logging for first few frames
-    if (this.frameCount <= 3) {
-      console.log(`Frame ${this.frameCount}:`, this.players.map(p => ({
-        name: p.name,
-        pos: `(${p.x},${p.y})`,
-        alive: p.vivo
-      })));
-    }
-
     // Update player inputs
     for (const player of this.players) {
       if (!player.vivo) continue;
@@ -146,35 +132,13 @@ export class Game {
       player.update();
     }
 
-    // Always draw trails (even during grace period)
+    // Check collisions and draw trails
     for (let i = 0; i < this.players.length; i++) {
       const player = this.players[i];
       if (!player) continue;
 
       if (player.vivo) {
-        const oldPos = oldPositions[i];
-        // Draw trail at OLD position (where player was last frame)
-        if (oldPos && (oldPos.x !== player.x || oldPos.y !== player.y)) {
-          this.renderer.drawTrailPixel(oldPos.x, oldPos.y, player.color);
-        }
-      }
-    }
-
-    // Skip collision detection during grace period
-    if (this.frameCount <= this.GRACE_PERIOD) {
-      if (this.frameCount === this.GRACE_PERIOD) {
-        console.log('⚡ Grace period ended - collision detection enabled');
-      }
-      return;
-    }
-
-    // Check collisions AFTER grace period
-    for (let i = 0; i < this.players.length; i++) {
-      const player = this.players[i];
-      if (!player) continue;
-
-      if (player.vivo) {
-        // Check for collisions at NEW position
+        // Check for collisions at NEW position BEFORE drawing trail
         const collision = this.collisionDetector.checkPlayerCollision(player);
 
         const oldPos = oldPositions[i];
@@ -189,7 +153,12 @@ export class Game {
 
         if (collision || diagonalCollision) {
           player.vivo = false;
-          console.log(`💥 ${player.name} crashed at (${player.x}, ${player.y})! collision=${collision}, diagonal=${diagonalCollision}`);
+          console.log(`💥 ${player.name} crashed!`);
+        } else {
+          // Only draw trail if still alive and actually moved
+          if (oldPos && (oldPos.x !== player.x || oldPos.y !== player.y)) {
+            this.renderer.drawTrailPixel(oldPos.x, oldPos.y, player.color);
+          }
         }
       }
     }

@@ -16,7 +16,7 @@ export const TICK_INTERVAL = 1000 / TICK_RATE;
 
 // Player constants
 export const PLAYER_TURN_SPEED = 4000; // Units per frame (360000 = full circle)
-export const PLAYER_MOVE_SPEED = 1; // Pixels per frame at normal speed
+export const PLAYER_MOVE_SPEED = 1000; // Internal units per frame (1000 = 1 pixel)
 export const ANGLE_UNITS = 360000; // Full circle in units
 
 // Player colors (from original game)
