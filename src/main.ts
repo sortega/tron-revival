@@ -2,9 +2,10 @@
  * Teratron - Main Entry Point
  */
 
+import { Game } from './game/Game';
 import { GAME_WIDTH, GAME_HEIGHT } from './constants';
 
-console.log('🎮 Teratron Revival');
+console.log('🎮 Teratron Revival - Phase 1 Demo');
 console.log(`Canvas size: ${GAME_WIDTH}x${GAME_HEIGHT}`);
 
 // Get the app container
@@ -14,25 +15,59 @@ if (!app) {
   throw new Error('App container not found');
 }
 
-// Create welcome screen
-app.innerHTML = `
-  <div style="text-align: center;">
-    <h1 style="font-size: 3rem; margin-bottom: 2rem; color: #0f0;">
-      TERATRON
-    </h1>
-    <p style="font-size: 1.2rem; margin-bottom: 1rem;">
-      A modern revival of the classic multiplayer Tron game
-    </p>
-    <p style="font-size: 1rem; color: #888;">
-      Phase 1: Core Mechanics (Coming Soon)
-    </p>
-    <div style="margin-top: 3rem;">
-      <p style="font-size: 0.9rem; color: #666;">
-        Press F12 to open console for development info
-      </p>
-    </div>
-  </div>
-`;
+// Clear container and set up game UI
+app.innerHTML = '';
+app.style.display = 'flex';
+app.style.flexDirection = 'column';
+app.style.alignItems = 'center';
+app.style.justifyContent = 'center';
+app.style.gap = '20px';
 
-console.log('Project structure initialized successfully!');
-console.log('Ready for Phase 1 implementation');
+// Add title
+const title = document.createElement('h1');
+title.textContent = 'TERATRON';
+title.style.fontSize = '2rem';
+title.style.color = '#0f0';
+title.style.marginBottom = '10px';
+app.appendChild(title);
+
+// Add controls info
+const controls = document.createElement('div');
+controls.style.textAlign = 'center';
+controls.style.color = '#888';
+controls.style.fontSize = '0.9rem';
+controls.innerHTML = `
+  <p><strong>Player 1 (Red):</strong> Z = Left, X = Right</p>
+  <p><strong>Player 2 (Green):</strong> Arrow Left, Arrow Right</p>
+  <p style="margin-top: 10px; color: #666;">Press ESC to restart</p>
+`;
+app.appendChild(controls);
+
+// Create game container
+const gameContainer = document.createElement('div');
+app.appendChild(gameContainer);
+
+// Initialize and start game
+let game: Game | null = null;
+
+function startGame() {
+  if (game) {
+    game.stop();
+  }
+
+  game = new Game(gameContainer, 2); // 2-player demo
+  game.start();
+}
+
+// Handle restart
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape') {
+    console.log('🔄 Restarting game...');
+    startGame();
+  }
+});
+
+// Start the game!
+startGame();
+
+console.log('✅ Game initialized! Use controls to play.');
