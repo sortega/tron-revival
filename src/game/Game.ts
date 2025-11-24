@@ -9,9 +9,8 @@ import { CollisionDetector } from './engine/CollisionDetector';
 import { Player } from './entities/Player';
 import { Renderer } from '../render/Renderer';
 import { AudioManager } from '../audio/AudioManager';
+import { RoundManager } from './managers/RoundManager';
 import { PLAYER_COLORS, SPAWN_POSITIONS, TRAIL_HEAD_COLOR } from '../constants';
-
-type RoundState = 'playing' | 'waiting_for_ready';
 
 export class Game {
   private gameLoop: GameLoop;
@@ -19,17 +18,12 @@ export class Game {
   private collisionDetector: CollisionDetector;
   private renderer: Renderer;
   private audioManager: AudioManager;
+  private roundManager: RoundManager;
   private players: Player[] = [];
   private running = false;
 
-  // Round management
-  private roundState: RoundState = 'playing';
-  private scores: Map<number, number> = new Map(); // playerNum -> wins
-  private muertesRidiculas: Map<number, number> = new Map(); // playerNum -> ridiculous deaths
-  private playersReady: Set<number> = new Set(); // playerNums that are ready
-  private lastWinner: Player | null = null; // Winner of last round (null = draw)
-  private lastFireState: Map<number, boolean> = new Map(); // Track fire button state for toggle
-  private trailHeads: Map<number, { x: number; y: number } | null> = new Map(); // Track trail head positions
+  // Trail management
+  private trailHeads: Map<number, { x: number; y: number } | null> = new Map();
 
   constructor(container: HTMLElement, numPlayers: number = 2) {
     // Initialize renderer
@@ -39,6 +33,7 @@ export class Game {
     this.inputManager = new InputManager();
     this.collisionDetector = new CollisionDetector(this.renderer);
     this.audioManager = new AudioManager();
+    this.roundManager = new RoundManager();
 
     // Initialize game loop
     this.gameLoop = new GameLoop(
@@ -111,28 +106,14 @@ export class Game {
    * Update game state
    */
   private update(_deltaTime: number): void {
-    if (this.roundState === 'waiting_for_ready') {
-      // Check for ready inputs (toggle on fire press)
-      for (const player of this.players) {
-        const input = this.inputManager.getPlayerInput(player.num);
-        const wasPressed = this.lastFireState.get(player.num) ?? false;
+    if (this.roundManager.getState() === 'waiting_for_ready') {
+      // Handle ready-up system
+      const allReady = this.roundManager.handleReadyInput(
+        this.players,
+        (playerNum) => this.inputManager.getPlayerInput(playerNum)
+      );
 
-        // Detect fire button press (rising edge)
-        if (input.fire && !wasPressed) {
-          if (this.playersReady.has(player.num)) {
-            this.playersReady.delete(player.num);
-            console.log(`✗ ${player.name} is not ready`);
-          } else {
-            this.playersReady.add(player.num);
-            console.log(`✓ ${player.name} is ready`);
-          }
-        }
-
-        this.lastFireState.set(player.num, input.fire);
-      }
-
-      // Start next round if all players ready
-      if (this.playersReady.size === this.players.length) {
+      if (allReady) {
         this.startNewRound();
       }
       return;
@@ -155,6 +136,9 @@ export class Game {
     for (const player of this.players) {
       player.update();
     }
+
+    // Track collision details for round end
+    const collisionDetails = new Map<number, boolean>();
 
     // Check collisions and draw trails
     for (let i = 0; i < this.players.length; i++) {
@@ -182,10 +166,11 @@ export class Game {
           // Clear trail head tracking for dead player
           this.trailHeads.delete(player.num);
 
-          // Track muerte ridícula if player died on their own color
+          // Track if player died on own color
+          collisionDetails.set(player.num, collisionResult.ownColor);
+
+          // Log crash
           if (collisionResult.ownColor) {
-            const currentMR = this.muertesRidiculas.get(player.num) ?? 0;
-            this.muertesRidiculas.set(player.num, currentMR + 1);
             console.log(`💥 ${player.name} crashed on their own trail! (Muerte Ridícula)`);
           } else {
             console.log(`💥 ${player.name} crashed!`);
@@ -214,35 +199,15 @@ export class Game {
     // Check win condition
     const alivePlayers = this.players.filter((p) => p.alive);
     if (alivePlayers.length <= 1) {
-      this.endRound(alivePlayers);
+      this.roundManager.endRound(alivePlayers, collisionDetails);
     }
-  }
-
-  /**
-   * End the current round and update scores
-   */
-  private endRound(alivePlayers: Player[]): void {
-    if (alivePlayers.length === 1) {
-      const winner = alivePlayers[0]!;
-      this.lastWinner = winner;
-      const currentScore = this.scores.get(winner.num) ?? 0;
-      this.scores.set(winner.num, currentScore + 1);
-      console.log(`🏆 ${winner.name} wins! Score: ${currentScore + 1}`);
-    } else {
-      this.lastWinner = null;
-      console.log(`🤝 Draw!`);
-    }
-
-    this.roundState = 'waiting_for_ready';
-    this.playersReady.clear();
-    this.lastFireState.clear();
   }
 
   /**
    * Start a new round
    */
   private startNewRound(): void {
-    console.log('🎮 Starting new round...');
+    this.roundManager.startNewRound();
 
     // Play round start sound
     this.audioManager.play('inicio');
@@ -261,9 +226,6 @@ export class Game {
 
       player.reset(pos);
     }
-
-    this.roundState = 'playing';
-    this.playersReady.clear();
   }
 
   /**
@@ -272,18 +234,18 @@ export class Game {
   private render(): void {
     this.renderer.render(
       this.players,
-      this.scores,
-      this.muertesRidiculas,
-      this.roundState,
-      this.playersReady,
-      this.lastWinner
+      this.roundManager.getScores(),
+      this.roundManager.getMuertesRidiculas(),
+      this.roundManager.getState(),
+      this.roundManager.getPlayersReady(),
+      this.roundManager.getLastWinner()
     );
   }
 
   /**
    * Get the current round state (for external access)
    */
-  getRoundState(): RoundState {
-    return this.roundState;
+  getRoundState() {
+    return this.roundManager.getState();
   }
 }
