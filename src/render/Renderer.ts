@@ -3,7 +3,7 @@
  * Handles all rendering including trails, players, and UI
  */
 
-import { GAME_WIDTH, GAME_HEIGHT, PANEL_WIDTH, TOTAL_WIDTH } from '../constants';
+import { GAME_WIDTH, GAME_HEIGHT, PANEL_WIDTH, TOTAL_WIDTH, type RGB } from '../constants';
 import type { Player } from '../game/entities/Player';
 
 export class Renderer {
@@ -58,40 +58,65 @@ export class Renderer {
   /**
    * Draw a pixel in the trail
    */
-  drawTrailPixel(x: number, y: number, colorIndex: number): void {
+  drawTrailPixel(x: number, y: number, color: RGB): void {
     if (x < 0 || x >= GAME_WIDTH || y < 0 || y >= GAME_HEIGHT) return;
 
     const index = (y * GAME_WIDTH + x) * 4;
-    const rgb = this.colorIndexToRGB(colorIndex);
 
-    this.trailImageData.data[index] = rgb.r;
-    this.trailImageData.data[index + 1] = rgb.g;
-    this.trailImageData.data[index + 2] = rgb.b;
+    this.trailImageData.data[index] = color.r;
+    this.trailImageData.data[index + 1] = color.g;
+    this.trailImageData.data[index + 2] = color.b;
     this.trailImageData.data[index + 3] = 255;
   }
 
   /**
-   * Get pixel color index at position
+   * Get pixel color at position
    */
-  getPixelColor(x: number, y: number): number {
-    if (x < 0 || x >= GAME_WIDTH || y < 0 || y >= GAME_HEIGHT) return 0;
+  getPixelColor(x: number, y: number): RGB | null {
+    if (x < 0 || x >= GAME_WIDTH || y < 0 || y >= GAME_HEIGHT) return null;
 
     const index = (y * GAME_WIDTH + x) * 4;
-    const r = this.trailImageData.data[index];
-    const g = this.trailImageData.data[index + 1];
-    const b = this.trailImageData.data[index + 2];
+    const r = this.trailImageData.data[index] ?? 0;
+    const g = this.trailImageData.data[index + 1] ?? 0;
+    const b = this.trailImageData.data[index + 2] ?? 0;
 
-    // If pixel is black, return 0 (empty)
-    if (r === 0 && g === 0 && b === 0) return 0;
+    // If pixel is black, return null (empty)
+    if (r === 0 && g === 0 && b === 0) return null;
 
-    // Return color index (simplified - in real game would map RGB back to index)
-    return (r ?? 0) + (g ?? 0) + (b ?? 0); // Simple approximation
+    return { r, g, b };
+  }
+
+  /**
+   * Check if a pixel color matches an RGB color
+   */
+  isColorMatch(pixelColor: RGB | null, color: RGB): boolean {
+    if (!pixelColor) return false;
+    return pixelColor.r === color.r && pixelColor.g === color.g && pixelColor.b === color.b;
+  }
+
+  /**
+   * Clear trails
+   */
+  clearTrails(): void {
+    for (let i = 0; i < this.trailImageData.data.length; i += 4) {
+      this.trailImageData.data[i] = 0;
+      this.trailImageData.data[i + 1] = 0;
+      this.trailImageData.data[i + 2] = 0;
+      this.trailImageData.data[i + 3] = 255;
+    }
   }
 
   /**
    * Render a frame
    */
-  render(players: Player[]): void {
+  render(
+    players: Player[],
+    scores: Map<number, number>,
+    muertesRidiculas: Map<number, number>,
+    roundState: 'playing' | 'waiting_for_ready',
+    playersReady: Set<number>,
+    lastWinner: Player | null
+  ): void {
     // Clear main canvas
     this.clear();
 
@@ -109,15 +134,19 @@ export class Renderer {
     }
 
     // Draw panel
-    this.drawPanel(players);
+    this.drawPanel(players, roundState, playersReady);
+
+    // Draw round end overlay
+    if (roundState === 'waiting_for_ready') {
+      this.drawRoundEndOverlay(players, scores, muertesRidiculas, lastWinner);
+    }
   }
 
   /**
    * Draw a player
    */
   private drawPlayer(player: Player): void {
-    const rgb = this.colorIndexToRGB(player.color);
-    this.ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+    this.ctx.fillStyle = `rgb(${player.color.r}, ${player.color.g}, ${player.color.b})`;
 
     // Draw player as a small square
     this.ctx.fillRect(player.x - 1, player.y - 1, 3, 3);
@@ -133,47 +162,122 @@ export class Renderer {
   }
 
   /**
+   * Draw round end overlay
+   */
+  private drawRoundEndOverlay(
+    players: Player[],
+    scores: Map<number, number>,
+    muertesRidiculas: Map<number, number>,
+    lastWinner: Player | null
+  ): void {
+    const centerX = GAME_WIDTH / 2;
+    const centerY = GAME_HEIGHT / 2;
+    const boxWidth = 400;
+    const boxHeight = 250;
+
+    // Draw semi-transparent background
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    this.ctx.fillRect(
+      centerX - boxWidth / 2,
+      centerY - boxHeight / 2,
+      boxWidth,
+      boxHeight
+    );
+
+    // Draw border
+    this.ctx.strokeStyle = '#0f0';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(
+      centerX - boxWidth / 2,
+      centerY - boxHeight / 2,
+      boxWidth,
+      boxHeight
+    );
+
+    // Draw winner announcement
+    this.ctx.textAlign = 'center';
+    this.ctx.font = 'bold 24px monospace';
+
+    if (lastWinner) {
+      this.ctx.fillStyle = `rgb(${lastWinner.color.r}, ${lastWinner.color.g}, ${lastWinner.color.b})`;
+      this.ctx.fillText(
+        `${lastWinner.name} WINS!`,
+        centerX,
+        centerY - 80
+      );
+    } else {
+      this.ctx.fillStyle = '#888';
+      this.ctx.fillText('DRAW!', centerX, centerY - 80);
+    }
+
+    // Draw scores
+    this.ctx.font = '16px monospace';
+    this.ctx.fillStyle = '#fff';
+
+    let yOffset = centerY - 30;
+    for (const player of players) {
+      const playerScore = scores.get(player.num) ?? 0;
+      const playerMR = muertesRidiculas.get(player.num) ?? 0;
+      this.ctx.fillStyle = `rgb(${player.color.r}, ${player.color.g}, ${player.color.b})`;
+      this.ctx.fillText(
+        `${player.name}: ${playerScore} wins, ${playerMR} muertes ridículas`,
+        centerX,
+        yOffset
+      );
+      yOffset += 25;
+    }
+
+    // Draw "Fire to continue / ESC to exit"
+    this.ctx.fillStyle = '#0f0';
+    this.ctx.font = 'bold 18px monospace';
+    this.ctx.fillText(
+      'FIRE TO CONTINUE',
+      centerX,
+      centerY + 75
+    );
+
+    this.ctx.fillStyle = '#888';
+    this.ctx.font = '14px monospace';
+    this.ctx.fillText(
+      'ESC TO EXIT',
+      centerX,
+      centerY + 100
+    );
+
+    // Reset text alignment
+    this.ctx.textAlign = 'left';
+  }
+
+  /**
    * Draw side panel
    */
-  private drawPanel(players: Player[]): void {
+  private drawPanel(
+    players: Player[],
+    roundState: 'playing' | 'waiting_for_ready',
+    playersReady: Set<number>
+  ): void {
     this.ctx.fillStyle = '#111';
     this.ctx.fillRect(GAME_WIDTH, 0, PANEL_WIDTH, GAME_HEIGHT);
 
     // Draw player indicators
     players.forEach((player, i) => {
       const y = i * 150 + 75;
-      const rgb = this.colorIndexToRGB(player.color);
 
-      this.ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+      this.ctx.fillStyle = `rgb(${player.color.r}, ${player.color.g}, ${player.color.b})`;
       this.ctx.fillRect(GAME_WIDTH + 10, y, 30, 30);
 
       // Draw status
       this.ctx.fillStyle = player.vivo ? '#0f0' : '#f00';
-      this.ctx.font = '12px monospace';
-      this.ctx.fillText(player.vivo ? 'ALIVE' : 'DEAD', GAME_WIDTH + 5, y + 50);
+      this.ctx.font = '10px monospace';
+      this.ctx.fillText(player.vivo ? 'ALIVE' : 'DEAD', GAME_WIDTH + 5, y + 45);
+
+      // Draw ready status
+      if (roundState === 'waiting_for_ready') {
+        const isReady = playersReady.has(player.num);
+        this.ctx.fillStyle = isReady ? '#0f0' : '#888';
+        this.ctx.fillText(isReady ? 'READY' : 'WAIT', GAME_WIDTH + 5, y + 60);
+      }
     });
   }
 
-  /**
-   * Convert color index to RGB (simplified color palette)
-   */
-  private colorIndexToRGB(colorIndex: number): { r: number; g: number; b: number } {
-    // Simplified color mapping (would use actual palette in full implementation)
-    switch (colorIndex) {
-      case 52: // Red
-        return { r: 255, g: 0, b: 0 };
-      case 114: // Green
-        return { r: 0, g: 255, b: 0 };
-      case 32: // Blue
-        return { r: 0, g: 0, b: 255 };
-      case 60: // Yellow
-        return { r: 255, g: 255, b: 0 };
-      case 80: // Purple
-        return { r: 128, g: 0, b: 128 };
-      case 215: // Brown
-        return { r: 165, g: 42, b: 42 };
-      default:
-        return { r: 255, g: 255, b: 255 };
-    }
-  }
 }

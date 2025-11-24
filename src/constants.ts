@@ -19,15 +19,22 @@ export const PLAYER_TURN_SPEED = 4000; // Units per frame (360000 = full circle)
 export const PLAYER_MOVE_SPEED = 1000; // Internal units per frame (1000 = 1 pixel)
 export const ANGLE_UNITS = 360000; // Full circle in units
 
+// RGB color type
+export interface RGB {
+  r: number;
+  g: number;
+  b: number;
+}
+
 // Player colors (from original game)
 export const PLAYER_COLORS = {
-  RED: 52,
-  GREEN: 114,
-  BLUE: 32,
-  YELLOW: 60,
+  RED: { r: 255, g: 0, b: 0 },
+  GREEN: { r: 0, g: 255, b: 0 },
+  BLUE: { r: 0, g: 0, b: 255 },
+  YELLOW: { r: 255, g: 255, b: 0 },
   // Team mode colors
-  PURPLE: 80,
-  BROWN: 215,
+  PURPLE: { r: 128, g: 0, b: 128 },
+  BROWN: { r: 165, g: 42, b: 42 },
 } as const;
 
 // Maps

@@ -4,7 +4,7 @@
  */
 
 import type { PlayerId, PlayerState } from '../../types';
-import { PLAYER_TURN_SPEED, PLAYER_MOVE_SPEED, GAME_WIDTH, GAME_HEIGHT } from '../../constants';
+import { PLAYER_TURN_SPEED, PLAYER_MOVE_SPEED, GAME_WIDTH, GAME_HEIGHT, type RGB } from '../../constants';
 import { normalizeAngle, toPixel, cos, sin, fromPixel } from '../../utils';
 
 export class Player {
@@ -40,7 +40,7 @@ export class Player {
     public id: PlayerId,
     public name: string,
     public num: number,
-    public color: number,
+    public color: RGB,
     startX: number,
     startY: number,
     startDir: number

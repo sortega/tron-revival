@@ -11,12 +11,13 @@ export class CollisionDetector {
 
   /**
    * Check if a player collides with anything at their current position
+   * Returns { collision: boolean, ownColor: boolean }
    */
-  checkPlayerCollision(player: Player): boolean {
-    if (!player.vivo) return false;
+  checkPlayerCollision(player: Player): { collision: boolean; ownColor: boolean } {
+    if (!player.vivo) return { collision: false, ownColor: false };
 
     // Shield protects from all collisions
-    if (player.escudo > 0) return false;
+    if (player.escudo > 0) return { collision: false, ownColor: false };
 
     const { x, y } = player;
 
@@ -24,17 +25,18 @@ export class CollisionDetector {
     const pixelColor = this.renderer.getPixelColor(x, y);
 
     // Empty pixel = no collision
-    if (pixelColor === 0) return false;
+    if (!pixelColor) return { collision: false, ownColor: false };
+
+    // Check if it's the player's own color
+    const isOwnColor = this.renderer.isColorMatch(pixelColor, player.color);
 
     // If player has crossing ability, can cross own trail
     if (player.cruces > 0) {
-      // Would need to check if it's the player's own color
-      // For now, simplified: crossing allows passing through anything
-      return false;
+      return { collision: false, ownColor: false };
     }
 
     // Collision detected!
-    return true;
+    return { collision: true, ownColor: isOwnColor };
   }
 
   /**
@@ -49,20 +51,21 @@ export class CollisionDetector {
     // No diagonal movement, no special check needed
     if (oldX === newX || oldY === newY) return false;
 
-    // Check all pixels in the 2x2 area between old and new position
-    const minX = Math.min(oldX, newX);
-    const maxX = Math.max(oldX, newX);
-    const minY = Math.min(oldY, newY);
-    const maxY = Math.max(oldY, newY);
+    // Check the 4 corner pixels of the diagonal movement
+    // This works correctly even with wraparound
+    const pixelsToCheck = [
+      { x: oldX, y: oldY },
+      { x: oldX, y: newY },
+      { x: newX, y: oldY },
+      { x: newX, y: newY },
+    ];
 
     let collisionCount = 0;
 
-    for (let x = minX; x <= maxX; x++) {
-      for (let y = minY; y <= maxY; y++) {
-        const pixelColor = this.renderer.getPixelColor(x, y);
-        if (pixelColor !== 0) {
-          collisionCount++;
-        }
+    for (const pixel of pixelsToCheck) {
+      const pixelColor = this.renderer.getPixelColor(pixel.x, pixel.y);
+      if (pixelColor !== null) {
+        collisionCount++;
       }
     }
 

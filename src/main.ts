@@ -37,9 +37,8 @@ controls.style.textAlign = 'center';
 controls.style.color = '#888';
 controls.style.fontSize = '0.9rem';
 controls.innerHTML = `
-  <p><strong>Player 1 (Red):</strong> Z = Left, X = Right</p>
-  <p><strong>Player 2 (Green):</strong> Arrow Left, Arrow Right</p>
-  <p style="margin-top: 10px; color: #666;">Press ESC to restart</p>
+  <p><strong>Player 1 (Red):</strong> Z = Left, X = Right, L-Ctrl = Fire</p>
+  <p><strong>Player 2 (Green):</strong> Arrow Left, Arrow Right, R-Option = Fire</p>
 `;
 app.appendChild(controls);
 
@@ -62,9 +61,9 @@ function startGame() {
   game.start();
 }
 
-// Handle restart
+// Handle restart (only during post-round overlay)
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Escape') {
+  if (e.code === 'Escape' && game?.getRoundState() === 'waiting_for_ready') {
     console.log('🔄 Restarting game...');
     startGame();
   }

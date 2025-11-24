@@ -16,8 +16,8 @@ export class InputManager {
   constructor() {
     // Default key bindings for 4 players
     this.keyBindings = [
-      { left: 'KeyZ', right: 'KeyX', fire: 'ControlLeft' }, // Player 0
-      { left: 'ArrowLeft', right: 'ArrowRight', fire: 'Insert' }, // Player 1
+      { left: 'KeyZ', right: 'KeyX', fire: 'ControlLeft' }, // Player 0 (Red)
+      { left: 'ArrowLeft', right: 'ArrowRight', fire: 'AltRight' }, // Player 1 (Green)
       { left: 'KeyL', right: 'Semicolon', fire: 'KeyK' }, // Player 2
       { left: 'Delete', right: 'Enter', fire: 'NumpadAdd' }, // Player 3
     ];

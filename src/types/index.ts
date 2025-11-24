@@ -2,6 +2,8 @@
  * Core Type Definitions
  */
 
+import type { RGB } from '../constants';
+
 // Player ID type
 export type PlayerId = string;
 
@@ -19,7 +21,7 @@ export interface PlayerState {
   id: PlayerId;
   name: string;
   num: number; // Player number (0-3)
-  color: number; // Color index for trail
+  color: RGB; // RGB color for trail
 
   // Position (stored as integers * 1000 for sub-pixel precision)
   rx: number;
