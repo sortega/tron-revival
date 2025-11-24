@@ -18,8 +18,24 @@ export class PeerManager {
    */
   async initialize(customId?: string): Promise<string> {
     return new Promise((resolve, reject) => {
+      // Configure ICE servers for NAT traversal
+      const config = {
+        debug: 2, // Show debug logs
+        config: {
+          iceServers: [
+            // Google's public STUN servers
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' },
+          ],
+          iceTransportPolicy: 'all' as const,
+        },
+      };
+
       // Create peer with custom ID or let PeerJS generate one
-      this.peer = customId ? new Peer(customId) : new Peer();
+      this.peer = customId ? new Peer(customId, config) : new Peer(config);
 
       this.peer.on('open', (id) => {
         console.log('✅ Peer initialized with ID:', id);
@@ -58,27 +74,42 @@ export class PeerManager {
     }
 
     return new Promise((resolve, reject) => {
+      console.log('🔌 Attempting to connect to:', remotePeerId);
+
       const conn = this.peer!.connect(remotePeerId, {
         reliable: true, // Use reliable ordered channel
+        serialization: 'json',
       });
 
+      let connected = false;
+
       conn.on('open', () => {
+        connected = true;
         console.log('✅ Connected to:', remotePeerId);
         this.connections.set(remotePeerId, conn);
         resolve(conn);
       });
 
       conn.on('error', (error) => {
-        console.error('❌ Connection error:', error);
-        reject(error);
+        if (!connected) {
+          console.error('❌ Connection error:', error);
+          reject(error);
+        }
       });
 
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        if (!conn.open) {
-          reject(new Error('Connection timeout'));
+      // Increased timeout for NAT traversal (30 seconds)
+      const timeoutId = setTimeout(() => {
+        if (!connected) {
+          console.error('⏱️ Connection timeout after 30 seconds');
+          conn.close();
+          reject(new Error('Connection timeout - peer may not exist or network issues'));
         }
-      }, 10000);
+      }, 30000);
+
+      // Clear timeout if connected
+      conn.on('open', () => {
+        clearTimeout(timeoutId);
+      });
     });
   }
 
