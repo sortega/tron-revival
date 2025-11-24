@@ -168,17 +168,32 @@ export class Lobby {
         const input = this.container?.querySelector('.room-link-input') as HTMLInputElement;
         if (input) {
           try {
-            await navigator.clipboard.writeText(input.value);
-            copyBtn.textContent = 'Copied!';
+            // Try modern Clipboard API first
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(input.value);
+              copyBtn.textContent = 'Copied!';
+            } else {
+              // Fallback to input selection method
+              input.select();
+              input.setSelectionRange(0, 99999); // For mobile
+              const successful = document.execCommand('copy');
+              if (successful) {
+                copyBtn.textContent = 'Copied!';
+              } else {
+                throw new Error('execCommand failed');
+              }
+            }
             setTimeout(() => {
               copyBtn.textContent = 'Copy Link';
             }, 2000);
           } catch (err) {
             console.error('Failed to copy:', err);
-            copyBtn.textContent = 'Failed';
+            // Show a helpful message instead
+            input.select();
+            copyBtn.textContent = 'Select & Copy';
             setTimeout(() => {
               copyBtn.textContent = 'Copy Link';
-            }, 2000);
+            }, 3000);
           }
         }
       });
