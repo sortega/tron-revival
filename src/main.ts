@@ -347,4 +347,21 @@ window.addEventListener('keydown', (e) => {
 // Initialize the menu system
 initializeMenus();
 
-console.log('✅ Menu system initialized!');
+// Check for room parameter in URL
+const urlParams = new URLSearchParams(window.location.search);
+const roomParam = urlParams.get('room');
+if (roomParam) {
+  console.log(`🔗 Room link detected: ${roomParam}`);
+  // Auto-join room from URL parameter
+  setTimeout(() => {
+    if (uiManager) {
+      uiManager.showScreen('network-menu');
+      // Wait for screen to render, then auto-join
+      setTimeout(() => {
+        joinRoom(roomParam);
+      }, 100);
+    }
+  }, 100);
+} else {
+  console.log('✅ Menu system initialized!');
+}

@@ -164,15 +164,22 @@ export class Lobby {
 
     const copyBtn = this.container.querySelector('[data-action="copy-link"]') as HTMLButtonElement | null;
     if (copyBtn) {
-      copyBtn.addEventListener('click', () => {
+      copyBtn.addEventListener('click', async () => {
         const input = this.container?.querySelector('.room-link-input') as HTMLInputElement;
         if (input) {
-          input.select();
-          document.execCommand('copy');
-          copyBtn.textContent = 'Copied!';
-          setTimeout(() => {
-            copyBtn.textContent = 'Copy Link';
-          }, 2000);
+          try {
+            await navigator.clipboard.writeText(input.value);
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => {
+              copyBtn.textContent = 'Copy Link';
+            }, 2000);
+          } catch (err) {
+            console.error('Failed to copy:', err);
+            copyBtn.textContent = 'Failed';
+            setTimeout(() => {
+              copyBtn.textContent = 'Copy Link';
+            }, 2000);
+          }
         }
       });
     }
