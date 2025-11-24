@@ -23,15 +23,15 @@ export class PeerManager {
         debug: 3, // Show all debug logs
         config: {
           iceServers: [
-            // Use just 1-2 STUN servers to avoid slowdown
             { urls: 'stun:stun.l.google.com:19302' },
           ],
-          // For localhost testing, prioritize host candidates
           iceTransportPolicy: 'all' as const,
           iceCandidatePoolSize: 10,
+          // For localhost testing: bundle policy to maximize compatibility
+          bundlePolicy: 'max-bundle' as const,
+          rtcpMuxPolicy: 'require' as const,
         },
         // Use the PeerJS cloud server (free) - let it use default settings
-        // Don't specify host/port/path to use PeerJS defaults
       };
 
       // Create peer with custom ID or let PeerJS generate one
@@ -91,6 +91,11 @@ export class PeerManager {
       });
 
       let connected = false;
+
+      // Log connection state changes
+      conn.on('iceStateChanged', (state) => {
+        console.log('🔌 ICE state:', state);
+      });
 
       conn.on('open', () => {
         connected = true;
