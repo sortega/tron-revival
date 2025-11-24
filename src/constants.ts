@@ -57,3 +57,32 @@ export const POWERUP_DURATION = {
   SPEED_SLOW: 1400, // ~20 seconds
   CONTROL_REVERSAL: 700, // ~10 seconds
 } as const;
+
+// Player spawn configuration
+export interface SpawnPosition {
+  x: number;
+  y: number;
+  dir: number;
+}
+
+export const SPAWN_POSITIONS: Record<number, SpawnPosition[]> = {
+  2: [
+    { x: 50, y: 50, dir: -45000 }, // Top-left, facing SE
+    { x: 700, y: 550, dir: 135000 }, // Bottom-right, facing NW
+  ],
+  3: [
+    { x: 50, y: 50, dir: -45000 }, // Top-left
+    { x: 700, y: 50, dir: 225000 }, // Top-right
+    { x: 50, y: 550, dir: 45000 }, // Bottom-left
+  ],
+  4: [
+    { x: 50, y: 50, dir: -45000 }, // Top-left
+    { x: 700, y: 50, dir: 225000 }, // Top-right
+    { x: 50, y: 550, dir: 45000 }, // Bottom-left
+    { x: 700, y: 550, dir: 135000 }, // Bottom-right
+  ],
+};
+
+// Other constants
+export const TRAIL_HEAD_COLOR: RGB = { r: 255, g: 255, b: 255 };
+export const WRAPAROUND_THRESHOLD = 100; // Threshold for detecting screen wraparound

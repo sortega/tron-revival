@@ -9,7 +9,7 @@ import { CollisionDetector } from './engine/CollisionDetector';
 import { Player } from './entities/Player';
 import { Renderer } from '../render/Renderer';
 import { AudioManager } from '../audio/AudioManager';
-import { PLAYER_COLORS } from '../constants';
+import { PLAYER_COLORS, SPAWN_POSITIONS, TRAIL_HEAD_COLOR } from '../constants';
 
 type RoundState = 'playing' | 'waiting_for_ready';
 
@@ -62,29 +62,8 @@ export class Game {
       PLAYER_COLORS.YELLOW,
     ];
 
-    // Starting positions based on player count
-    const positions: Array<{ x: number; y: number; dir: number }> = [];
-
-    if (numPlayers === 2) {
-      positions.push(
-        { x: 50, y: 50, dir: -45000 }, // Top-left, facing SE
-        { x: 700, y: 550, dir: 135000 } // Bottom-right, facing NW
-      );
-    } else if (numPlayers === 3) {
-      positions.push(
-        { x: 50, y: 50, dir: -45000 }, // Top-left
-        { x: 700, y: 50, dir: 225000 }, // Top-right
-        { x: 50, y: 550, dir: 45000 } // Bottom-left
-      );
-    } else {
-      // 4 players (default)
-      positions.push(
-        { x: 50, y: 50, dir: -45000 }, // Top-left
-        { x: 700, y: 50, dir: 225000 }, // Top-right
-        { x: 50, y: 550, dir: 45000 }, // Bottom-left
-        { x: 700, y: 550, dir: 135000 } // Bottom-right
-      );
-    }
+    // Get starting positions from configuration
+    const positions = SPAWN_POSITIONS[numPlayers] || SPAWN_POSITIONS[4]!;
 
     for (let i = 0; i < numPlayers; i++) {
       const pos = positions[i];
@@ -112,6 +91,10 @@ export class Game {
 
     this.running = true;
     this.gameLoop.start();
+
+    // Play initial round sound
+    this.audioManager.play('inicio');
+
     console.log('🎮 Game started!');
   }
 
@@ -157,7 +140,7 @@ export class Game {
 
     // Update player inputs
     for (const player of this.players) {
-      if (!player.vivo) continue;
+      if (!player.alive) continue;
 
       const input = this.inputManager.getPlayerInput(player.num);
       player.turningLeft = input.left;
@@ -178,7 +161,7 @@ export class Game {
       const player = this.players[i];
       if (!player) continue;
 
-      if (player.vivo) {
+      if (player.alive) {
         // Check for collisions at NEW position BEFORE drawing trail
         const collisionResult = this.collisionDetector.checkPlayerCollision(player);
 
@@ -194,7 +177,7 @@ export class Game {
         }
 
         if (collisionResult.collision || diagonalCollision) {
-          player.vivo = false;
+          player.alive = false;
 
           // Clear trail head tracking for dead player
           this.trailHeads.delete(player.num);
@@ -219,7 +202,7 @@ export class Game {
             }
 
             // Draw new white pixel at old position
-            this.renderer.drawTrailPixel(oldPos.x, oldPos.y, { r: 255, g: 255, b: 255 });
+            this.renderer.drawTrailPixel(oldPos.x, oldPos.y, TRAIL_HEAD_COLOR);
 
             // Update trail head tracking
             this.trailHeads.set(player.num, { x: oldPos.x, y: oldPos.y });
@@ -229,7 +212,7 @@ export class Game {
     }
 
     // Check win condition
-    const alivePlayers = this.players.filter((p) => p.vivo);
+    const alivePlayers = this.players.filter((p) => p.alive);
     if (alivePlayers.length <= 1) {
       this.endRound(alivePlayers);
     }
@@ -269,39 +252,14 @@ export class Game {
     this.trailHeads.clear();
 
     // Reset players to starting positions
-    const positions: Array<{ x: number; y: number; dir: number }> = [];
-
-    if (this.players.length === 2) {
-      positions.push(
-        { x: 50, y: 50, dir: -45000 },
-        { x: 700, y: 550, dir: 135000 }
-      );
-    } else if (this.players.length === 3) {
-      positions.push(
-        { x: 50, y: 50, dir: -45000 },
-        { x: 700, y: 50, dir: 225000 },
-        { x: 50, y: 550, dir: 45000 }
-      );
-    } else {
-      positions.push(
-        { x: 50, y: 50, dir: -45000 },
-        { x: 700, y: 50, dir: 225000 },
-        { x: 50, y: 550, dir: 45000 },
-        { x: 700, y: 550, dir: 135000 }
-      );
-    }
+    const positions = SPAWN_POSITIONS[this.players.length] || SPAWN_POSITIONS[4]!;
 
     for (let i = 0; i < this.players.length; i++) {
       const player = this.players[i];
       const pos = positions[i];
       if (!player || !pos) continue;
 
-      player.vivo = true;
-      player.rx = pos.x * 1000;
-      player.ry = pos.y * 1000;
-      player.dir = pos.dir;
-      player.x = pos.x;
-      player.y = pos.y;
+      player.reset(pos);
     }
 
     this.roundState = 'playing';

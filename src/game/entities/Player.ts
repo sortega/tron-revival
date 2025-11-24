@@ -4,7 +4,7 @@
  */
 
 import type { PlayerId, PlayerState } from '../../types';
-import { PLAYER_TURN_SPEED, PLAYER_MOVE_SPEED, GAME_WIDTH, GAME_HEIGHT, type RGB } from '../../constants';
+import { PLAYER_TURN_SPEED, PLAYER_MOVE_SPEED, GAME_WIDTH, GAME_HEIGHT, type RGB, type SpawnPosition } from '../../constants';
 import { normalizeAngle, toPixel, cos, sin, fromPixel } from '../../utils';
 
 export class Player {
@@ -18,16 +18,16 @@ export class Player {
   y: number;
 
   // State
-  vivo = true; // Alive
-  vel = 100; // Velocity (100 = normal, lower = faster, higher = slower)
-  ctrl = 1; // Control multiplier (1 = normal, -1 = reversed)
+  alive = true;
+  velocity = 100; // 100 = normal, lower = faster, higher = slower
+  controlMultiplier = 1; // 1 = normal, -1 = reversed
 
   // Power-ups
-  escudo = 0; // Shield frames remaining
-  cruces = 0; // Crossing frames remaining
+  shield = 0; // Shield frames remaining
+  crossing = 0; // Crossing frames remaining
 
   // Weapon
-  fase = -1; // Weapon fire phase
+  firePhase = -1; // Weapon fire phase
   ammo = 0;
   target = 0; // Has weapon equipped
 
@@ -56,18 +56,18 @@ export class Player {
    * Update player state
    */
   update(): void {
-    if (!this.vivo) return;
+    if (!this.alive) return;
 
     // Update power-ups
-    if (this.escudo > 0) this.escudo--;
-    if (this.cruces > 0) this.cruces--;
+    if (this.shield > 0) this.shield--;
+    if (this.crossing > 0) this.crossing--;
 
     // Handle turning
     if (this.turningLeft) {
-      this.dir += PLAYER_TURN_SPEED * this.ctrl;
+      this.dir += PLAYER_TURN_SPEED * this.controlMultiplier;
     }
     if (this.turningRight) {
-      this.dir -= PLAYER_TURN_SPEED * this.ctrl;
+      this.dir -= PLAYER_TURN_SPEED * this.controlMultiplier;
     }
     this.dir = normalizeAngle(this.dir);
 
@@ -91,6 +91,36 @@ export class Player {
   }
 
   /**
+   * Reset player to spawn position
+   */
+  reset(spawn: SpawnPosition): void {
+    this.rx = fromPixel(spawn.x);
+    this.ry = fromPixel(spawn.y);
+    this.dir = normalizeAngle(spawn.dir);
+    this.x = spawn.x;
+    this.y = spawn.y;
+    this.alive = true;
+
+    // Reset power-ups
+    this.shield = 0;
+    this.crossing = 0;
+
+    // Reset weapon
+    this.firePhase = -1;
+    this.ammo = 0;
+    this.target = 0;
+
+    // Reset state
+    this.velocity = 100;
+    this.controlMultiplier = 1;
+
+    // Reset input
+    this.turningLeft = false;
+    this.turningRight = false;
+    this.firing = false;
+  }
+
+  /**
    * Convert to PlayerState for serialization
    */
   toState(): PlayerState {
@@ -104,12 +134,12 @@ export class Player {
       dir: this.dir,
       x: this.x,
       y: this.y,
-      vivo: this.vivo,
-      vel: this.vel,
-      ctrl: this.ctrl,
-      escudo: this.escudo,
-      cruces: this.cruces,
-      fase: this.fase,
+      alive: this.alive,
+      velocity: this.velocity,
+      controlMultiplier: this.controlMultiplier,
+      shield: this.shield,
+      crossing: this.crossing,
+      firePhase: this.firePhase,
       ammo: this.ammo,
       target: this.target,
     };

@@ -128,7 +128,7 @@ export class Renderer {
 
     // Draw players
     for (const player of players) {
-      if (player.vivo) {
+      if (player.alive) {
         this.drawPlayer(player);
       }
     }
@@ -152,7 +152,7 @@ export class Renderer {
     this.ctx.fillRect(player.x - 1, player.y - 1, 3, 3);
 
     // Draw shield indicator
-    if (player.escudo > 0) {
+    if (player.shield > 0) {
       this.ctx.strokeStyle = '#0ff';
       this.ctx.lineWidth = 2;
       this.ctx.beginPath();
@@ -267,9 +267,9 @@ export class Renderer {
       this.ctx.fillRect(GAME_WIDTH + 10, y, 30, 30);
 
       // Draw status
-      this.ctx.fillStyle = player.vivo ? '#0f0' : '#f00';
+      this.ctx.fillStyle = player.alive ? '#0f0' : '#f00';
       this.ctx.font = '10px monospace';
-      this.ctx.fillText(player.vivo ? 'ALIVE' : 'DEAD', GAME_WIDTH + 5, y + 45);
+      this.ctx.fillText(player.alive ? 'ALIVE' : 'DEAD', GAME_WIDTH + 5, y + 45);
 
       // Draw ready status
       if (roundState === 'waiting_for_ready') {

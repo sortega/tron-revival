@@ -14,10 +14,10 @@ export class CollisionDetector {
    * Returns { collision: boolean, ownColor: boolean }
    */
   checkPlayerCollision(player: Player): { collision: boolean; ownColor: boolean } {
-    if (!player.vivo) return { collision: false, ownColor: false };
+    if (!player.alive) return { collision: false, ownColor: false };
 
     // Shield protects from all collisions
-    if (player.escudo > 0) return { collision: false, ownColor: false };
+    if (player.shield > 0) return { collision: false, ownColor: false };
 
     const { x, y } = player;
 
@@ -30,8 +30,8 @@ export class CollisionDetector {
     // Check if it's the player's own color
     const isOwnColor = this.renderer.isColorMatch(pixelColor, player.color);
 
-    // If player has crossing ability, can cross own trail
-    if (player.cruces > 0) {
+    // If player has crossing ability, can cross trails
+    if (player.crossing > 0) {
       return { collision: false, ownColor: false };
     }
 
@@ -43,8 +43,8 @@ export class CollisionDetector {
    * Check diagonal movement collision (prevents threading through corners)
    */
   checkDiagonalCollision(player: Player, oldX: number, oldY: number): boolean {
-    if (!player.vivo) return false;
-    if (player.escudo > 0) return false;
+    if (!player.alive) return false;
+    if (player.shield > 0) return false;
 
     const { x: newX, y: newY } = player;
 

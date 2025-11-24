@@ -33,16 +33,16 @@ export interface PlayerState {
   y: number;
 
   // State
-  vivo: boolean; // Alive/dead
-  vel: number; // Velocity (100 = normal, lower = faster)
-  ctrl: number; // Control direction (1 = normal, -1 = reversed)
+  alive: boolean;
+  velocity: number; // 100 = normal, lower = faster
+  controlMultiplier: number; // 1 = normal, -1 = reversed
 
   // Power-ups
-  escudo: number; // Shield remaining frames
-  cruces: number; // Crossing remaining frames
+  shield: number; // Shield remaining frames
+  crossing: number; // Crossing remaining frames
 
   // Weapon
-  fase: number; // Weapon fire phase (-1 = not firing)
+  firePhase: number; // Weapon fire phase (-1 = not firing)
   ammo: number; // Ammunition remaining
   target: number; // Has weapon equipped
 }
@@ -61,9 +61,9 @@ export interface ItemState {
   id: string;
   x: number;
   y: number;
-  clase: number; // 0 = automatic, 1 = weapon
-  tipo: number; // Item type within class
-  vivo: number; // Lifetime remaining
+  category: number; // 0 = automatic, 1 = weapon
+  type: number; // Item type within category
+  lifetime: number; // Lifetime remaining
 }
 
 // Game state
