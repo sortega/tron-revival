@@ -4,9 +4,12 @@
 
 import { Game } from './game/Game';
 import { UIManager } from './ui/UIManager';
-import { GAME_WIDTH, GAME_HEIGHT } from './constants';
+import { HostManager } from './network/HostManager';
+import { GuestManager } from './network/GuestManager';
+import { GAME_WIDTH, GAME_HEIGHT, PLAYER_COLORS } from './constants';
+import type { LobbyPlayer } from './ui/Lobby';
 
-console.log('🎮 Teratron Revival - Phase 1 Demo');
+console.log('🎮 Teratron Revival - Phase 2 Demo (Networking)');
 console.log(`Canvas size: ${GAME_WIDTH}x${GAME_HEIGHT}`);
 
 // Get the app container
@@ -23,6 +26,12 @@ app.innerHTML = '';
 let game: Game | null = null;
 let gameContainer: HTMLElement | null = null;
 let uiManager: UIManager | null = null;
+
+// Network state
+let hostManager: HostManager | null = null;
+let guestManager: GuestManager | null = null;
+let isHost = false;
+let currentRoomId: string | null = null;
 
 /**
  * Start local game
@@ -79,61 +88,181 @@ function startLocalGame(numPlayers: number): void {
 }
 
 /**
- * Create network room (Phase 2 - mock for now)
+ * Create network room
  */
-function createRoom(): void {
-  console.log('🌐 Create room - Coming in Phase 2!');
-  // For Phase 1, just show lobby with mock data
-  const mockRoomId = 'demo-room-' + Math.random().toString(36).substr(2, 9);
+async function createRoom(): Promise<void> {
+  console.log('🌐 Creating room...');
 
-  if (uiManager) {
-    uiManager.updateLobby(
-      [
-        {
-          name: 'Player 1',
-          color: 'rgb(255, 0, 0)',
-          isReady: true,
-          isHost: true,
-          isYou: true,
-        },
-      ],
-      mockRoomId
-    );
+  try {
+    // Create host manager
+    hostManager = new HostManager();
+    isHost = true;
+
+    // Create room
+    currentRoomId = await hostManager.createRoom();
+    console.log(`✅ Room created: ${currentRoomId}`);
+
+    // Setup host callbacks
+    hostManager.onGuestJoined((playerInfo) => {
+      console.log(`👋 Guest joined: ${playerInfo.name}`);
+      updateLobbyFromNetwork();
+    });
+
+    hostManager.onGuestLeft((playerId) => {
+      console.log(`👋 Guest left: ${playerId}`);
+      updateLobbyFromNetwork();
+    });
+
+    // Show lobby with host as only player
+    updateLobbyFromNetwork();
+  } catch (error) {
+    console.error('Failed to create room:', error);
+    alert('Failed to create room. Please try again.');
+    initializeMenus();
   }
 }
 
 /**
- * Join network room (Phase 2 - mock for now)
+ * Join network room
  */
-function joinRoom(roomId: string): void {
-  console.log(`🌐 Join room: ${roomId} - Coming in Phase 2!`);
-  // For Phase 1, just show lobby with mock data
-  if (uiManager) {
-    uiManager.updateLobby([
-      {
+async function joinRoom(roomId: string): Promise<void> {
+  console.log(`🌐 Joining room: ${roomId}...`);
+
+  try {
+    // Create guest manager
+    guestManager = new GuestManager();
+    isHost = false;
+    currentRoomId = roomId;
+
+    // Setup guest callbacks
+    guestManager.onWelcome((_playerId, playerNum, _roomInfo) => {
+      console.log(`✅ Welcomed as Player ${playerNum}`);
+      updateLobbyFromNetwork();
+    });
+
+    guestManager.onPlayerJoined((player) => {
+      console.log(`👋 Player joined: ${player.name}`);
+      updateLobbyFromNetwork();
+    });
+
+    guestManager.onPlayerLeft((playerId) => {
+      console.log(`👋 Player left: ${playerId}`);
+      updateLobbyFromNetwork();
+    });
+
+    guestManager.onDisconnected(() => {
+      console.log('🔌 Disconnected from host');
+      alert('Disconnected from host');
+      cleanupNetwork();
+      initializeMenus();
+    });
+
+    guestManager.onError((code, message) => {
+      console.error(`Error: ${code} - ${message}`);
+      alert(`Error: ${message}`);
+      cleanupNetwork();
+      initializeMenus();
+    });
+
+    // Join the room
+    const playerName = `Guest-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+    await guestManager.joinRoom(roomId, playerName);
+  } catch (error) {
+    console.error('Failed to join room:', error);
+    alert('Failed to join room. Please check the room code and try again.');
+    cleanupNetwork();
+    initializeMenus();
+  }
+}
+
+/**
+ * Update lobby from network state
+ */
+function updateLobbyFromNetwork(): void {
+  if (!uiManager) return;
+
+  const players: LobbyPlayer[] = [];
+
+  if (isHost && hostManager) {
+    // Host player (always first)
+    players.push({
+      name: 'Host (You)',
+      color: `rgb(${PLAYER_COLORS.RED.r}, ${PLAYER_COLORS.RED.g}, ${PLAYER_COLORS.RED.b})`,
+      isReady: true,
+      isHost: true,
+      isYou: true,
+    });
+
+    // Add guests
+    const guests = hostManager.getGuestPlayerInfo();
+    for (const guest of guests) {
+      players.push({
+        name: guest.name,
+        color: `rgb(${guest.color.r}, ${guest.color.g}, ${guest.color.b})`,
+        isReady: guest.isReady,
+        isHost: false,
+        isYou: false,
+      });
+    }
+  } else if (guestManager) {
+    const roomInfo = guestManager.getRoomInfo();
+    const localPlayerId = guestManager.getLocalPlayerId();
+
+    if (roomInfo) {
+      // Add host
+      players.push({
         name: 'Host',
-        color: 'rgb(255, 0, 0)',
+        color: `rgb(${PLAYER_COLORS.RED.r}, ${PLAYER_COLORS.RED.g}, ${PLAYER_COLORS.RED.b})`,
         isReady: true,
         isHost: true,
-      },
-      {
-        name: 'You',
-        color: 'rgb(0, 255, 0)',
-        isReady: false,
-        isHost: false,
-        isYou: true,
-      },
-    ]);
+        isYou: false,
+      });
+
+      // Add all guests (including self)
+      for (const player of roomInfo.players) {
+        players.push({
+          name: player.id === localPlayerId ? `${player.name} (You)` : player.name,
+          color: `rgb(${player.color.r}, ${player.color.g}, ${player.color.b})`,
+          isReady: player.isReady,
+          isHost: false,
+          isYou: player.id === localPlayerId,
+        });
+      }
+    }
   }
+
+  uiManager.updateLobby(players, currentRoomId || undefined);
 }
 
 /**
- * Start network game (Phase 2 - mock for now)
+ * Start network game (host only)
  */
 function startNetworkGame(): void {
-  console.log('🌐 Start network game - Coming in Phase 2!');
-  // For Phase 1, just start a local 2-player game
+  if (!isHost) {
+    console.log('Only host can start the game');
+    return;
+  }
+
+  console.log('🌐 Starting network game...');
+  // For Phase 2, just start a local game
+  // Phase 3 will add full network synchronization
   startLocalGame(2);
+}
+
+/**
+ * Cleanup network connections
+ */
+function cleanupNetwork(): void {
+  if (hostManager) {
+    hostManager.destroy();
+    hostManager = null;
+  }
+  if (guestManager) {
+    guestManager.destroy();
+    guestManager = null;
+  }
+  isHost = false;
+  currentRoomId = null;
 }
 
 /**
@@ -141,11 +270,16 @@ function startNetworkGame(): void {
  */
 function disconnect(): void {
   console.log('🔌 Disconnecting from network game');
+
   // Stop game if running
   if (game) {
     game.stop();
     game = null;
   }
+
+  // Cleanup network
+  cleanupNetwork();
+
   // Return to main menu
   initializeMenus();
 }

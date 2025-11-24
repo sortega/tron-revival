@@ -12,7 +12,14 @@
     "type": "git",
     "url": "http://local_proxy@127.0.0.1:48674/git/sortega/tron-revival"
   },
-  "keywords": ["game", "tron", "multiplayer", "p2p", "webrtc", "retro"],
+  "keywords": [
+    "game",
+    "tron",
+    "multiplayer",
+    "p2p",
+    "webrtc",
+    "retro"
+  ],
   "author": "Sebastian Ortega",
   "license": "ISC",
   "devDependencies": {
