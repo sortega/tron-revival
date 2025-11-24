@@ -66,29 +66,34 @@ export class HostManager {
    */
   private handleGuestConnection(conn: DataConnection): void {
     const peerId = conn.peer;
+    console.log(`[HostManager] 📞 Incoming connection from: ${peerId}`);
 
     // Check if room is full
     if (this.guests.size >= MAX_PLAYERS - 1) {
-      console.log(`❌ Room full, rejecting ${peerId}`);
+      console.log(`[HostManager] ❌ Room full (${this.guests.size}/${MAX_PLAYERS - 1}), rejecting ${peerId}`);
       conn.send(createErrorMessage('ROOM_FULL', 'Room is full (max 4 players)'));
       setTimeout(() => conn.close(), 100);
       return;
     }
 
+    console.log(`[HostManager] Room has space (${this.guests.size}/${MAX_PLAYERS - 1})`);
+
     // Setup connection handlers
     this.peerManager.onData(conn, (data) => {
+      console.log(`[HostManager] Received data from ${peerId}:`, data);
       if (isGuestToHostMessage(data)) {
         this.handleGuestMessage(peerId, data);
       } else {
-        console.warn('Invalid message from guest:', data);
+        console.warn(`[HostManager] Invalid message from guest ${peerId}:`, data);
       }
     });
 
     this.peerManager.onClose(conn, () => {
+      console.log(`[HostManager] Connection closed for ${peerId}`);
       this.handleGuestDisconnection(peerId);
     });
 
-    console.log(`✅ Guest ${peerId} connected, waiting for join message...`);
+    console.log(`[HostManager] ✅ Guest ${peerId} connected, waiting for join message...`);
   }
 
   /**
@@ -116,10 +121,6 @@ export class HostManager {
           this.onGuestReadyCallback(message.playerId, message.isReady);
         }
         break;
-
-      case 'chat':
-        console.log(`💬 ${message.playerId}: ${message.message}`);
-        break;
     }
   }
 
@@ -127,10 +128,13 @@ export class HostManager {
    * Handle guest join message
    */
   private handleJoinMessage(peerId: string, playerName: string): void {
+    console.log(`[HostManager] Processing join request from ${peerId} with name: ${playerName}`);
+
     // Assign player number and color
     const playerNum = this.nextPlayerNum++;
     const colors = [PLAYER_COLORS.RED, PLAYER_COLORS.GREEN, PLAYER_COLORS.BLUE, PLAYER_COLORS.YELLOW];
     const color = colors[playerNum] || PLAYER_COLORS.RED;
+    console.log(`[HostManager] Assigned player number ${playerNum} with color:`, color);
 
     // Create player info
     const playerInfo: PlayerInfo = {

@@ -40,35 +40,46 @@ export class GuestManager {
    * Join a room by connecting to host
    */
   async joinRoom(roomId: string, playerName: string): Promise<void> {
-    // Initialize peer
-    await this.peerManager.initialize();
+    try {
+      console.log(`[GuestManager] Starting join process for room: ${roomId}`);
 
-    // Connect to host
-    console.log(`🔌 Connecting to host: ${roomId}...`);
-    this.hostConnection = await this.peerManager.connect(roomId);
+      // Initialize peer
+      console.log('[GuestManager] Initializing peer...');
+      const myPeerId = await this.peerManager.initialize();
+      console.log(`[GuestManager] ✅ Peer initialized with ID: ${myPeerId}`);
 
-    // Setup message handler
-    this.peerManager.onData(this.hostConnection, (data) => {
-      if (isHostToGuestMessage(data)) {
-        this.handleHostMessage(data);
-      } else {
-        console.warn('Invalid message from host:', data);
-      }
-    });
+      // Connect to host
+      console.log(`[GuestManager] 🔌 Connecting to host: ${roomId}...`);
+      this.hostConnection = await this.peerManager.connect(roomId);
+      console.log(`[GuestManager] ✅ Connected to host`);
 
-    // Setup disconnect handler
-    this.peerManager.onClose(this.hostConnection, () => {
-      console.log('🔌 Disconnected from host');
-      if (this.onDisconnectedCallback) {
-        this.onDisconnectedCallback();
-      }
-    });
+      // Setup message handler
+      this.peerManager.onData(this.hostConnection, (data) => {
+        console.log('[GuestManager] Received data from host:', data);
+        if (isHostToGuestMessage(data)) {
+          this.handleHostMessage(data);
+        } else {
+          console.warn('[GuestManager] Invalid message from host:', data);
+        }
+      });
 
-    // Send join message
-    const joinMsg = createJoinMessage(playerName);
-    this.hostConnection.send(joinMsg);
+      // Setup disconnect handler
+      this.peerManager.onClose(this.hostConnection, () => {
+        console.log('[GuestManager] 🔌 Disconnected from host');
+        if (this.onDisconnectedCallback) {
+          this.onDisconnectedCallback();
+        }
+      });
 
-    console.log(`✅ Join message sent, waiting for welcome...`);
+      // Send join message
+      console.log(`[GuestManager] Sending join message with name: ${playerName}`);
+      const joinMsg = createJoinMessage(playerName);
+      this.hostConnection.send(joinMsg);
+      console.log(`[GuestManager] ✅ Join message sent, waiting for welcome...`);
+    } catch (error) {
+      console.error('[GuestManager] Error during join:', error);
+      throw error;
+    }
   }
 
   /**

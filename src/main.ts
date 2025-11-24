@@ -166,10 +166,16 @@ async function joinRoom(roomId: string): Promise<void> {
 
     // Join the room
     const playerName = `Guest-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+    console.log(`Attempting to join room ${roomId} as ${playerName}...`);
     await guestManager.joinRoom(roomId, playerName);
   } catch (error) {
-    console.error('Failed to join room:', error);
-    alert('Failed to join room. Please check the room code and try again.');
+    console.error('Failed to join room - Full error:', error);
+    console.error('Error type:', typeof error);
+    console.error('Error message:', error instanceof Error ? error.message : String(error));
+
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    alert(`Failed to join room: ${errorMsg}\n\nPlease check:\n- Room code is correct\n- Host is still connected\n- Both browsers have WebRTC enabled`);
+
     cleanupNetwork();
     initializeMenus();
   }

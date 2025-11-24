@@ -20,17 +20,12 @@ export class PeerManager {
     return new Promise((resolve, reject) => {
       // Configure ICE servers for NAT traversal
       const config = {
-        debug: 2, // Show debug logs
+        debug: 3, // Show all debug logs
         config: {
           iceServers: [
-            // Google's public STUN servers
+            // Use just 1-2 STUN servers to avoid slowdown
             { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' },
           ],
-          iceTransportPolicy: 'all' as const,
         },
       };
 

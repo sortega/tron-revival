@@ -32,18 +32,10 @@ export interface ReadyMessage {
   isReady: boolean;
 }
 
-export interface ChatMessage {
-  type: 'chat';
-  playerId: string;
-  message: string;
-  timestamp: number;
-}
-
 export type GuestToHostMessage =
   | JoinMessage
   | InputMessage
-  | ReadyMessage
-  | ChatMessage;
+  | ReadyMessage;
 
 // ============================================================================
 // Host → Guest Messages
@@ -149,8 +141,7 @@ export function isGuestToHostMessage(msg: unknown): msg is GuestToHostMessage {
   return (
     type === 'join' ||
     type === 'input' ||
-    type === 'ready' ||
-    type === 'chat'
+    type === 'ready'
   );
 }
 
