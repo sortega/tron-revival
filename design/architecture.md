@@ -53,38 +53,25 @@ This document outlines the high-level architecture for the modern web implementa
 
 ### Networking
 
-**Pure Peer-to-Peer - No Custom Server!**
+**Pure Peer-to-Peer with PeerJS**
 
-Use existing P2P infrastructure - zero server-side code to write or host!
+Teratron uses a pure P2P architecture with PeerJS for zero-cost multiplayer:
+- **Host-authority model**: One client runs authoritative game loop
+- **WebRTC direct connections**: Low latency P2P between players
+- **Shareable room links**: Create/join rooms via URLs
+- **No custom servers**: Uses PeerJS's free public signaling service
+- **Cost:** $0/month
 
-**PeerJS** (or similar service)
-- **What it provides:**
-  - Free public signaling server (already running!)
-  - Simple WebRTC abstraction
-  - Room/peer ID system
-  - Automatic connection management
-- **What we write:** Client-side code only (TypeScript)
-- **Cost:** $0 (uses PeerJS's free public server)
+**For complete networking design, see: [networking.md](./networking.md)**
 
-**How it works:**
-1. Include PeerJS library in client
-2. Create peer with unique ID (or random if host)
-3. Share peer ID via URL: `http://teratron.com/?room=abc123`
-4. Other players connect to peer ID
-5. Direct P2P connections established automatically
-6. No custom server code needed!
-
-**Alternatives to PeerJS:**
-- **Simple-peer**: Lower-level, more control
-- **Trystero**: Serverless P2P using public infrastructure (BitTorrent, IPFS, etc.)
-- **Gun.js**: Decentralized database with P2P sync
-- Roll our own minimal signaling (only if needed later)
-
-**Decision: Start with PeerJS**
-- Simplest to implement
-- Proven, widely used
-- Free public infrastructure
-- Can replace later if needed
+This covers:
+- Full PeerJS integration details
+- Menu system design (Local vs Network game)
+- Room creation/joining flow
+- Lobby system with player management
+- Network protocol specification
+- State synchronization strategy
+- Implementation structure
 
 ### Build Tools
 
@@ -133,73 +120,27 @@ Use existing P2P infrastructure - zero server-side code to write or host!
 - Source of truth for game state
 
 **Guest Clients**
-- Connect to host and other peers via WebRTC
+- Connect to host via WebRTC
 - Send inputs to host
 - Receive state updates from host
 - Render game state locally
-- Optional: Can connect to each other for redundancy/chat
 
 **Why peer-to-peer with host authority?**
 - **Zero server costs**: No dedicated game servers needed
-- **Simpler operations**: Just static file hosting + minimal signaling
 - **Low latency**: Direct connections, no server hop for game data
 - **Perfect for 2-4 players**: WebRTC mesh scales well at this size
 - **Still authoritative**: Host prevents cheating, ensures consistency
 
 ### Network Architecture
 
-See detailed design: [multiplayer.md](./multiplayer.md) *(to be created)*
+**For detailed networking design, see: [networking.md](./networking.md)**
 
-**Key decisions:**
-- **Room-based matchmaking**: Players create/join rooms via shareable links
-- **WebRTC signaling**: Use signaling server only for initial connection setup
-- **P2P game data**: All game traffic goes directly between clients
-- **Host authority**: Host client runs game loop and broadcasts state
-- **Input handling**:
-  - Guest clients send inputs to host
-  - Host processes all inputs and updates state
-  - Host broadcasts state to all guests
-- **Latency handling**:
-  - Client-side prediction for local player (on all clients)
-  - Host reconciliation for corrections
-  - Interpolation for remote players
-
-**Room System:**
-```
-Shareable Link: http://teratron.example.com/?room=abc123xyz
-
-Create Room:
-  Player 1 → Creates PeerJS peer with ID "abc123xyz" → Becomes Host
-          → Gets shareable link with peer ID
-
-Join Room:
-  Player 2+ → Opens link → Extracts peer ID from URL
-          → Creates own PeerJS peer → Connects to host peer ID
-          → PeerJS handles WebRTC setup automatically
-          → Direct P2P connection established
-```
-
-**Connection Flow (using PeerJS):**
-```typescript
-// Host creates room
-const hostPeer = new Peer('room-abc123xyz'); // Or random ID
-const shareableLink = `${window.location.origin}/?room=${hostPeer.id}`;
-// Share link with friends!
-
-// Guest joins room
-const roomId = new URLSearchParams(window.location.search).get('room');
-const guestPeer = new Peer(); // Random ID for guest
-const conn = guestPeer.connect(roomId); // Connect to host
-
-// Direct P2P communication established!
-// PeerJS handled all the WebRTC signaling
-```
-
-**Yes, shareable links work perfectly with pure P2P!**
-- No custom server needed
-- PeerJS provides the signaling
-- Room ID is just the host's peer ID
-- Share via URL, Discord, text message, etc.
+Key features:
+- Room-based matchmaking with shareable links
+- Menu system for local vs networked games
+- Pre-game lobby with player management
+- Full protocol specification
+- State synchronization approach
 
 ## Code Organization
 
@@ -245,10 +186,10 @@ tron-revival/
 ### Key Modules
 
 See detailed designs:
+- [networking.md](./networking.md) - PeerJS networking, menu system, and multiplayer protocol
 - [game-state.md](./game-state.md) *(to be created)* - State management
 - [rendering.md](./rendering.md) *(to be created)* - Canvas rendering approach
 - [collision.md](./collision.md) *(to be created)* - Pixel-perfect collision
-- [multiplayer.md](./multiplayer.md) *(to be created)* - Network protocol
 
 ## Game Loop Architecture
 
@@ -476,54 +417,22 @@ interface Input {
 
 ## Networking Protocol
 
-### PeerJS Connection (Handled Automatically!)
+**For complete protocol specification, see: [networking.md](./networking.md)**
 
-PeerJS handles all the WebRTC signaling automatically. We just need to:
-```typescript
-// Host
-const peer = new Peer('room-abc123');
-peer.on('connection', (conn) => {
-  // New player connected!
-  conn.on('data', handleGuestMessage);
-});
+The networking protocol uses PeerJS for WebRTC connections with a simple message-based design:
 
-// Guest
-const peer = new Peer();
-const conn = peer.connect('room-abc123');
-conn.on('data', handleHostMessage);
-```
+**Guest → Host messages:**
+- Join requests with player info
+- Player inputs (left/right/fire)
+- Ready status updates
 
-### Game Messages (Peer-to-Peer via PeerJS)
+**Host → Guest messages:**
+- Full game state updates (60 Hz)
+- Player join/leave notifications
+- Game start/end events
+- Error messages
 
-```typescript
-// Guest → Host (via WebRTC)
-type GuestToHostMessage =
-  | { type: 'input', input: Input }
-  | { type: 'ready' }
-  | { type: 'chat', message: string }; // Optional
-
-// Host → Guest (via WebRTC)
-type HostToGuestMessage =
-  | { type: 'state', state: GameState | DeltaState, frame: number }
-  | { type: 'start_game', countdown: number }
-  | { type: 'event', event: GameEvent } // Player died, item spawned, etc.
-  | { type: 'end_game', winner: string };
-```
-
-**Protocol notes:**
-- PeerJS handles all WebRTC setup automatically
-- We send/receive plain JavaScript objects (PeerJS handles serialization)
-- Data is sent over PeerJS's data channel (WebRTC underneath)
-- Type-safe message parsing with TypeScript discriminated unions
-- Optional: Add version field for protocol evolution
-
-**PeerJS Benefits:**
-- No WebRTC boilerplate (offers, answers, ICE candidates handled)
-- Automatic serialization (just send objects)
-- Connection state management
-- Fallback to older browsers
-
-See [multiplayer.md](./multiplayer.md) for complete protocol spec.
+All messages are sent as JavaScript objects over PeerJS data channels. See networking.md for complete message type definitions and protocol details.
 
 ## Performance Considerations
 
@@ -765,7 +674,7 @@ These will be resolved during implementation:
 ## Next Steps
 
 1. Create detailed design documents:
-   - [ ] `multiplayer.md` - PeerJS P2P protocol and synchronization
+   - [x] `networking.md` - PeerJS P2P protocol and synchronization
    - [ ] `game-state.md` - Complete state structure and transitions
    - [ ] `rendering.md` - Canvas rendering implementation
    - [ ] `collision.md` - Collision detection algorithms

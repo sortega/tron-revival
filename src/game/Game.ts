@@ -140,6 +140,36 @@ export class Game {
     // Track collision details for round end
     const collisionDetails = new Map<number, boolean>();
 
+    // Check for player-to-player path crossings FIRST
+    for (let i = 0; i < this.players.length; i++) {
+      for (let j = i + 1; j < this.players.length; j++) {
+        const player1 = this.players[i];
+        const player2 = this.players[j];
+        const oldPos1 = oldPositions[i];
+        const oldPos2 = oldPositions[j];
+
+        if (player1 && player2 && oldPos1 && oldPos2) {
+          const crossed = this.collisionDetector.checkPlayersCrossing(
+            player1,
+            oldPos1.x,
+            oldPos1.y,
+            player2,
+            oldPos2.x,
+            oldPos2.y
+          );
+
+          if (crossed) {
+            // Both players die when they cross paths
+            player1.alive = false;
+            player2.alive = false;
+            this.trailHeads.delete(player1.num);
+            this.trailHeads.delete(player2.num);
+            console.log(`💥 ${player1.name} and ${player2.name} crossed paths!`);
+          }
+        }
+      }
+    }
+
     // Check collisions and draw trails
     for (let i = 0; i < this.players.length; i++) {
       const player = this.players[i];
