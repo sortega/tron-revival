@@ -26,7 +26,12 @@ export class PeerManager {
             // Use just 1-2 STUN servers to avoid slowdown
             { urls: 'stun:stun.l.google.com:19302' },
           ],
+          // For localhost testing, prioritize host candidates
+          iceTransportPolicy: 'all' as const,
+          iceCandidatePoolSize: 10,
         },
+        // Use the PeerJS cloud server (free) - let it use default settings
+        // Don't specify host/port/path to use PeerJS defaults
       };
 
       // Create peer with custom ID or let PeerJS generate one
@@ -55,8 +60,17 @@ export class PeerManager {
 
     this.peer.on('connection', (conn) => {
       console.log('📞 Incoming connection from:', conn.peer);
-      this.connections.set(conn.peer, conn);
-      handler(conn);
+
+      // Wait for connection to open before calling handler
+      conn.on('open', () => {
+        console.log('✅ Connection opened with:', conn.peer);
+        this.connections.set(conn.peer, conn);
+        handler(conn);
+      });
+
+      conn.on('error', (err) => {
+        console.error('Connection error with', conn.peer, ':', err);
+      });
     });
   }
 

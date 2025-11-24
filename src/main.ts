@@ -174,7 +174,25 @@ async function joinRoom(roomId: string): Promise<void> {
     console.error('Error message:', error instanceof Error ? error.message : String(error));
 
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    alert(`Failed to join room: ${errorMsg}\n\nPlease check:\n- Room code is correct\n- Host is still connected\n- Both browsers have WebRTC enabled`);
+
+    let helpText = 'Failed to join room: ' + errorMsg + '\n\n';
+    helpText += 'Troubleshooting:\n';
+    helpText += '✓ Room code is correct\n';
+    helpText += '✓ Host is still connected\n';
+    helpText += '✓ Both browsers have WebRTC enabled\n\n';
+
+    if (errorMsg.includes('Negotiation') || errorMsg.includes('failed')) {
+      helpText += '⚠️ WebRTC Connection Failed\n\n';
+      helpText += 'For localhost testing, try:\n';
+      helpText += '1. Use TWO DIFFERENT BROWSERS\n';
+      helpText += '   (e.g., Chrome for host, Firefox for guest)\n\n';
+      helpText += '2. Or use your local network IP:\n';
+      helpText += '   - Find your IP: ipconfig (Windows) or ifconfig (Mac/Linux)\n';
+      helpText += '   - Access via http://192.168.x.x:5173\n\n';
+      helpText += '3. Or test on different devices on same WiFi\n';
+    }
+
+    alert(helpText);
 
     cleanupNetwork();
     initializeMenus();
