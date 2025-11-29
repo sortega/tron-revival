@@ -1,6 +1,6 @@
 /**
  * Peer Manager
- * Thin wrapper around PeerJS for connection management
+ * Simplified wrapper around PeerJS based on official examples
  */
 
 import Peer, { type DataConnection } from 'peerjs';
@@ -15,53 +15,76 @@ export class PeerManager {
 
   /**
    * Initialize peer with optional custom ID
+   * Based on official PeerJS example pattern
    */
   async initialize(customId?: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      // Configure ICE servers for NAT traversal
-      const config = {
-        debug: 3, // Show all debug logs
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-          ],
-          iceTransportPolicy: 'all' as const,
-          iceCandidatePoolSize: 10,
-          bundlePolicy: 'max-bundle' as const,
-          rtcpMuxPolicy: 'require' as const,
-        },
+      // Minimal config - let PeerJS handle defaults
+      const config: any = {
+        debug: 2, // Errors and warnings only
       };
 
-      // Create peer with custom ID or let PeerJS generate one
+      // Only add custom ICE servers if needed
+      // PeerJS already includes Google STUN by default
+      config.config = {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+        ],
+      };
+
+      // Create peer - let PeerJS connect to cloud server
+      console.log('[PeerManager] Creating peer with ID:', customId || 'auto');
       this.peer = customId ? new Peer(customId, config) : new Peer(config);
 
+      // Wait for connection to PeerJS server
       this.peer.on('open', (id) => {
-        console.log('✅ Peer initialized with ID:', id);
+        console.log('[PeerManager] ✅ Peer connected to server with ID:', id);
         resolve(id);
       });
 
+      // Handle disconnection from PeerJS server
       this.peer.on('disconnected', () => {
-        console.warn('⚠️ Peer disconnected from server, attempting to reconnect...');
-        // Attempt to reconnect
+        console.warn('[PeerManager] ⚠️ Disconnected from PeerJS server');
+        // Try to reconnect
         if (this.peer && !this.peer.destroyed) {
+          console.log('[PeerManager] Attempting to reconnect...');
           this.peer.reconnect();
         }
       });
 
+      // Handle permanent closure
       this.peer.on('close', () => {
-        console.log('🔌 Peer connection closed');
+        console.log('[PeerManager] 🔌 Peer connection permanently closed');
       });
 
-      this.peer.on('error', (error) => {
-        console.error('❌ Peer error:', error);
-        // Don't reject on certain errors, just log them
-        if (error.type === 'peer-unavailable') {
-          console.error('Peer is not available - they may have disconnected');
-        } else if (error.type === 'network') {
-          console.error('Network error - check internet connection');
+      // Handle errors - only reject on fatal errors during initialization
+      let initialized = false;
+      this.peer.on('error', (error: any) => {
+        console.error('[PeerManager] ❌ Peer error:', error.type, error);
+
+        // Only reject promise if we haven't initialized yet
+        if (!initialized) {
+          if (error.type === 'unavailable-id') {
+            reject(new Error('Peer ID already in use'));
+          } else if (error.type === 'server-error') {
+            reject(new Error('Cannot connect to PeerJS server'));
+          } else if (error.type === 'socket-error') {
+            reject(new Error('WebSocket connection failed'));
+          } else if (error.type === 'socket-closed') {
+            reject(new Error('WebSocket connection closed'));
+          } else {
+            // For other errors during init, reject
+            reject(error);
+          }
         } else {
-          reject(error);
+          // After initialization, just log errors
+          console.error('[PeerManager] Non-fatal error after init:', error.type);
         }
+      });
+
+      // Mark as initialized when open
+      this.peer.on('open', () => {
+        initialized = true;
       });
     });
   }
@@ -71,22 +94,30 @@ export class PeerManager {
    */
   onConnection(handler: ConnectionEventHandler): void {
     if (!this.peer) {
-      console.error('Peer not initialized');
+      console.error('[PeerManager] Cannot listen for connections - peer not initialized');
       return;
     }
 
-    this.peer.on('connection', (conn) => {
-      console.log('📞 Incoming connection from:', conn.peer);
+    console.log('[PeerManager] 📡 Listening for incoming connections...');
 
-      // Wait for connection to open before calling handler
+    this.peer.on('connection', (conn) => {
+      console.log('[PeerManager] 📞 Incoming connection from:', conn.peer);
+
+      // Setup connection handlers
       conn.on('open', () => {
-        console.log('✅ Connection opened with:', conn.peer);
+        console.log('[PeerManager] ✅ Connection established with:', conn.peer);
         this.connections.set(conn.peer, conn);
         handler(conn);
       });
 
+      conn.on('close', () => {
+        console.log('[PeerManager] 🔌 Connection closed with:', conn.peer);
+        this.connections.delete(conn.peer);
+      });
+
       conn.on('error', (err) => {
-        console.error('Connection error with', conn.peer, ':', err);
+        console.error('[PeerManager] ❌ Connection error with', conn.peer, ':', err);
+        this.connections.delete(conn.peer);
       });
     });
   }
@@ -100,46 +131,51 @@ export class PeerManager {
     }
 
     return new Promise((resolve, reject) => {
-      console.log('🔌 Attempting to connect to:', remotePeerId);
+      console.log('[PeerManager] 🔌 Connecting to peer:', remotePeerId);
 
+      // Create connection
       const conn = this.peer!.connect(remotePeerId, {
-        reliable: true, // Use reliable ordered channel
+        reliable: true,
         serialization: 'json',
       });
 
-      let connected = false;
+      let isConnected = false;
+      const timeout = setTimeout(() => {
+        if (!isConnected) {
+          console.error('[PeerManager] ⏱️ Connection timeout after 30s');
+          conn.close();
+          reject(new Error('Connection timeout - peer may not be available'));
+        }
+      }, 30000);
 
-      // Log connection state changes
-      conn.on('iceStateChanged', (state) => {
-        console.log('🔌 ICE state:', state);
-      });
-
+      // Connection opened successfully
       conn.on('open', () => {
-        connected = true;
-        console.log('✅ Connected to:', remotePeerId);
+        clearTimeout(timeout);
+        isConnected = true;
+        console.log('[PeerManager] ✅ Connected to peer:', remotePeerId);
         this.connections.set(remotePeerId, conn);
         resolve(conn);
       });
 
-      conn.on('error', (error) => {
-        if (!connected) {
-          console.error('❌ Connection error:', error);
-          reject(error);
+      // Connection failed
+      conn.on('error', (err) => {
+        clearTimeout(timeout);
+        if (!isConnected) {
+          console.error('[PeerManager] ❌ Connection failed:', err);
+          reject(err);
         }
       });
 
-      // Increased timeout for NAT traversal (30 seconds)
-      const timeoutId = setTimeout(() => {
-        if (!connected) {
-          console.error('⏱️ Connection timeout after 30 seconds');
-          conn.close();
-          reject(new Error('Connection timeout - peer may not exist or network issues'));
+      // Connection closed before opening
+      conn.on('close', () => {
+        clearTimeout(timeout);
+        if (!isConnected) {
+          console.error('[PeerManager] ❌ Connection closed before opening');
+          reject(new Error('Connection closed by remote peer'));
+        } else {
+          console.log('[PeerManager] 🔌 Connection closed');
+          this.connections.delete(remotePeerId);
         }
-      }, 30000);
-
-      // Clear timeout if connected
-      conn.on('open', () => {
-        clearTimeout(timeoutId);
       });
     });
   }
@@ -150,7 +186,7 @@ export class PeerManager {
   send(peerId: string, data: unknown): boolean {
     const conn = this.connections.get(peerId);
     if (!conn || !conn.open) {
-      console.warn('Cannot send: connection not open for', peerId);
+      console.warn('[PeerManager] Cannot send - connection not open:', peerId);
       return false;
     }
 
@@ -158,7 +194,7 @@ export class PeerManager {
       conn.send(data);
       return true;
     } catch (error) {
-      console.error('Error sending data:', error);
+      console.error('[PeerManager] Error sending data:', error);
       return false;
     }
   }
@@ -167,15 +203,18 @@ export class PeerManager {
    * Broadcast data to all connections
    */
   broadcast(data: unknown): void {
+    let sent = 0;
     for (const [peerId, conn] of this.connections) {
       if (conn.open) {
         try {
           conn.send(data);
+          sent++;
         } catch (error) {
-          console.error(`Error broadcasting to ${peerId}:`, error);
+          console.error(`[PeerManager] Error broadcasting to ${peerId}:`, error);
         }
       }
     }
+    console.log(`[PeerManager] 📡 Broadcast to ${sent} peer(s)`);
   }
 
   /**
@@ -190,7 +229,7 @@ export class PeerManager {
    */
   onClose(conn: DataConnection, handler: () => void): void {
     conn.on('close', () => {
-      console.log('🔌 Connection closed:', conn.peer);
+      console.log('[PeerManager] Connection closed:', conn.peer);
       this.connections.delete(conn.peer);
       handler();
     });
@@ -201,7 +240,9 @@ export class PeerManager {
    */
   onError(handler: ErrorEventHandler): void {
     if (!this.peer) return;
-    this.peer.on('error', handler);
+    this.peer.on('error', (error: any) => {
+      handler(error);
+    });
   }
 
   /**
@@ -240,18 +281,28 @@ export class PeerManager {
    * Disconnect all and destroy peer
    */
   destroy(): void {
+    console.log('[PeerManager] Destroying peer and all connections...');
+
     // Close all connections
     for (const conn of this.connections.values()) {
-      conn.close();
+      try {
+        conn.close();
+      } catch (e) {
+        // Ignore errors during cleanup
+      }
     }
     this.connections.clear();
 
     // Destroy peer
     if (this.peer) {
-      this.peer.destroy();
+      try {
+        this.peer.destroy();
+      } catch (e) {
+        console.error('[PeerManager] Error destroying peer:', e);
+      }
       this.peer = null;
     }
 
-    console.log('🔌 Peer destroyed');
+    console.log('[PeerManager] ✅ Cleanup complete');
   }
 }
