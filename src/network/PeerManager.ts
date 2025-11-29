@@ -27,11 +27,9 @@ export class PeerManager {
           ],
           iceTransportPolicy: 'all' as const,
           iceCandidatePoolSize: 10,
-          // For localhost testing: bundle policy to maximize compatibility
           bundlePolicy: 'max-bundle' as const,
           rtcpMuxPolicy: 'require' as const,
         },
-        // Use the PeerJS cloud server (free) - let it use default settings
       };
 
       // Create peer with custom ID or let PeerJS generate one
@@ -42,9 +40,28 @@ export class PeerManager {
         resolve(id);
       });
 
+      this.peer.on('disconnected', () => {
+        console.warn('⚠️ Peer disconnected from server, attempting to reconnect...');
+        // Attempt to reconnect
+        if (this.peer && !this.peer.destroyed) {
+          this.peer.reconnect();
+        }
+      });
+
+      this.peer.on('close', () => {
+        console.log('🔌 Peer connection closed');
+      });
+
       this.peer.on('error', (error) => {
         console.error('❌ Peer error:', error);
-        reject(error);
+        // Don't reject on certain errors, just log them
+        if (error.type === 'peer-unavailable') {
+          console.error('Peer is not available - they may have disconnected');
+        } else if (error.type === 'network') {
+          console.error('Network error - check internet connection');
+        } else {
+          reject(error);
+        }
       });
     });
   }
