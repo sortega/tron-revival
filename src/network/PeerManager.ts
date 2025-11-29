@@ -24,11 +24,23 @@ export class PeerManager {
         debug: 2, // Errors and warnings only
       };
 
-      // Only add custom ICE servers if needed
-      // PeerJS already includes Google STUN by default
+      // Add both STUN and TURN servers for better NAT traversal
+      // Free TURN servers from Open Relay Project
       config.config = {
         iceServers: [
+          // STUN server for discovering public IP
           { urls: 'stun:stun.l.google.com:19302' },
+          // Free TURN servers for relaying when direct connection fails
+          {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject',
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelayproject',
+            credential: 'openrelayproject',
+          },
         ],
       };
 
