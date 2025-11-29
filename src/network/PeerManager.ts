@@ -19,34 +19,12 @@ export class PeerManager {
    */
   async initialize(customId?: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      // Minimal config - let PeerJS handle defaults
-      const config: any = {
-        debug: 2, // Errors and warnings only
-      };
-
-      // Add both STUN and TURN servers for better NAT traversal
-      // Free TURN servers from Open Relay Project
-      config.config = {
-        iceServers: [
-          // STUN server for discovering public IP
-          { urls: 'stun:stun.l.google.com:19302' },
-          // Free TURN servers for relaying when direct connection fails
-          {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-        ],
-      };
-
-      // Create peer - let PeerJS connect to cloud server
+      // ABSOLUTE MINIMAL CONFIG - Let PeerJS handle everything
+      // No custom config at all to avoid any issues
       console.log('[PeerManager] Creating peer with ID:', customId || 'auto');
-      this.peer = customId ? new Peer(customId, config) : new Peer(config);
+
+      // Try with absolutely no config first
+      this.peer = customId ? new Peer(customId) : new Peer();
 
       // Wait for connection to PeerJS server
       this.peer.on('open', (id) => {
