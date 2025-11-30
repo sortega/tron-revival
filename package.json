@@ -28,6 +28,6 @@
     "vite": "^7.2.4"
   },
   "dependencies": {
-    "peerjs": "^1.5.5"
+    "trystero": "^0.22.0"
   }
 }

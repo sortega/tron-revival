@@ -1,9 +1,9 @@
 /**
  * Guest Manager
  * Manages guest-side networking for connecting to host
+ * Now using Trystero for serverless P2P!
  */
 
-import type { DataConnection } from 'peerjs';
 import { PeerManager } from './PeerManager';
 import {
   type HostToGuestMessage,
@@ -18,7 +18,7 @@ import {
 
 export class GuestManager {
   private peerManager: PeerManager;
-  private hostConnection: DataConnection | null = null;
+  private hostPeerId: string | null = null;
   private localPlayerId: string | null = null;
   private localPlayerNum: number | null = null;
   private roomInfo: RoomInfo | null = null;
@@ -43,39 +43,32 @@ export class GuestManager {
     try {
       console.log(`[GuestManager] Starting join process for room: ${roomId}`);
 
-      // Initialize peer
-      console.log('[GuestManager] Initializing peer...');
-      const myPeerId = await this.peerManager.initialize();
-      console.log(`[GuestManager] ✅ Peer initialized with ID: ${myPeerId}`);
+      // Join the same room as the host
+      console.log('[GuestManager] Joining room...');
+      const myPeerId = await this.peerManager.initialize(roomId);
+      console.log(`[GuestManager] ✅ Joined room with ID: ${myPeerId}`);
 
-      // Connect to host
-      console.log(`[GuestManager] 🔌 Connecting to host: ${roomId}...`);
-      this.hostConnection = await this.peerManager.connect(roomId);
-      console.log(`[GuestManager] ✅ Connected to host`);
+      // Setup connection handler to detect when host appears
+      this.peerManager.onConnection((peerId) => {
+        console.log(`[GuestManager] 👋 Host peer detected: ${peerId}`);
+        this.hostPeerId = peerId;
 
-      // Setup message handler
-      this.peerManager.onData(this.hostConnection, (data) => {
-        console.log('[GuestManager] Received data from host:', data);
-        if (isHostToGuestMessage(data)) {
-          this.handleHostMessage(data);
-        } else {
-          console.warn('[GuestManager] Invalid message from host:', data);
-        }
+        // Setup message handler for host
+        this.peerManager.onData(peerId, (data) => {
+          console.log('[GuestManager] Received data from host:', data);
+          if (isHostToGuestMessage(data)) {
+            this.handleHostMessage(data);
+          } else {
+            console.warn('[GuestManager] Invalid message from host:', data);
+          }
+        });
+
+        // Send join message to host
+        console.log(`[GuestManager] Sending join message to host with name: ${playerName}`);
+        const joinMsg = createJoinMessage(playerName);
+        this.peerManager.send(peerId, joinMsg);
+        console.log(`[GuestManager] ✅ Join message sent, waiting for welcome...`);
       });
-
-      // Setup disconnect handler
-      this.peerManager.onClose(this.hostConnection, () => {
-        console.log('[GuestManager] 🔌 Disconnected from host');
-        if (this.onDisconnectedCallback) {
-          this.onDisconnectedCallback();
-        }
-      });
-
-      // Send join message
-      console.log(`[GuestManager] Sending join message with name: ${playerName}`);
-      const joinMsg = createJoinMessage(playerName);
-      this.hostConnection.send(joinMsg);
-      console.log(`[GuestManager] ✅ Join message sent, waiting for welcome...`);
     } catch (error) {
       console.error('[GuestManager] Error during join:', error);
       throw error;
@@ -142,24 +135,24 @@ export class GuestManager {
    * Send input to host
    */
   sendInput(left: boolean, right: boolean, fire: boolean): void {
-    if (!this.hostConnection || !this.localPlayerId) {
+    if (!this.hostPeerId || !this.localPlayerId) {
       return;
     }
 
     const inputMsg = createInputMessage(this.localPlayerId, left, right, fire);
-    this.hostConnection.send(inputMsg);
+    this.peerManager.send(this.hostPeerId, inputMsg);
   }
 
   /**
    * Send ready status to host
    */
   sendReady(isReady: boolean): void {
-    if (!this.hostConnection || !this.localPlayerId) {
+    if (!this.hostPeerId || !this.localPlayerId) {
       return;
     }
 
     const readyMsg = createReadyMessage(this.localPlayerId, isReady);
-    this.hostConnection.send(readyMsg);
+    this.peerManager.send(this.hostPeerId, readyMsg);
   }
 
   /**

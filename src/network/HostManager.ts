@@ -1,9 +1,9 @@
 /**
  * Host Manager
  * Manages host-side networking for the authoritative game server
+ * Now using Trystero for serverless P2P!
  */
 
-import type { DataConnection } from 'peerjs';
 import { PeerManager } from './PeerManager';
 import {
   type GuestToHostMessage,
@@ -22,7 +22,6 @@ const MAX_PLAYERS = 4;
 
 interface ConnectedGuest {
   peerId: string;
-  connection: DataConnection;
   playerInfo: PlayerInfo;
 }
 
@@ -46,16 +45,14 @@ export class HostManager {
    * Initialize as host and create room
    */
   async createRoom(): Promise<string> {
-    // Initialize peer (PeerJS will generate random ID)
-    this.roomId = await this.peerManager.initialize();
+    // Generate a random room ID
+    this.roomId = this.generateRoomId();
+
+    // Initialize peer manager and join room
+    await this.peerManager.initialize(this.roomId);
 
     // Listen for incoming connections
-    this.peerManager.onConnection((conn) => this.handleGuestConnection(conn));
-
-    // Setup error handler
-    this.peerManager.onError((error) => {
-      console.error('Host peer error:', error);
-    });
+    this.peerManager.onConnection((peerId) => this.handleGuestConnection(peerId));
 
     console.log(`🎮 Room created with ID: ${this.roomId}`);
     return this.roomId;
@@ -64,33 +61,26 @@ export class HostManager {
   /**
    * Handle incoming guest connection
    */
-  private handleGuestConnection(conn: DataConnection): void {
-    const peerId = conn.peer;
-    console.log(`[HostManager] 📞 Incoming connection from: ${peerId}`);
+  private handleGuestConnection(peerId: string): void {
+    console.log(`[HostManager] 📞 Peer joined room: ${peerId}`);
 
     // Check if room is full
     if (this.guests.size >= MAX_PLAYERS - 1) {
       console.log(`[HostManager] ❌ Room full (${this.guests.size}/${MAX_PLAYERS - 1}), rejecting ${peerId}`);
-      conn.send(createErrorMessage('ROOM_FULL', 'Room is full (max 4 players)'));
-      setTimeout(() => conn.close(), 100);
+      this.peerManager.send(peerId, createErrorMessage('ROOM_FULL', 'Room is full (max 4 players)'));
       return;
     }
 
     console.log(`[HostManager] Room has space (${this.guests.size}/${MAX_PLAYERS - 1})`);
 
-    // Setup connection handlers
-    this.peerManager.onData(conn, (data) => {
+    // Setup data handler for this peer
+    this.peerManager.onData(peerId, (data) => {
       console.log(`[HostManager] Received data from ${peerId}:`, data);
       if (isGuestToHostMessage(data)) {
         this.handleGuestMessage(peerId, data);
       } else {
         console.warn(`[HostManager] Invalid message from guest ${peerId}:`, data);
       }
-    });
-
-    this.peerManager.onClose(conn, () => {
-      console.log(`[HostManager] Connection closed for ${peerId}`);
-      this.handleGuestDisconnection(peerId);
     });
 
     console.log(`[HostManager] ✅ Guest ${peerId} connected, waiting for join message...`);
@@ -146,15 +136,8 @@ export class HostManager {
     };
 
     // Store guest
-    const conn = this.peerManager.getConnections().get(peerId);
-    if (!conn) {
-      console.error('Connection not found for:', peerId);
-      return;
-    }
-
     this.guests.set(peerId, {
       peerId,
-      connection: conn,
       playerInfo,
     });
 
@@ -272,6 +255,19 @@ export class HostManager {
    */
   getRoomId(): string | null {
     return this.roomId;
+  }
+
+  /**
+   * Generate a random room ID
+   */
+  private generateRoomId(): string {
+    // Generate a short, readable room code
+    const chars = '0123456789abcdefghijklmnopqrstuvwxyz';
+    let roomId = '';
+    for (let i = 0; i < 8; i++) {
+      roomId += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return roomId;
   }
 
   /**
