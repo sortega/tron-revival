@@ -32,7 +32,7 @@ This document outlines the high-level architecture for the modern web implementa
   - Simple API, no framework overhead
 
 **Why not WebGL?**
-- Canvas 2D is sufficient for pixel-based rendering
+- Canvas 2D is enough for pixel-based rendering
 - Simpler to implement pixel-perfect collision
 - Lower complexity, better maintainability
 - WebGL would be over-engineering for this use case
@@ -59,19 +59,9 @@ Teratron uses a pure P2P architecture with PeerJS for zero-cost multiplayer:
 - **Host-authority model**: One client runs authoritative game loop
 - **WebRTC direct connections**: Low latency P2P between players
 - **Shareable room links**: Create/join rooms via URLs
-- **No custom servers**: Uses PeerJS's free public signaling service
+- **No custom servers**: pure P2P
 - **Cost:** $0/month
-
-**For complete networking design, see: [networking.md](./networking.md)**
-
-This covers:
-- Full PeerJS integration details
-- Menu system design (Local vs Network game)
-- Room creation/joining flow
-- Lobby system with player management
-- Network protocol specification
-- State synchronization strategy
-- Implementation structure
+- **Testing:** it's easy to test in two different browser windows or two devices in the same local network
 
 ### Build Tools
 
@@ -90,23 +80,22 @@ This covers:
 ### High-Level Overview
 
 ```
-                    ┌────────────────────────┐
-                    │ PeerJS Public Servers  │ (Free, already running!)
-                    │  (Signaling only)      │
-                    └───────────┬────────────┘
-                                │ (Initial connection setup only)
+                    ┌──────────────────────────┐
+                    │ Server with static files │
+                    └───────────┬──────────────┘
+                                │ 
                    ┌────────────┼────────────┐
                    │            │            │
                    ▼            ▼            ▼
          ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
          │ Host Client │ │  Client 2   │ │  Client 3   │
          │             │◄┼────────────►│ │             │
-         │ - Game Loop │ │ WebRTC P2P  │◄┤ WebRTC P2P │
+         │ - Game Loop │ │ WebRTC P2P  │◄┤ WebRTC P2P  │
          │ - Authority │ │             │ │             │
          │ - Rendering │ │ - Rendering │ │ - Rendering │
          └─────────────┘ └─────────────┘ └─────────────┘
 
-         After initial setup, all communication is direct P2P
+         All communication is direct P2P
          No custom server needed - just static file hosting!
 ```
 
@@ -128,7 +117,7 @@ This covers:
 **Why peer-to-peer with host authority?**
 - **Zero server costs**: No dedicated game servers needed
 - **Low latency**: Direct connections, no server hop for game data
-- **Perfect for 2-4 players**: WebRTC mesh scales well at this size
+- **Perfect for 2–4 players**: WebRTC mesh scales well at this size
 - **Still authoritative**: Host prevents cheating, ensures consistency
 
 ### Network Architecture
@@ -148,45 +137,24 @@ Key features:
 
 ```
 tron-revival/
-├── src/                     # All TypeScript code (client-side only!)
-│   ├── game/                # Core game logic (runs on host)
-│   │   ├── engine/          # Game loop, physics, collision
-│   │   ├── entities/        # Players, items, projectiles
-│   │   └── maps/            # Map loading, hazards
-│   ├── render/              # Canvas rendering
-│   ├── network/             # P2P connections (PeerJS wrapper)
-│   │   ├── host.ts          # Host-specific logic
-│   │   ├── guest.ts         # Guest-specific logic
-│   │   └── peer-manager.ts  # PeerJS connection management
-│   ├── ui/                  # Menus, lobby, HUD
-│   ├── types/               # TypeScript type definitions
-│   ├── constants.ts         # Game constants
-│   ├── utils.ts             # Shared utilities
-│   └── main.ts              # Entry point
-│
-├── public/                  # Static assets
-│   ├── assets/              # Graphics, sounds, fonts
+├── src/            # All TypeScript code (client-side only!)
+├── public/         # Static assets
+│   ├── assets/     # Graphics, sounds, fonts
 │   └── index.html
 │
-├── design/                  # Design documents
-├── old-tron/                # Original game reference
+├── design/         # Design documents
+├── old-tron/       # Original game reference
 ├── CLAUDE.md
-├── package.json             # Single package!
+├── package.json    # Single package!
 ├── tsconfig.json
 ├── vite.config.ts
 └── README.md
 ```
 
-**No monorepo needed!**
-- Just one package: the client
-- All TypeScript code is client-side
-- No server code to maintain
-- Simpler project structure
-
 ### Key Modules
 
 See detailed designs:
-- [networking.md](./networking.md) - PeerJS networking, menu system, and multiplayer protocol
+- [networking.md](./networking.md) - networking, menu system, and multiplayer protocol
 - [game-state.md](./game-state.md) *(to be created)* - State management
 - [rendering.md](./rendering.md) *(to be created)* - Canvas rendering approach
 - [collision.md](./collision.md) *(to be created)* - Pixel-perfect collision
@@ -268,7 +236,7 @@ interface GameState {
   items: Map<ItemId, ItemState>;
   projectiles: Map<ProjectileId, ProjectileState>;
   portals: [Portal, Portal];
-  mapHazards: MapHazard[]; // Mano, Bandas, etc.
+  mapHazards: MapHazard[];
 
   // Field state
   trails: TrailMap; // Pixel data for collision
