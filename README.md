@@ -16,6 +16,19 @@ See [design/architecture.md](./design/architecture.md) for complete technical de
 
 ## 🚀 Quick Start
 
+### Prerequisites (macOS)
+
+```bash
+# Install system dependencies
+brew bundle
+
+# Set up local HTTPS certificates (one-time)
+mkcert -install
+mkdir -p .certs && cd .certs && mkcert localhost 127.0.0.1 ::1
+```
+
+### Development
+
 ```bash
 # Install dependencies
 npm install

@@ -19,7 +19,7 @@ This document outlines the high-level architecture for the modern web implementa
   - Better tooling and refactoring support
   - Compiles to efficient JavaScript
 
-- **Runtime**: Node.js (server) + Modern browsers (client)
+- **Runtime**: Modern browsers (client-only, pure P2P)
   - Use ES2020+ features
   - Target evergreen browsers (Chrome, Firefox, Safari, Edge)
 
@@ -53,15 +53,16 @@ This document outlines the high-level architecture for the modern web implementa
 
 ### Networking
 
-**Pure Peer-to-Peer with PeerJS**
+**Pure Peer-to-Peer with Trystero**
 
-Teratron uses a pure P2P architecture with PeerJS for zero-cost multiplayer:
+Teratron uses a pure P2P architecture with Trystero for zero-cost, truly serverless multiplayer:
 - **Host-authority model**: One client runs authoritative game loop
 - **WebRTC direct connections**: Low latency P2P between players
+- **Decentralized signaling**: Uses Nostr/BitTorrent/MQTT for peer discovery (no single point of failure)
 - **Shareable room links**: Create/join rooms via URLs
-- **No custom servers**: pure P2P
+- **No servers at all**: Not even for signaling
 - **Cost:** $0/month
-- **Testing:** it's easy to test in two different browser windows or two devices in the same local network
+- **Testing:** Two browser windows or two devices on the same network
 
 ### Build Tools
 
@@ -440,12 +441,11 @@ All messages are sent as JavaScript objects over PeerJS data channels. See netwo
 - 4 players = 6 total connections (manageable)
 - No server bottleneck for game data
 
-**PeerJS public servers:**
-- PeerJS cloud service handles all signaling (free!)
-- Can support thousands of concurrent connections
-- Once P2P connected, PeerJS server not actively used
-- If PeerJS ever has issues, can switch to self-hosted PeerServer
-- Or use alternative service (Trystero, simple-peer, etc.)
+**Trystero signaling:**
+- Uses decentralized networks (Nostr, BitTorrent, MQTT) for peer discovery
+- No single point of failure - if one network is down, others work
+- Once P2P connected, signaling network not actively used
+- Multiple fallback strategies built-in
 
 ## Asset Pipeline
 
@@ -498,7 +498,7 @@ All messages are sent as JavaScript objects over PeerJS data channels. See netwo
 ### Phase 2: Multiplayer Foundation
 *Goal: Get basic online play working*
 
-- PeerJS integration (super simple!)
+- Trystero integration with multiple signaling strategies
 - Room system (create/join via shareable links)
 - Host/guest architecture
 - Basic state synchronization
@@ -506,7 +506,7 @@ All messages are sent as JavaScript objects over PeerJS data channels. See netwo
 - Simple prediction/interpolation
 
 **Deliverables:**
-- 2-player online demo via PeerJS
+- 2-player online demo via Trystero
 - P2P protocol working
 - Shareable room links
 - No server deployment needed!
@@ -551,7 +551,7 @@ All messages are sent as JavaScript objects over PeerJS data channels. See netwo
 - **Cost: FREE**
 
 **No Server Needed!**
-- PeerJS cloud handles all signaling (free!)
+- Trystero uses decentralized networks for signaling (Nostr, BitTorrent, MQTT)
 - No backend code to deploy
 - No databases to manage
 - No server monitoring
@@ -564,24 +564,24 @@ All messages are sent as JavaScript objects over PeerJS data channels. See netwo
                     │  Hosting     │
                     └──────┬───────┘
                            │
-            (Loads PeerJS library from CDN)
-                           │
                            ▼
-                    ┌──────────────┐
-                    │   PeerJS     │ (Free public service)
-                    │   Cloud      │
-                    └──────┬───────┘
-                           │
-                    (Initial setup only)
-                           │
-                           ▼
-              ┌────────────┴────────────┐
-              │   WebRTC P2P Mesh       │
-              │  (Direct connections)   │
-              │  Player 1 ↔ Player 2    │
-              │  Player 1 ↔ Player 3    │
-              │  Player 2 ↔ Player 3    │
-              └─────────────────────────┘
+              ┌─────────────────────────┐
+              │   Trystero Signaling    │
+              │  (Decentralized)        │
+              │  Nostr / BitTorrent /   │
+              │  MQTT relays            │
+              └───────────┬─────────────┘
+                          │
+                   (Peer discovery only)
+                          │
+                          ▼
+              ┌────────────────────────┐
+              │   WebRTC P2P Mesh      │
+              │  (Direct connections)  │
+              │  Player 1 ↔ Player 2   │
+              │  Player 1 ↔ Player 3   │
+              │  Player 2 ↔ Player 3   │
+              └────────────────────────┘
 ```
 
 **Deployment Options (all FREE!):**
@@ -609,20 +609,26 @@ All messages are sent as JavaScript objects over PeerJS data channels. See netwo
 ### Configuration
 
 ```typescript
-// Minimal config needed
-const config = {
-  // PeerJS cloud (free)
-  peerServerHost: 'peerjs.com',
-  peerServerPort: 443,
-  peerServerPath: '/',
-  peerServerSecure: true,
+import { joinRoom } from 'trystero/nostr'; // or /torrent, /mqtt
 
-  // Or use custom PeerServer if needed (optional)
-  // peerServerHost: 'your-peerserver.com',
+// Minimal config - Trystero handles signaling automatically
+const config = {
+  appId: 'teratron-game', // Unique app identifier
+
+  // Optional: Custom relay URLs for better reliability
+  // relayUrls: ['wss://relay.example.com'],
+
+  // Optional: TURN servers for restrictive NATs
+  rtcConfig: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      // Add TURN servers for better connectivity
+    ]
+  }
 };
 ```
 
-**No environment variables needed!** (unless using custom PeerServer)
+**No environment variables needed!** Trystero uses public relays by default.
 
 ## Open Questions
 
@@ -630,28 +636,28 @@ These will be resolved during implementation:
 
 1. **Host update rate:** 30 Hz, 60 Hz, or adaptive?
 2. **State snapshot frequency:** How often to send full state vs deltas?
-3. **PeerJS reliability:** Use PeerJS's default settings or configure data channels?
+3. **Trystero strategy:** Nostr (default), BitTorrent, or MQTT? Or fallback chain?
 4. **Client prediction scope:** Predict just local player, or all entities?
 5. **Data format:** JSON (easier to debug) or binary (more efficient)?
 6. **Multiple canvas layers:** Single or multiple canvases?
 7. **Asset loading strategy:** Preload all, or lazy load by map?
 8. **Browser testing scope:** How far back do we support? (probably just evergreen)
 9. **Host migration:** What happens if host disconnects? (probably just end game for MVP)
-10. **PeerServer fallback:** Self-host PeerServer if PeerJS cloud has issues, or use alternative?
+10. **TURN servers:** Use free public TURN or set up dedicated ones for reliability?
 
 ## Next Steps
 
 1. Create detailed design documents:
-   - [x] `networking.md` - PeerJS P2P protocol and synchronization
+   - [x] `networking.md` - Trystero P2P protocol and synchronization
    - [ ] `game-state.md` - Complete state structure and transitions
    - [ ] `rendering.md` - Canvas rendering implementation
    - [ ] `collision.md` - Collision detection algorithms
 
-2. Set up project (super simple!):
-   - [ ] `npm create vite@latest tron-revival -- --template vanilla-ts`
-   - [ ] `npm install peerjs` (only dependency!)
+2. Set up project:
+   - [ ] `npm create vite@latest . -- --template vanilla-ts`
+   - [ ] `npm install trystero`
    - [ ] Set up folder structure (src/game, src/render, src/network, etc.)
-   - [ ] Configure TypeScript
+   - [ ] Configure TypeScript (strict mode)
 
 3. Begin Phase 1 implementation:
    - [ ] Basic game loop (single player / local multiplayer first)
@@ -664,7 +670,7 @@ These will be resolved during implementation:
 **Cost savings:**
 - **Zero infrastructure costs** - no servers at all!
 - Free static hosting (GitHub Pages, Vercel, Netlify)
-- PeerJS cloud handles signaling (free!)
+- Trystero uses decentralized networks for signaling (free!)
 - Total: **$0/month** to run
 
 **Simplicity:**
@@ -688,6 +694,6 @@ These will be resolved during implementation:
 - Host can theoretically cheat → Fine for friendly games
 - Host leaving ends game → Add migration later if needed
 - Limited to 2-4 players → Perfect for our game design!
-- Relies on PeerJS service → Can self-host PeerServer if needed
+- Relies on public relays → Multiple fallback strategies available
 
 **This is the ideal architecture for a small multiplayer game like Teratron!**

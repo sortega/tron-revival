@@ -1,6 +1,6 @@
-# Networking Design - Multiplayer with PeerJS
+# Networking Design - Multiplayer with Trystero
 
-This document details the multiplayer networking architecture for Teratron Web, using pure peer-to-peer connections with PeerJS.
+This document details the multiplayer networking architecture for Teratron Web, using pure peer-to-peer connections with Trystero.
 
 ## Table of Contents
 
@@ -33,29 +33,30 @@ Teratron uses a pure P2P architecture with one client acting as the authoritativ
 - All players see identical game state
 - Room creation/joining via shareable links
 
-## PeerJS Architecture
+## Trystero Architecture
 
-### Why PeerJS?
+### Why Trystero?
 
-**PeerJS provides:**
-- Free public signaling server (already running!)
+**Trystero provides:**
+- Truly serverless signaling via decentralized networks (Nostr, BitTorrent, MQTT)
+- No single point of failure - multiple fallback strategies
 - Simple WebRTC abstraction (no manual offer/answer/ICE handling)
-- Room/peer ID system built-in
+- Room-based peer discovery built-in
 - Automatic connection management
-- Reliable and unreliable data channels
+- End-to-end encryption
 
 **What we write:** Client-side TypeScript only
 **What we deploy:** Static HTML/CSS/JS files
-**Cost:** $0 (uses PeerJS's free public server)
+**Cost:** $0 (uses public relays)
 
-### How PeerJS Works
+### How Trystero Works
 
 ```
-┌────────────────────────┐
-│ PeerJS Public Servers  │ (Free signaling service)
-│  (Signaling only)      │
-└───────────┬────────────┘
-            │ (Initial connection setup only)
+┌─────────────────────────────┐
+│   Decentralized Signaling   │
+│  (Nostr / BitTorrent / MQTT)│
+└───────────┬─────────────────┘
+            │ (Peer discovery only)
    ┌────────┼────────────┐
    │        │            │
    ▼        ▼            ▼
@@ -67,20 +68,20 @@ Teratron uses a pure P2P architecture with one client acting as the authoritativ
 ```
 
 **Connection Flow:**
-1. Host creates PeerJS peer with unique ID
+1. Host joins a Trystero room with unique app+room ID
 2. Host shares room link: `https://teratron.com/?room=abc123xyz`
 3. Guests open link and extract room ID from URL
-4. Guests create their own PeerJS peers and connect to host's ID
-5. PeerJS handles all WebRTC signaling automatically
-6. Direct P2P connections established
-7. After connection, PeerJS server not actively used (only for keepalive)
+4. Guests join the same Trystero room
+5. Trystero handles peer discovery via decentralized network
+6. Direct P2P connections established via WebRTC
+7. After connection, signaling network not actively used
 
-**Alternatives considered:**
-- **simple-peer**: More control, but more boilerplate
-- **Trystero**: Interesting (uses BitTorrent/IPFS), but less proven
-- **Custom signaling**: Overkill for this project
+**Signaling Strategies:**
+- **Nostr** (default): Uses Nostr relays - reliable, growing network
+- **BitTorrent**: Uses WebTorrent trackers - very decentralized
+- **MQTT**: Uses public MQTT brokers - reliable fallback
 
-**Decision:** Start with PeerJS, can migrate later if needed.
+**Decision:** Use Nostr as primary, with fallback options if needed.
 
 ## Connection Model
 
@@ -99,19 +100,20 @@ Teratron uses a pure P2P architecture with one client acting as the authoritativ
 **State:**
 ```typescript
 class HostManager {
-  private peer: Peer;              // Host's PeerJS peer
-  private connections: Map<string, DataConnection>; // Guest connections
-  private game: Game;               // Authoritative game instance
+  private room: Room;                // Trystero room instance
+  private sendState: ActionSender;   // Broadcast function for game state
+  private sendEvent: ActionSender;   // Broadcast function for events
+  private game: Game;                // Authoritative game instance
   private players: Map<string, PlayerInfo>; // Connected players
 
   // Manages room lifecycle
-  createRoom(): string;             // Returns shareable room ID
-  handleGuestConnection(conn: DataConnection): void;
-  handleGuestDisconnection(playerId: string): void;
+  createRoom(): string;              // Returns shareable room ID
+  handlePeerJoin(peerId: string): void;
+  handlePeerLeave(peerId: string): void;
 
   // Game loop
-  broadcastGameState(): void;       // Send state to all guests
-  processGuestInput(playerId: string, input: InputMessage): void;
+  broadcastGameState(): void;        // Send state to all guests
+  processGuestInput(peerId: string, input: InputMessage): void;
 }
 ```
 
@@ -128,10 +130,11 @@ class HostManager {
 **State:**
 ```typescript
 class GuestManager {
-  private peer: Peer;                    // Guest's PeerJS peer
-  private hostConnection: DataConnection; // Connection to host
+  private room: Room;                    // Trystero room instance
+  private sendInput: ActionSender;       // Send function for inputs
+  private hostPeerId: string | null;     // Host's peer ID
   private localPlayerId: string;         // This guest's player ID
-  private game: Game;                     // For rendering only
+  private game: Game;                    // For rendering only
 
   // Connection
   joinRoom(roomId: string): Promise<void>;
@@ -297,38 +300,42 @@ class GuestManager {
 
 **Flow:**
 1. User clicks "Create Room"
-2. Initialize PeerJS peer:
+2. Generate room ID and join Trystero room:
    ```typescript
-   const peer = new Peer(); // Random ID, or custom: new Peer('abc123xyz')
+   import { joinRoom } from 'trystero/nostr';
+
+   const roomId = generateRoomId(); // e.g., 'abc123xyz'
+   const room = joinRoom({ appId: 'teratron' }, roomId);
+   const shareableLink = `${window.location.origin}/?room=${roomId}`;
    ```
-3. Wait for peer to open:
+3. Set up action channels:
    ```typescript
-   peer.on('open', (id) => {
-     const roomId = id;
-     const shareableLink = `${window.location.origin}/?room=${roomId}`;
-     // Show lobby with shareableLink
-   });
+   const [sendState, getState] = room.makeAction('state');
+   const [sendEvent, getEvent] = room.makeAction('event');
    ```
-4. Listen for guest connections:
+4. Listen for peer connections:
    ```typescript
-   peer.on('connection', (conn) => {
+   room.onPeerJoin(peerId => {
      // New guest connected
-     handleGuestConnection(conn);
+     handlePeerJoin(peerId);
+   });
+   room.onPeerLeave(peerId => {
+     handlePeerLeave(peerId);
    });
    ```
 5. Display lobby with shareable link
 
 **Room ID Generation:**
-- Option 1: Use PeerJS random ID (guaranteed unique)
-- Option 2: Generate custom readable ID (e.g., `game-happy-cat-123`)
-- **Decision:** Use PeerJS random ID for MVP (simpler, no collision risk)
+- Generate short readable ID (e.g., `happy-cat-123`)
+- Combined with appId ensures uniqueness
+- **Decision:** Use nanoid or similar for short, URL-safe IDs
 
 **Room Link Format:**
 ```
 https://teratron.com/?room=abc123xyz
 
 Parameters:
-- room: PeerJS peer ID of the host (required)
+- room: Unique room identifier (required)
 ```
 
 ### Room Joining (Guest)
@@ -340,22 +347,25 @@ Parameters:
    const urlParams = new URLSearchParams(window.location.search);
    const roomId = urlParams.get('room');
    ```
-3. Initialize guest PeerJS peer:
+3. Join the same Trystero room:
    ```typescript
-   const peer = new Peer(); // Random ID for guest
+   import { joinRoom } from 'trystero/nostr';
+
+   const room = joinRoom({ appId: 'teratron' }, roomId);
    ```
-4. Connect to host:
+4. Set up action channels and wait for host:
    ```typescript
-   peer.on('open', () => {
-     const conn = peer.connect(roomId);
-     conn.on('open', () => {
-       // Connected to host!
-       sendJoinMessage(playerName);
-       showLobby();
-     });
-     conn.on('error', (err) => {
-       // Show error: "Room not found" or "Connection failed"
-     });
+   const [sendInput, getInput] = room.makeAction('input');
+   const [, getState] = room.makeAction('state');
+
+   getState((state, peerId) => {
+     // Receiving state from host
+     handleStateUpdate(state);
+   });
+
+   room.onPeerJoin(peerId => {
+     // Could be host or another guest
+     sendJoinMessage(peerId);
    });
    ```
 5. Send join message with player info
@@ -484,7 +494,7 @@ Parameters:
 
 ### Message Types
 
-All messages sent over PeerJS data channels as JavaScript objects (PeerJS handles serialization).
+All messages sent over Trystero action channels as JavaScript objects (Trystero handles serialization).
 
 #### Guest → Host Messages
 
@@ -643,75 +653,70 @@ interface ErrorMessage {
 
 ### Connection Management
 
-**PeerJS Connection Setup:**
+**Trystero Connection Setup:**
 
 ```typescript
-// Host setup
-const hostPeer = new Peer();
-hostPeer.on('open', (id) => {
-  console.log('Host peer ID:', id);
-  // Share room link
+import { joinRoom } from 'trystero/nostr';
+
+// Both host and guest use the same setup pattern
+const room = joinRoom(
+  {
+    appId: 'teratron',
+    // Optional: custom relay URLs
+    // relayUrls: ['wss://relay.example.com'],
+    // Optional: TURN servers for restrictive NATs
+    rtcConfig: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        // Add TURN servers here for better connectivity
+      ]
+    }
+  },
+  roomId
+);
+
+// Set up action channels
+const [sendState, getState] = room.makeAction('state');
+const [sendInput, getInput] = room.makeAction('input');
+const [sendEvent, getEvent] = room.makeAction('event');
+
+// Handle peer connections
+room.onPeerJoin(peerId => {
+  console.log('Peer joined:', peerId);
+  handlePeerJoin(peerId);
 });
 
-hostPeer.on('connection', (conn) => {
-  console.log('Guest connected:', conn.peer);
-
-  conn.on('open', () => {
-    // Connection established
-    handleGuestConnection(conn);
-  });
-
-  conn.on('data', (data) => {
-    // Receive message from guest
-    handleGuestMessage(conn, data);
-  });
-
-  conn.on('close', () => {
-    // Guest disconnected
-    handleGuestDisconnection(conn);
-  });
-
-  conn.on('error', (err) => {
-    console.error('Connection error:', err);
-  });
+room.onPeerLeave(peerId => {
+  console.log('Peer left:', peerId);
+  handlePeerLeave(peerId);
 });
 
-// Guest setup
-const guestPeer = new Peer();
-guestPeer.on('open', () => {
-  const conn = guestPeer.connect(roomId);
-
-  conn.on('open', () => {
-    // Connected to host
-    sendJoinMessage(conn);
-  });
-
-  conn.on('data', (data) => {
-    // Receive message from host
-    handleHostMessage(data);
-  });
-
-  conn.on('close', () => {
-    // Host disconnected
-    handleHostDisconnection();
-  });
-
-  conn.on('error', (err) => {
-    console.error('Connection error:', err);
-    handleConnectionError(err);
-  });
+// Receive messages
+getState((state, peerId) => {
+  handleStateUpdate(state, peerId);
 });
+
+getInput((input, peerId) => {
+  handleInput(input, peerId);
+});
+
+// Send messages
+sendState(gameState);           // Broadcast to all peers
+sendState(gameState, peerId);   // Send to specific peer
+
+// Leave room
+room.leave();
 ```
 
 **Reliability:**
-- PeerJS defaults to reliable ordered channels (like TCP)
+- Trystero uses reliable WebRTC data channels by default
 - Good for our use case (state consistency critical)
-- Future: Use unreliable channels for non-critical data (effects, particles)
+- End-to-end encryption built-in
 
-**Heartbeat (optional):**
-- PeerJS handles connection keepalive automatically
+**Connection Monitoring:**
+- `room.getPeers()` returns array of connected peer IDs
+- `onPeerJoin` / `onPeerLeave` callbacks for connection changes
 - Can add application-level heartbeat if needed
-- Detect silent disconnections (network loss without close event)
 
 ## State Synchronization
 
@@ -925,26 +930,27 @@ function drawTrailForPlayer(player: Player, oldX: number, oldY: number): void {
 
 #### Network Layer
 
-**`src/network/PeerManager.ts`**
-- Thin wrapper around PeerJS
-- Handles peer initialization and lifecycle
+**`src/network/RoomManager.ts`**
+- Wrapper around Trystero
+- Handles room creation/joining
+- Manages action channels
 - Provides type-safe message sending/receiving
 
 **`src/network/HostManager.ts`**
 - Host-specific networking logic
-- Manages guest connections
+- Manages peer connections
 - Broadcasts game state
 - Processes guest inputs
 
 **`src/network/GuestManager.ts`**
 - Guest-specific networking logic
-- Connects to host
+- Joins host's room
 - Sends inputs to host
 - Applies received state
 
 **`src/network/protocol.ts`**
 - TypeScript type definitions for all messages
-- Message serialization/deserialization utilities
+- Message validation utilities
 - Protocol version management
 
 #### UI Layer
@@ -1007,7 +1013,7 @@ src/
 │   └── Game.ts                      (modify)
 │
 ├── network/                         (NEW)
-│   ├── PeerManager.ts               (NEW)
+│   ├── RoomManager.ts               (NEW)
 │   ├── HostManager.ts               (NEW)
 │   ├── GuestManager.ts              (NEW)
 │   └── protocol.ts                  (NEW)
@@ -1038,13 +1044,13 @@ Add to `package.json`:
 ```json
 {
   "dependencies": {
-    "peerjs": "^1.5.2"
-  },
-  "devDependencies": {
-    "@types/peerjs": "^1.2.3"
+    "trystero": "^0.21.0",
+    "nanoid": "^5.0.0"
   }
 }
 ```
+
+Note: Trystero includes TypeScript types, no separate `@types` package needed.
 
 ## Technical Considerations
 
@@ -1141,19 +1147,19 @@ Add to `package.json`:
 
 ## Implementation Phases
 
-### Phase 1: Menu System (Local)
-- Build MainMenu, NetworkMenu UI
-- Room creation/joining flow (no networking yet)
-- Lobby UI with mock data
-- **Goal:** Validate UI flow and design
+### Phase 1: P2P Connection Test
+- Build minimal connection test page
+- Integrate Trystero with Nostr strategy
+- Test peer discovery and connection
+- Add TURN server configuration
+- **Goal:** Verify P2P works in target environments
 
-### Phase 2: Basic P2P Connection
-- Integrate PeerJS
-- Implement PeerManager
-- Create room and generate shareable link
-- Join room via link
-- Display connected players in lobby
-- **Goal:** Prove P2P connection works
+### Phase 2: Menu System & Lobby
+- Build MainMenu, NetworkMenu UI
+- Room creation with shareable links
+- Lobby with player list
+- Ready-up system
+- **Goal:** Complete pre-game flow
 
 ### Phase 3: State Synchronization
 - Implement HostManager and GuestManager
@@ -1165,7 +1171,6 @@ Add to `package.json`:
 ### Phase 4: Multi-player & Polish
 - Support 3-4 players
 - Round state synchronization
-- Ready-up system
 - Connection quality monitoring
 - Error handling and edge cases
 - **Goal:** Production-ready multiplayer
@@ -1178,12 +1183,12 @@ Add to `package.json`:
 2. **State snapshot frequency:** Every tick (60 Hz) or adaptive?
 3. **Message serialization:** JSON (easy to debug) or binary (efficient)?
 4. **Client prediction:** Add for Phase 2 or defer to Phase 3?
-5. **Room ID format:** Random PeerJS ID or custom readable IDs?
+5. **Room ID format:** Use nanoid for short, readable IDs
 6. **QR code sharing:** Implement for mobile sharing?
 7. **Host migration:** Defer to Phase 3+?
 8. **Connection quality UI:** Show RTT/quality indicator?
 9. **Chat system:** Add text chat or just game state?
-10. **Self-hosted PeerServer:** Deploy our own or use PeerJS cloud?
+10. **Trystero strategy fallback:** Try Nostr first, fall back to BitTorrent?
 
 ## Conclusion
 

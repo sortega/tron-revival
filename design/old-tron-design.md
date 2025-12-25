@@ -218,16 +218,16 @@ These require the player to press the action button to use. Ammo displayed in pa
 - **Display**: Shows ammo counter (frames remaining / 70)
 - **Sound**: turbo.wav (on activation)
 
-### Weapon Ammo Distribution
+### Weapon Spawn Distribution
 
-Weapon type spawn weights (out of 500):
-- Type 1 (Shots): 20% (0-19)
-- Type 2 (Rifle): 15% (20-34)
-- Type 3 (Machine gun): 20% (35-54)
-- Type 4 (Heavy missile): 10% (55-64)
-- Type 5 (Lock borders): 15% (65-79)
-- Type 6 (Shotgun): 20% (80-99)
-- Type 7 (Turbo): Remainder
+Weapon type spawn weights (from original ItemLauncher code):
+- Type 1 (Shots): 20% (cases 0-19)
+- Type 2 (Rifle): 15% (cases 20-34)
+- Type 3 (Machine gun): 20% (cases 35-54)
+- Type 5 (Lock borders): 10% (cases 55-64)
+- Type 6 (Shotgun): 15% (cases 65-79)
+- Type 7 (Turbo): 20% (cases 80-99)
+- Type 4 (Heavy missile): Remainder (default case - rare!)
 
 ## Maps
 
