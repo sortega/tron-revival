@@ -1,7 +1,19 @@
-import { ConnectionTest } from './network/ConnectionTest';
+import { ScreenManager } from './screens/ScreenManager';
+import { MainMenu } from './screens/MainMenu';
+import { NetworkLobby } from './screens/NetworkLobby';
+import { PlaceholderGame } from './screens/PlaceholderGame';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
-// For now, show the P2P connection test page
-const test = new ConnectionTest(app);
-test.render();
+// Initialize screen manager
+const screenManager = new ScreenManager(app);
+
+// Set up screen factories
+screenManager.setScreenFactories({
+  mainMenu: () => new MainMenu(app, screenManager),
+  networkLobby: (options) => new NetworkLobby(app, screenManager, options),
+  placeholderGame: (config, connection) => new PlaceholderGame(app, screenManager, config, connection),
+});
+
+// Start the app
+screenManager.init();
