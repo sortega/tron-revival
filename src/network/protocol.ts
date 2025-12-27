@@ -102,10 +102,25 @@ export interface PlayerInputMessage {
   input: GameInput;
 }
 
+// === Tron Game Messages ===
+
+import type { TronGameStateData, TronInput } from '../types/game';
+
+export interface TronStateMessage {
+  type: 'tron_state';
+  state: TronGameStateData;
+  timestamp: number;
+}
+
+export interface TronInputMessage {
+  type: 'tron_input';
+  input: TronInput;
+}
+
 // === Unified Message Types ===
 
 export type LobbyMessage = GuestToHostMessage | HostToGuestMessage;
-export type GameMessage = GameStateMessage | PlayerInputMessage;
+export type GameMessage = GameStateMessage | PlayerInputMessage | TronStateMessage | TronInputMessage;
 
 // Type guards
 

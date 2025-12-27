@@ -1,7 +1,7 @@
 import { ScreenManager } from './screens/ScreenManager';
 import { MainMenu } from './screens/MainMenu';
 import { NetworkLobby } from './screens/NetworkLobby';
-import { PlaceholderGame } from './screens/PlaceholderGame';
+import { TronGame } from './game/TronGame';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -12,7 +12,7 @@ const screenManager = new ScreenManager(app);
 screenManager.setScreenFactories({
   mainMenu: () => new MainMenu(app, screenManager),
   networkLobby: (options) => new NetworkLobby(app, screenManager, options),
-  placeholderGame: (config, connection) => new PlaceholderGame(app, screenManager, config, connection),
+  placeholderGame: (config, connection) => new TronGame(app, screenManager, config, connection),
 });
 
 // Start the app

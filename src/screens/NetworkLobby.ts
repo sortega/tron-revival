@@ -701,6 +701,7 @@ export class NetworkLobby implements Screen {
       players,
       spectators,
       isHost: this.connection.isHostMode(),
+      gameMode: lobbyState.gameMode,
     };
 
     const gameConnection = new GameConnection(

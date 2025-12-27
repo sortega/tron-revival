@@ -190,7 +190,8 @@ export class PlaceholderGame implements Screen {
       // Host receives input from guests and stores it for continuous application
       this.connection.setCallbacks({
         onPlayerInput: (slotIndex, input) => {
-          this.playerInputs.set(slotIndex, { ...input });
+          // Cast to GameInput - PlaceholderGame only uses legacy input format
+          this.playerInputs.set(slotIndex, input as GameInput);
         },
       });
     } else {
