@@ -43,6 +43,24 @@ npm run build
 npm run preview
 ```
 
+## 🌐 Deployment
+
+### Deploy to GitHub Pages
+
+```bash
+npm run deploy
+```
+
+This builds the project and publishes to the `gh-pages` branch. The game will be available at:
+`https://<username>.github.io/tron-revival/`
+
+### First-time setup
+
+After the first deploy, enable GitHub Pages in repository settings:
+1. Go to Settings → Pages
+2. Set Source to "Deploy from a branch"
+3. Select `gh-pages` branch and `/ (root)` folder
+
 ## 📁 Project Structure
 
 ```
