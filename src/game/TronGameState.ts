@@ -10,6 +10,7 @@ import type {
   RoundPhase,
 } from '../types/game';
 import type { GamePlayer } from '../types/game';
+import { LEVELS } from '../types/game';
 import { TronPlayer, getStartingPosition } from './TronPlayer';
 
 const COUNTDOWN_SECONDS = 3;
@@ -52,6 +53,7 @@ export class TronGameState {
   // Match state
   scores: Map<SlotIndex, number> = new Map();
   currentRound: number = 1;
+  currentLevelIndex: number = 0;
   playersReady: Set<SlotIndex> = new Set();
   gameMode: GameMode;
 
@@ -78,6 +80,13 @@ export class TronGameState {
 
     // Initialize players for first round
     this.initRound();
+  }
+
+  // Set level obstacle pixels (called by TronGame after loading level image)
+  setLevelObstacles(obstacles: Set<string>): void {
+    for (const pixel of obstacles) {
+      this.occupiedPixels.add(pixel);
+    }
   }
 
   // Initialize/reset for a new round
@@ -243,6 +252,7 @@ export class TronGameState {
     // Check if all players are ready
     if (this.playersReady.size >= this.players.length) {
       this.currentRound++;
+      this.currentLevelIndex = (this.currentLevelIndex + 1) % LEVELS.length;
       this.initRound();
     }
   }
@@ -313,6 +323,7 @@ export class TronGameState {
     const matchState: TronMatchState = {
       scores: Object.fromEntries(this.scores),
       currentRound: this.currentRound,
+      currentLevelIndex: this.currentLevelIndex,
       playersReady: Array.from(this.playersReady),
       gameMode: this.gameMode,
     };
@@ -345,6 +356,7 @@ export class TronGameState {
 
     // Update match state
     this.currentRound = state.match.currentRound;
+    this.currentLevelIndex = state.match.currentLevelIndex;
     this.gameMode = state.match.gameMode;
     this.playersReady = new Set(state.match.playersReady as SlotIndex[]);
 

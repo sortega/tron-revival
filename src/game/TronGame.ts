@@ -3,6 +3,7 @@
 import type { Screen, ScreenManager } from '../screens/ScreenManager';
 import type { GameConnection } from '../network/GameConnection';
 import type { GameConfig, TronInput, TronGameStateData, TrailSegment } from '../types/game';
+import { LEVELS } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
 import { TronGameState } from './TronGameState';
 import { TronRenderer } from './TronRenderer';
@@ -31,6 +32,10 @@ export class TronGame implements Screen {
   // Last time we processed a frame (for consistent timing)
   private lastFrameTime: number = 0;
   private readonly TARGET_FRAME_TIME = 1000 / 60; // 60fps
+
+  // Track loaded level to detect changes
+  private loadedLevelIndex: number = -1;
+  private levelLoading: boolean = false;
 
   constructor(
     container: HTMLElement,
@@ -168,6 +173,12 @@ export class TronGame implements Screen {
   private processFrame(): void {
     if (!this.inputHandler || !this.renderer || !this.gameState) return;
 
+    // Check if level needs to be loaded (for both host and guest)
+    const currentLevelIndex = this.gameState.currentLevelIndex;
+    if (currentLevelIndex !== this.loadedLevelIndex && !this.levelLoading) {
+      this.loadLevel(currentLevelIndex);
+    }
+
     // Get local input
     const myInput = this.inputHandler.getInput();
     const mySlot = this.connection.getMySlotIndex();
@@ -235,6 +246,27 @@ export class TronGame implements Screen {
   private broadcastState(state: TronGameStateData): void {
     // Broadcast full Tron state to all guests
     this.connection.broadcastTronState(state);
+  }
+
+  private loadLevel(levelIndex: number): void {
+    if (!this.renderer || !this.gameState) return;
+
+    const level = LEVELS[levelIndex];
+    if (!level) return;
+
+    this.levelLoading = true;
+
+    this.renderer.loadLevel(level).then((obstacles) => {
+      // Only host adds obstacles to game state (guests just render the background)
+      if (this.config.isHost && this.gameState) {
+        this.gameState.setLevelObstacles(obstacles);
+      }
+      this.loadedLevelIndex = levelIndex;
+      this.levelLoading = false;
+    }).catch((error) => {
+      console.error('Failed to load level:', error);
+      this.levelLoading = false;
+    });
   }
 
   cleanup(): void {

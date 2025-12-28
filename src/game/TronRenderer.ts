@@ -1,7 +1,7 @@
 // TronRenderer - Canvas rendering for the Tron game
 
 import type { SlotIndex } from '../types/lobby';
-import type { TronRoundState, TronMatchState, TrailSegment } from '../types/game';
+import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
 
@@ -25,6 +25,11 @@ export class TronRenderer {
   // Off-screen canvas for persistent trails
   private trailCanvas: HTMLCanvasElement;
   private trailCtx: CanvasRenderingContext2D;
+
+  // Off-screen canvas for level background
+  private levelCanvas: HTMLCanvasElement;
+  private levelCtx: CanvasRenderingContext2D;
+  private currentLevelId: string | null = null;
 
   // Player configs for rendering
   private players: GamePlayer[];
@@ -77,6 +82,13 @@ export class TronRenderer {
     this.trailCanvas.height = PLAY_HEIGHT;
     this.trailCtx = this.trailCanvas.getContext('2d')!;
     this.trailCtx.imageSmoothingEnabled = false;
+
+    // Create off-screen level canvas
+    this.levelCanvas = document.createElement('canvas');
+    this.levelCanvas.width = PLAY_WIDTH;
+    this.levelCanvas.height = PLAY_HEIGHT;
+    this.levelCtx = this.levelCanvas.getContext('2d')!;
+    this.levelCtx.imageSmoothingEnabled = false;
   }
 
   // Main render function
@@ -84,6 +96,11 @@ export class TronRenderer {
     // Clear the play area
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
+
+    // Draw level background (if any)
+    if (this.currentLevelId !== null) {
+      this.ctx.drawImage(this.levelCanvas, 0, 0);
+    }
 
     // Draw trails from off-screen canvas
     this.ctx.drawImage(this.trailCanvas, 0, 0);
@@ -130,6 +147,58 @@ export class TronRenderer {
   // Clear all trails (for new round)
   clearTrails(): void {
     this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+  }
+
+  // Load a level background and return obstacle pixels
+  // Returns a Promise that resolves with the set of obstacle pixel coordinates
+  async loadLevel(level: LevelDefinition): Promise<Set<string>> {
+    const obstacles = new Set<string>();
+
+    if (level.imagePath === null) {
+      // Blank level - clear level canvas
+      this.levelCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+      this.currentLevelId = null;
+      return obstacles;
+    }
+
+    // Load the level image
+    const img = new Image();
+    img.src = level.imagePath;
+
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error(`Failed to load level image: ${level.imagePath}`));
+    });
+
+    // Draw to level canvas
+    this.levelCtx.drawImage(img, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    this.currentLevelId = level.id;
+
+    // Extract non-black pixels as obstacles
+    const imageData = this.levelCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    const data = imageData.data;
+
+    for (let y = 0; y < PLAY_HEIGHT; y++) {
+      for (let x = 0; x < PLAY_WIDTH; x++) {
+        const idx = (y * PLAY_WIDTH + x) * 4;
+        const r = data[idx] ?? 0;
+        const g = data[idx + 1] ?? 0;
+        const b = data[idx + 2] ?? 0;
+
+        // Non-black pixels are obstacles (threshold to handle near-black colors)
+        if (r > 10 || g > 10 || b > 10) {
+          obstacles.add(`${x},${y}`);
+        }
+      }
+    }
+
+    return obstacles;
+  }
+
+  // Clear level (for blank level)
+  clearLevel(): void {
+    this.levelCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    this.currentLevelId = null;
   }
 
   private drawPlayerHead(x: number, y: number, color: string): void {
