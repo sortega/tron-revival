@@ -23,6 +23,7 @@ import {
 } from '../types/game';
 import { TronPlayer, getStartingPosition, PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
 import { ItemLauncher } from './ItemLauncher';
+import { getSoundManager } from './SoundManager';
 
 const COUNTDOWN_SECONDS = 3;
 
@@ -125,6 +126,9 @@ export class TronGameState {
       this.roundEndTimeout = null;
     }
 
+    // Stop any looping sounds from previous round
+    getSoundManager().stopAllLoops();
+
     this.phase = 'countdown';
     this.countdown = COUNTDOWN_SECONDS;
     this.roundWinner = null;
@@ -205,6 +209,7 @@ export class TronGameState {
     if (this.countdown <= 0) {
       this.countdown = 0;
       this.phase = 'playing';
+      getSoundManager().play('round_start');
     }
   }
 
@@ -291,6 +296,7 @@ export class TronGameState {
     // Kill players that collided
     for (const player of dyingPlayers) {
       player.kill();
+      getSoundManager().play('laughs');
     }
 
     // Spawn items periodically
@@ -314,21 +320,41 @@ export class TronGameState {
     }
 
     // Handle weapon use (action button)
+    const sound = getSoundManager();
     for (const [slotIndex, input] of inputs) {
       const player = this.players.find(p => p.slotIndex === slotIndex);
       if (player?.alive && player.equippedWeapon) {
+        const weaponDef = WEAPON_ITEMS.find(d => d.sprite === player.equippedWeapon!.sprite);
+
         if (player.equippedWeapon.ammo !== undefined) {
           // Shot-based weapon: fire only on rising edge (new press)
           const wasPressed = this.prevActionState.get(slotIndex) || false;
-          if (input.action && !wasPressed) {
-            player.useWeapon();
+          if (input.action && !wasPressed && player.useWeapon()) {
+            if (weaponDef?.useSound) {
+              sound.play(weaponDef.useSound);
+            }
           }
         } else if (player.equippedWeapon.remainingFrames !== undefined) {
           // Time-based weapon: consume duration while held
+          const loopKey = `weapon-${slotIndex}`;
           if (input.action) {
             player.tickWeapon();
+            // Start looping sound if defined
+            if (weaponDef?.loopSound && weaponDef.useSound) {
+              sound.playLoop(weaponDef.useSound, loopKey);
+            }
+            // Stop loop if weapon ran out
+            if (!player.equippedWeapon) {
+              sound.stopLoop(loopKey);
+            }
+          } else {
+            // Action released - stop looping sound
+            sound.stopLoop(loopKey);
           }
         }
+      } else {
+        // Player dead or no weapon - stop any looping sound
+        sound.stopLoop(`weapon-${slotIndex}`);
       }
       // Update previous action state for next frame
       this.prevActionState.set(slotIndex, input.action);
@@ -470,6 +496,8 @@ export class TronGameState {
 
     // Set cooldown to prevent immediate re-teleport
     this.teleportCooldowns.set(player.slotIndex, this.TELEPORT_COOLDOWN_FRAMES);
+
+    getSoundManager().play('teleport');
   }
 
   // Check if player picks up an item
@@ -531,19 +559,19 @@ export class TronGameState {
 
   // Handle item pickup
   private pickupItem(player: TronPlayer, item: GameItem): void {
+    const def = item.category === 'automatic'
+      ? AUTOMATIC_ITEMS.find(d => d.sprite === item.sprite)
+      : WEAPON_ITEMS.find(d => d.sprite === item.sprite);
+
+    if (!def) return;
+
     if (item.category === 'automatic') {
-      const def = AUTOMATIC_ITEMS.find(d => d.sprite === item.sprite);
-      if (def) {
-        // Activate effect (TODO: implement actual effect behavior)
-        player.activateEffect(item.sprite, def.duration || 0);
-      }
+      player.activateEffect(item.sprite, def.duration || 0);
     } else {
-      const def = WEAPON_ITEMS.find(d => d.sprite === item.sprite);
-      if (def) {
-        // Equip weapon (either shot-based with ammo, or time-based with duration)
-        player.equipWeapon(item.sprite, def.ammo, def.duration);
-      }
+      player.equipWeapon(item.sprite, def.ammo, def.duration);
     }
+
+    getSoundManager().play(def.pickupSound || 'item_pickup');
   }
 
   private checkRoundEnd(): void {

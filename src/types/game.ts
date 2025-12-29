@@ -127,6 +127,10 @@ export const LEVELS: LevelDefinition[] = LEVEL_DEFINITIONS.map(def => ({
 // Item category determines activation behavior
 export type ItemCategory = 'automatic' | 'weapon';
 
+// Import and re-export sound types from SoundManager
+import type { PickupSound, UseSound } from '../game/SoundManager';
+export type { PickupSound, UseSound } from '../game/SoundManager';
+
 // Item definition (static configuration)
 export interface ItemDefinition {
   name: string;
@@ -134,6 +138,9 @@ export interface ItemDefinition {
   category: ItemCategory;
   duration?: number;      // Frames at 70fps (automatic items + time-based weapons)
   ammo?: number;          // Shot count (shot-based weapons only)
+  pickupSound?: PickupSound;  // Sound when picked up (default: 'item_pickup')
+  useSound?: UseSound;        // Sound when weapon is used (weapons only)
+  loopSound?: boolean;        // Loop useSound while held (time-based weapons)
 }
 
 // Spawned item in the game world
@@ -162,28 +169,28 @@ export interface ActiveEffect {
 
 // Automatic items (round) - instant activation on pickup
 export const AUTOMATIC_ITEMS: ItemDefinition[] = [
-  { name: 'Crossing', sprite: 'crossing', category: 'automatic', duration: 2100 },        // 30s
-  { name: 'Shield', sprite: 'shield', category: 'automatic', duration: 2100 },            // 30s
-  { name: 'Eraser', sprite: 'eraser', category: 'automatic', duration: 0 },               // Instant
-  { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0 },            // Instant
-  { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0 },    // Instant
-  { name: 'Reverse', sprite: 'reverse', category: 'automatic', duration: 700 },           // 10s
-  { name: 'Slow', sprite: 'automatic_slow', category: 'automatic', duration: 1400 },      // 20s
-  { name: 'Turbo', sprite: 'automatic_turbo', category: 'automatic', duration: 1400 },    // 20s
+  { name: 'Crossing', sprite: 'crossing', category: 'automatic', duration: 2100, pickupSound: 'shield' },  // 30s
+  { name: 'Shield', sprite: 'shield', category: 'automatic', duration: 2100, pickupSound: 'shield' },      // 30s
+  { name: 'Eraser', sprite: 'eraser', category: 'automatic', duration: 0, pickupSound: 'reset' },          // Instant
+  { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0 },                             // Instant
+  { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0 },                     // Instant
+  { name: 'Reverse', sprite: 'reverse', category: 'automatic', duration: 700 },                            // 10s
+  { name: 'Slow', sprite: 'automatic_slow', category: 'automatic', duration: 1400, pickupSound: 'slow' },  // 20s
+  { name: 'Turbo', sprite: 'automatic_turbo', category: 'automatic', duration: 1400, pickupSound: 'turbo' }, // 20s
 ];
 
 // Weapon items (square) - manual activation with action button
 export const WEAPON_ITEMS: ItemDefinition[] = [
   // Shot-based weapons (use ammo)
-  { name: 'Glock', sprite: 'glock', category: 'weapon', ammo: 20 },
-  { name: 'Rifle', sprite: 'rifle', category: 'weapon', ammo: 200 },
-  { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1 },
-  { name: 'Lock Borders', sprite: 'lock_borders', category: 'weapon', ammo: 1 },
-  { name: 'Shotgun', sprite: 'shotgun', category: 'weapon', ammo: 20 },
+  { name: 'Glock', sprite: 'glock', category: 'weapon', ammo: 20, useSound: 'glock' },
+  { name: 'Rifle', sprite: 'rifle', category: 'weapon', ammo: 200, useSound: 'rifle' },
+  { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1, useSound: 'bomb' },
+  { name: 'Lock Borders', sprite: 'lock_borders', category: 'weapon', ammo: 1, useSound: 'alarm' },
+  { name: 'Shotgun', sprite: 'shotgun', category: 'weapon', ammo: 20, useSound: 'shotgun' },
   // Time-based weapons (use duration)
-  { name: 'Uzi', sprite: 'uzi', category: 'weapon', duration: 700 },          // 10s
-  { name: 'Turbo', sprite: 'turbo', category: 'weapon', duration: 700 },      // 10s
-  { name: 'Slow', sprite: 'slow', category: 'weapon', duration: 700 },        // 10s
+  { name: 'Uzi', sprite: 'uzi', category: 'weapon', duration: 700, useSound: 'uzi', loopSound: true }, // 10s
+  { name: 'Turbo', sprite: 'turbo', category: 'weapon', duration: 700, pickupSound: 'turbo' },  // 10s
+  { name: 'Slow', sprite: 'slow', category: 'weapon', duration: 700, pickupSound: 'slow' },     // 10s
 ];
 
 // Item constants
