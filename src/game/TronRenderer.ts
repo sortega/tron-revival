@@ -1,9 +1,10 @@
 // TronRenderer - Canvas rendering for the Tron game
 
 import type { SlotIndex } from '../types/lobby';
-import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition } from '../types/game';
+import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
+import { SpriteAtlas } from '../sprites';
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
@@ -33,6 +34,9 @@ export class TronRenderer {
 
   // Player configs for rendering
   private players: GamePlayer[];
+
+  // Sprite atlas for items/portals
+  private spriteAtlas: SpriteAtlas | null = null;
 
   // Resize handler (stored for cleanup)
   private resizeHandler: () => void;
@@ -89,6 +93,19 @@ export class TronRenderer {
     this.levelCanvas.height = PLAY_HEIGHT;
     this.levelCtx = this.levelCanvas.getContext('2d')!;
     this.levelCtx.imageSmoothingEnabled = false;
+
+    // Load sprite atlas
+    this.loadSprites();
+  }
+
+  // Load sprite atlas for items and portals
+  private async loadSprites(): Promise<void> {
+    try {
+      this.spriteAtlas = new SpriteAtlas();
+      await this.spriteAtlas.load(`${import.meta.env.BASE_URL}assets/sprites/items.json`);
+    } catch (error) {
+      console.error('Failed to load sprite atlas:', error);
+    }
   }
 
   // Main render function
@@ -104,6 +121,13 @@ export class TronRenderer {
 
     // Draw trails from off-screen canvas
     this.ctx.drawImage(this.trailCanvas, 0, 0);
+
+    // Draw teleport portals
+    for (const portal of round.portals) {
+      if (portal.active) {
+        this.drawPortal(portal);
+      }
+    }
 
     // Draw player heads
     for (const playerState of round.players) {
@@ -199,6 +223,34 @@ export class TronRenderer {
   clearLevel(): void {
     this.levelCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     this.currentLevelId = null;
+  }
+
+  // Draw a teleport portal (both endpoints with wrap-around)
+  private drawPortal(portal: TeleportPortal): void {
+    if (!this.spriteAtlas?.isLoaded()) return;
+
+    // Get the animation frame name (portal_01 to portal_30)
+    const frameNum = String(portal.animFrame + 1).padStart(2, '0');
+    const frameName = `portal_${frameNum}`;
+
+    // Draw both endpoints with wrap-around rendering
+    this.spriteAtlas.drawWrapped(
+      this.ctx,
+      frameName,
+      portal.x1,
+      portal.y1,
+      PLAY_WIDTH,
+      PLAY_HEIGHT
+    );
+
+    this.spriteAtlas.drawWrapped(
+      this.ctx,
+      frameName,
+      portal.x2,
+      portal.y2,
+      PLAY_WIDTH,
+      PLAY_HEIGHT
+    );
   }
 
   private drawPlayerHead(x: number, y: number, color: string): void {

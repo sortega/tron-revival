@@ -46,6 +46,7 @@ export interface TronRoundState {
   players: TronPlayerState[];
   countdown: number;           // Seconds remaining in countdown
   roundWinner: SlotIndex | 'draw' | null;
+  portals: TeleportPortal[];   // Active teleport portals
 }
 
 // Match state (scores, ready status)
@@ -71,6 +72,25 @@ export interface TronInput {
   right: boolean;
   action: boolean;  // Ready signal / special action
 }
+
+// === Teleport Portal Types ===
+
+export interface TeleportPortal {
+  id: number;
+  // Entry point
+  x1: number;  // Screen pixel (center)
+  y1: number;  // Screen pixel (center)
+  // Exit point
+  x2: number;  // Screen pixel (center)
+  y2: number;  // Screen pixel (center)
+  active: boolean;
+  animFrame: number;  // Current animation frame (0-29)
+}
+
+// Portal constants
+export const PORTAL_RADIUS = 12;  // Collision radius (inner part of 40x40 sprite)
+export const PORTAL_OUTER_RADIUS = 18;  // Where player appears after teleport
+export const PORTAL_FRAME_COUNT = 30;  // Animation frames (portal_01 to portal_30)
 
 // === Level Types ===
 

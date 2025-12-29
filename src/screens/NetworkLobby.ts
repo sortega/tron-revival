@@ -179,14 +179,14 @@ export class NetworkLobby implements Screen {
       this.connection.joinRoom(this.options.roomId, this.myNickname);
       // Guest will announce after receiving lobby state
 
-      // Set timeout - if no lobby data arrives in 10 seconds, go back to menu
+      // Set timeout - if no lobby data arrives in 20 seconds, go back to menu
       this.connectionTimeoutId = window.setTimeout(() => {
         if (this.lobbyState === null) {
           console.log('[NetworkLobby] Connection timeout - no lobby data received');
           this.connection.disconnect();
           this.screenManager.showMainMenu();
         }
-      }, 10000);
+      }, 20000);
     }
   }
 

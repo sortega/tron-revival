@@ -8,10 +8,11 @@ import type {
   TronInput,
   TrailSegment,
   RoundPhase,
+  TeleportPortal,
 } from '../types/game';
 import type { GamePlayer } from '../types/game';
-import { LEVELS } from '../types/game';
-import { TronPlayer, getStartingPosition } from './TronPlayer';
+import { LEVELS, PORTAL_RADIUS, PORTAL_OUTER_RADIUS, PORTAL_FRAME_COUNT } from '../types/game';
+import { TronPlayer, getStartingPosition, PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
 
 const COUNTDOWN_SECONDS = 3;
 
@@ -60,6 +61,16 @@ export class TronGameState {
   // Trail collision tracking
   occupiedPixels: Set<string> = new Set();
 
+  // Teleport portals
+  portals: TeleportPortal[] = [];
+  private nextPortalId = 0;
+  private readonly PORTAL_MIN_DISTANCE = 100;       // Minimum distance between portal endpoints
+  private readonly PORTAL_MIN_PLAYER_DISTANCE = 80; // Minimum distance from player start positions
+
+  // Track teleport cooldowns to prevent instant re-teleport
+  private teleportCooldowns: Map<SlotIndex, number> = new Map();
+  private readonly TELEPORT_COOLDOWN_FRAMES = 30;   // 0.5 seconds at 60fps
+
   // New trail segments this frame (for network efficiency)
   private frameTrailSegments: Map<SlotIndex, TrailSegment[]> = new Map();
 
@@ -98,6 +109,8 @@ export class TronGameState {
     this.frameTrailSegments.clear();
     this.playersReady.clear();
     this.prevActionState.clear();
+    this.portals = [];
+    this.teleportCooldowns.clear();
 
     const playerCount = this.playerConfigs.length;
 
@@ -123,6 +136,9 @@ export class TronGameState {
         player.reset(startPos.x, startPos.y, startPos.direction);
       });
     }
+
+    // Spawn 2 portals at round start
+    this.spawnPortals();
   }
 
   // Process one game tick (called at ~60fps by host)
@@ -160,6 +176,18 @@ export class TronGameState {
   }
 
   private tickPlaying(inputs: Map<SlotIndex, TronInput>): void {
+    // Animate portals
+    for (const portal of this.portals) {
+      portal.animFrame = (portal.animFrame + 1) % PORTAL_FRAME_COUNT;
+    }
+
+    // Decrement teleport cooldowns
+    for (const [slotIndex, cooldown] of this.teleportCooldowns) {
+      if (cooldown > 0) {
+        this.teleportCooldowns.set(slotIndex, cooldown - 1);
+      }
+    }
+
     // First, update all players and collect new trail segments
     const newSegmentsByPlayer: Map<SlotIndex, TrailSegment[]> = new Map();
 
@@ -169,6 +197,12 @@ export class TronGameState {
       const input = inputs.get(player.slotIndex) || { left: false, right: false, action: false };
       const newSegments = player.update(input);
       newSegmentsByPlayer.set(player.slotIndex, newSegments);
+
+      // Check teleport collision (if not on cooldown)
+      const cooldown = this.teleportCooldowns.get(player.slotIndex) || 0;
+      if (cooldown === 0) {
+        this.checkTeleport(player);
+      }
     }
 
     // Check collisions BEFORE adding new trail pixels
@@ -257,6 +291,116 @@ export class TronGameState {
     }
   }
 
+  // Spawn a single teleport portal pair at round start
+  private spawnPortals(): void {
+    // Get all player starting positions to avoid
+    const playerCount = this.playerConfigs.length;
+    const startPositions: { x: number; y: number }[] = [];
+    for (let i = 0; i < playerCount; i++) {
+      const pos = getStartingPosition(i, playerCount);
+      startPositions.push({ x: pos.x, y: pos.y });
+    }
+
+    // Spawn a single portal pair
+    const portal = this.createPortal(startPositions);
+    if (portal) {
+      this.portals.push(portal);
+    }
+  }
+
+  // Create a single portal, avoiding player positions
+  private createPortal(avoidPositions: { x: number; y: number }[]): TeleportPortal | null {
+    const margin = 30; // Keep portals away from edges
+    const maxAttempts = 100;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // Random position for first endpoint
+      const x1 = margin + Math.random() * (PLAY_WIDTH - 2 * margin);
+      const y1 = margin + Math.random() * (PLAY_HEIGHT - 2 * margin);
+
+      // Random position for second endpoint
+      const x2 = margin + Math.random() * (PLAY_WIDTH - 2 * margin);
+      const y2 = margin + Math.random() * (PLAY_HEIGHT - 2 * margin);
+
+      // Check distance between endpoints
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const endpointDistance = Math.sqrt(dx * dx + dy * dy);
+
+      if (endpointDistance < this.PORTAL_MIN_DISTANCE) {
+        continue;
+      }
+
+      // Check distance from player start positions
+      let tooCloseToPlayer = false;
+      for (const pos of avoidPositions) {
+        const d1 = Math.sqrt((x1 - pos.x) ** 2 + (y1 - pos.y) ** 2);
+        const d2 = Math.sqrt((x2 - pos.x) ** 2 + (y2 - pos.y) ** 2);
+        if (d1 < this.PORTAL_MIN_PLAYER_DISTANCE || d2 < this.PORTAL_MIN_PLAYER_DISTANCE) {
+          tooCloseToPlayer = true;
+          break;
+        }
+      }
+
+      if (tooCloseToPlayer) {
+        continue;
+      }
+
+      // Valid portal position found
+      return {
+        id: this.nextPortalId++,
+        x1: Math.floor(x1),
+        y1: Math.floor(y1),
+        x2: Math.floor(x2),
+        y2: Math.floor(y2),
+        active: true,
+        animFrame: Math.floor(Math.random() * PORTAL_FRAME_COUNT), // Random start frame
+      };
+    }
+
+    return null;
+  }
+
+  // Check if player is touching a portal and teleport them
+  private checkTeleport(player: TronPlayer): void {
+    const px = player.getScreenX();
+    const py = player.getScreenY();
+
+    for (const portal of this.portals) {
+      if (!portal.active) continue;
+
+      // Check distance to first endpoint
+      const d1 = Math.sqrt((px - portal.x1) ** 2 + (py - portal.y1) ** 2);
+      if (d1 < PORTAL_RADIUS) {
+        this.teleportPlayer(player, portal.x2, portal.y2);
+        return;
+      }
+
+      // Check distance to second endpoint
+      const d2 = Math.sqrt((px - portal.x2) ** 2 + (py - portal.y2) ** 2);
+      if (d2 < PORTAL_RADIUS) {
+        this.teleportPlayer(player, portal.x1, portal.y1);
+        return;
+      }
+    }
+  }
+
+  // Teleport a player to the outer ring of a portal, maintaining direction
+  private teleportPlayer(player: TronPlayer, portalX: number, portalY: number): void {
+    // Calculate exit position on the outer ring of the destination portal
+    // Player appears on the outer edge, moving in the same direction
+    const dirRad = (player.direction * Math.PI) / 180;
+    const exitX = portalX + Math.cos(dirRad) * PORTAL_OUTER_RADIUS;
+    const exitY = portalY + Math.sin(dirRad) * PORTAL_OUTER_RADIUS;
+
+    // Update player position (convert to fixed-point)
+    player.x = Math.floor(exitX * 1000);
+    player.y = Math.floor(exitY * 1000);
+
+    // Set cooldown to prevent immediate re-teleport
+    this.teleportCooldowns.set(player.slotIndex, this.TELEPORT_COOLDOWN_FRAMES);
+  }
+
   private checkRoundEnd(): void {
     const alivePlayers = this.players.filter(p => p.alive);
 
@@ -318,6 +462,7 @@ export class TronGameState {
       players: this.players.map(p => p.serialize()),
       countdown: this.countdown,
       roundWinner: this.roundWinner,
+      portals: this.portals,
     };
 
     const matchState: TronMatchState = {
@@ -345,6 +490,7 @@ export class TronGameState {
     this.phase = state.round.phase;
     this.countdown = state.round.countdown;
     this.roundWinner = state.round.roundWinner;
+    this.portals = state.round.portals;
 
     // Update player states
     for (const playerState of state.round.players) {
