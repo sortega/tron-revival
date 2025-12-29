@@ -1,7 +1,7 @@
 // TronRenderer - Canvas rendering for the Tron game
 
 import type { SlotIndex } from '../types/lobby';
-import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal } from '../types/game';
+import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
 import { SpriteAtlas } from '../sprites';
@@ -11,24 +11,16 @@ const CANVAS_HEIGHT = 600;
 const STATUS_WIDTH = 50;
 const PLAYER_HEAD_SIZE = 1;
 
-// Slot colors for the status panel when slot is empty
-const SLOT_COLORS: Record<number, string> = {
-  0: '#f44',  // Red
-  1: '#4f4',  // Green
-  2: '#44f',  // Blue
-  3: '#ff4',  // Yellow
-};
-
 export class TronRenderer {
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
+  private readonly canvas: HTMLCanvasElement;
+  private readonly ctx: CanvasRenderingContext2D;
 
   // Off-screen canvas for persistent trails
-  private trailCanvas: HTMLCanvasElement;
+  private readonly trailCanvas: HTMLCanvasElement;
   private trailCtx: CanvasRenderingContext2D;
 
   // Off-screen canvas for level background
-  private levelCanvas: HTMLCanvasElement;
+  private readonly levelCanvas: HTMLCanvasElement;
   private levelCtx: CanvasRenderingContext2D;
   private currentLevelId: string | null = null;
 
@@ -39,7 +31,7 @@ export class TronRenderer {
   private spriteAtlas: SpriteAtlas | null = null;
 
   // Resize handler (stored for cleanup)
-  private resizeHandler: () => void;
+  private readonly resizeHandler: () => void;
 
   constructor(container: HTMLElement, players: GamePlayer[]) {
     this.players = players;
@@ -94,8 +86,10 @@ export class TronRenderer {
     this.levelCtx = this.levelCanvas.getContext('2d')!;
     this.levelCtx.imageSmoothingEnabled = false;
 
-    // Load sprite atlas
-    this.loadSprites();
+    // Load sprite atlas asynchronously - rendering methods check isLoaded() and
+    // gracefully skip drawing if sprites aren't ready yet. The countdown phase
+    // provides enough time for loading before gameplay begins.
+    void this.loadSprites();
   }
 
   // Load sprite atlas for items and portals
@@ -124,8 +118,13 @@ export class TronRenderer {
 
     // Draw teleport portals
     for (const portal of round.portals) {
-      if (portal.active) {
-        this.drawPortal(portal);
+      this.drawPortal(portal);
+    }
+
+    // Draw items
+    for (const item of round.items) {
+      if (item.active) {
+        this.drawItem(item);
       }
     }
 
@@ -141,7 +140,7 @@ export class TronRenderer {
     }
 
     // Draw status panel
-    this.renderStatusPanel(match);
+    this.renderStatusPanel(round.players);
 
     // Draw overlays based on phase
     switch (round.phase) {
@@ -219,12 +218,6 @@ export class TronRenderer {
     return obstacles;
   }
 
-  // Clear level (for blank level)
-  clearLevel(): void {
-    this.levelCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    this.currentLevelId = null;
-  }
-
   // Draw a teleport portal (both endpoints with wrap-around)
   private drawPortal(portal: TeleportPortal): void {
     if (!this.spriteAtlas?.isLoaded()) return;
@@ -253,6 +246,24 @@ export class TronRenderer {
     );
   }
 
+  // Draw an item on the play area
+  private drawItem(item: GameItem): void {
+    if (!this.spriteAtlas?.isLoaded()) return;
+
+    // Mystery items show the random_item sprite instead of their actual sprite
+    const spriteName = item.mystery ? 'random_item' : item.sprite;
+
+    // Draw with wrap-around rendering using sprite name directly
+    this.spriteAtlas.drawWrapped(
+      this.ctx,
+      spriteName,
+      item.x,
+      item.y,
+      PLAY_WIDTH,
+      PLAY_HEIGHT
+    );
+  }
+
   private drawPlayerHead(x: number, y: number, color: string): void {
     // Draw a white head with colored glow
     const offset = Math.floor(PLAYER_HEAD_SIZE / 2);
@@ -268,50 +279,83 @@ export class TronRenderer {
     this.ctx.shadowBlur = 0;
   }
 
-  private renderStatusPanel(match: TronMatchState): void {
+  private renderStatusPanel(playerStates: TronPlayerState[]): void {
     const panelX = PLAY_WIDTH;
     const slotHeight = CANVAS_HEIGHT / 4;
+
+    // Draw sidebar background sprite (50x600, covers all 4 slots)
+    if (this.spriteAtlas?.isLoaded()) {
+      this.spriteAtlas.draw(
+        this.ctx,
+        'sidebar',
+        panelX + STATUS_WIDTH / 2,
+        CANVAS_HEIGHT / 2
+      );
+    }
 
     for (let i = 0; i < 4; i++) {
       const y = i * slotHeight;
       const slotIndex = i as SlotIndex;
       const player = this.players.find(p => p.slotIndex === slotIndex);
+      const playerState = playerStates.find(p => p.slotIndex === slotIndex);
 
-      // Background color for slot
-      if (player) {
-        this.ctx.fillStyle = player.color;
-      } else {
-        // Empty slot - dimmed default color
-        this.ctx.fillStyle = this.dimColor(SLOT_COLORS[i] || '#333');
-      }
-      this.ctx.fillRect(panelX, y, STATUS_WIDTH, slotHeight);
+      if (player && playerState) {
+        const centerX = panelX + STATUS_WIDTH / 2;
+        const hasWeapon = !!playerState.equippedWeapon;
+        const hasEffect = playerState.activeEffects && playerState.activeEffects.length > 0;
 
-      // Score
-      if (player) {
-        const score = match.scores[slotIndex] || 0;
-        this.ctx.fillStyle = '#fff';
-        this.ctx.font = 'bold 24px monospace';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
-        this.ctx.fillText(String(score), panelX + STATUS_WIDTH / 2, y + slotHeight / 2);
-
-        // Ready indicator
-        if (match.playersReady.includes(slotIndex)) {
-          this.ctx.fillStyle = '#0f0';
-          this.ctx.font = '12px monospace';
-          this.ctx.fillText('READY', panelX + STATUS_WIDTH / 2, y + slotHeight - 15);
+        // Layout: weapon on top half, effect on bottom half
+        // Draw equipped weapon icon and ammo (top half)
+        if (hasWeapon && playerState.equippedWeapon && this.spriteAtlas?.isLoaded()) {
+          // Draw weapon sidebar icon (uses _sidebar sprite)
+          this.spriteAtlas.draw(
+            this.ctx,
+            playerState.equippedWeapon.sprite + '_sidebar',
+            centerX,
+            y + slotHeight * 0.25
+          );
+          // Draw ammo/time below icon in black
+          const { ammo, remainingFrames } = playerState.equippedWeapon;
+          if (remainingFrames !== undefined) {
+            // Time-based weapon: show seconds
+            this.ctx.fillStyle = '#000';
+            this.ctx.font = 'bold 14px monospace';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'top';
+            this.ctx.fillText(`${Math.ceil(remainingFrames / 60)}s`, centerX, y + slotHeight * 0.25 + 22);
+          } else if (ammo !== undefined && ammo > 1) {
+            // Shot-based weapon: show ammo count (skip single-use)
+            this.ctx.fillStyle = '#000';
+            this.ctx.font = 'bold 14px monospace';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'top';
+            this.ctx.fillText(String(ammo), centerX, y + slotHeight * 0.25 + 22);
+          }
         }
+
+        // Draw active effect icon and timer (bottom half)
+        if (hasEffect) {
+          const effect = playerState.activeEffects[0];
+          if (effect && this.spriteAtlas?.isLoaded()) {
+            // Draw effect sidebar icon (uses _sidebar sprite)
+            this.spriteAtlas.draw(
+              this.ctx,
+              effect.sprite + '_sidebar',
+              centerX,
+              y + slotHeight * 0.75
+            );
+            // Draw remaining seconds below icon in black
+            const remainingSecs = Math.ceil(effect.remainingFrames / 60);
+            this.ctx.fillStyle = '#000';
+            this.ctx.font = 'bold 14px monospace';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'top';
+            this.ctx.fillText(`${remainingSecs}s`, centerX, y + slotHeight * 0.75 + 22);
+          }
+        }
+
       }
-
-      // Border between slots
-      this.ctx.strokeStyle = '#000';
-      this.ctx.lineWidth = 2;
-      this.ctx.strokeRect(panelX, y, STATUS_WIDTH, slotHeight);
     }
-
-    // Outer border
-    this.ctx.strokeStyle = '#333';
-    this.ctx.strokeRect(panelX, 0, STATUS_WIDTH, CANVAS_HEIGHT);
   }
 
   private drawCountdownOverlay(countdown: number): void {
@@ -415,27 +459,6 @@ export class TronRenderer {
     this.ctx.textAlign = 'center';
     const instructionY = startY + this.players.length * 35 + 40;
     this.ctx.fillText('Press SPACE when ready', PLAY_WIDTH / 2, instructionY);
-  }
-
-  private dimColor(color: string): string {
-    // Dim a hex color by reducing its brightness
-    // Simple implementation - just make it darker
-    if (color.startsWith('#') && color.length === 4) {
-      // Convert #RGB to #RRGGBB
-      const r = color[1];
-      const g = color[2];
-      const b = color[3];
-      color = `#${r}${r}${g}${g}${b}${b}`;
-    }
-
-    if (color.startsWith('#') && color.length === 7) {
-      const r = Math.floor(parseInt(color.slice(1, 3), 16) * 0.3);
-      const g = Math.floor(parseInt(color.slice(3, 5), 16) * 0.3);
-      const b = Math.floor(parseInt(color.slice(5, 7), 16) * 0.3);
-      return `rgb(${r}, ${g}, ${b})`;
-    }
-
-    return '#222';
   }
 
   // Clean up

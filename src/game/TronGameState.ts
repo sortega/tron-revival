@@ -9,10 +9,20 @@ import type {
   TrailSegment,
   RoundPhase,
   TeleportPortal,
+  GameItem,
 } from '../types/game';
 import type { GamePlayer } from '../types/game';
-import { LEVELS, PORTAL_RADIUS, PORTAL_OUTER_RADIUS, PORTAL_FRAME_COUNT } from '../types/game';
+import {
+  LEVELS,
+  PORTAL_RADIUS,
+  PORTAL_OUTER_RADIUS,
+  PORTAL_FRAME_COUNT,
+  AUTOMATIC_ITEMS,
+  WEAPON_ITEMS,
+  ITEM_COLLISION_RADIUS,
+} from '../types/game';
 import { TronPlayer, getStartingPosition, PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
+import { ItemLauncher } from './ItemLauncher';
 
 const COUNTDOWN_SECONDS = 3;
 
@@ -67,15 +77,22 @@ export class TronGameState {
   private readonly PORTAL_MIN_DISTANCE = 100;       // Minimum distance between portal endpoints
   private readonly PORTAL_MIN_PLAYER_DISTANCE = 80; // Minimum distance from player start positions
 
+  // Items
+  items: GameItem[] = [];
+  private itemLauncher = new ItemLauncher();
+
   // Track teleport cooldowns to prevent instant re-teleport
   private teleportCooldowns: Map<SlotIndex, number> = new Map();
-  private readonly TELEPORT_COOLDOWN_FRAMES = 30;   // 0.5 seconds at 60fps
+  private readonly TELEPORT_COOLDOWN_FRAMES = 35;   // 0.5 seconds at 70fps
 
   // New trail segments this frame (for network efficiency)
   private frameTrailSegments: Map<SlotIndex, TrailSegment[]> = new Map();
 
   // Track previous action state for one-shot ready detection
   private prevActionState: Map<SlotIndex, boolean> = new Map();
+
+  // Timeout for round end transition (stored for cleanup)
+  private roundEndTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Player configs for restarting rounds
   private playerConfigs: GamePlayer[];
@@ -102,6 +119,12 @@ export class TronGameState {
 
   // Initialize/reset for a new round
   initRound(): void {
+    // Clear any pending round-end timeout
+    if (this.roundEndTimeout) {
+      clearTimeout(this.roundEndTimeout);
+      this.roundEndTimeout = null;
+    }
+
     this.phase = 'countdown';
     this.countdown = COUNTDOWN_SECONDS;
     this.roundWinner = null;
@@ -111,6 +134,8 @@ export class TronGameState {
     this.prevActionState.clear();
     this.portals = [];
     this.teleportCooldowns.clear();
+    this.items = [];
+    this.itemLauncher.reset();
 
     const playerCount = this.playerConfigs.length;
 
@@ -139,9 +164,17 @@ export class TronGameState {
 
     // Spawn 2 portals at round start
     this.spawnPortals();
+
+    // Spawn initial items (6 items at round start)
+    this.itemLauncher.spawnInitialItems(this.items, () =>
+      this.players.map(p => ({
+        x: p.getScreenX(),
+        y: p.getScreenY()
+      }))
+    );
   }
 
-  // Process one game tick (called at ~60fps by host)
+  // Process one game tick (called at ~70fps by host)
   tick(inputs: Map<SlotIndex, TronInput>): void {
     // Clear frame trail segments
     this.frameTrailSegments.clear();
@@ -167,7 +200,7 @@ export class TronGameState {
   }
 
   private tickCountdown(): void {
-    this.countdown -= 1 / 60; // Assuming 60fps
+    this.countdown -= 1 / 70; // Assuming 70fps
 
     if (this.countdown <= 0) {
       this.countdown = 0;
@@ -258,6 +291,47 @@ export class TronGameState {
     // Kill players that collided
     for (const player of dyingPlayers) {
       player.kill();
+    }
+
+    // Spawn items periodically
+    this.itemLauncher.tick(this.items, () =>
+      this.players.filter(p => p.alive).map(p => ({
+        x: p.getScreenX(),
+        y: p.getScreenY()
+      }))
+    );
+
+    // Check item pickups for alive players
+    for (const player of this.players) {
+      if (player.alive) {
+        this.checkItemPickup(player);
+      }
+    }
+
+    // Tick player effects (decrement durations)
+    for (const player of this.players) {
+      player.tickEffects();
+    }
+
+    // Handle weapon use (action button)
+    for (const [slotIndex, input] of inputs) {
+      const player = this.players.find(p => p.slotIndex === slotIndex);
+      if (player?.alive && player.equippedWeapon) {
+        if (player.equippedWeapon.ammo !== undefined) {
+          // Shot-based weapon: fire only on rising edge (new press)
+          const wasPressed = this.prevActionState.get(slotIndex) || false;
+          if (input.action && !wasPressed) {
+            player.useWeapon();
+          }
+        } else if (player.equippedWeapon.remainingFrames !== undefined) {
+          // Time-based weapon: consume duration while held
+          if (input.action) {
+            player.tickWeapon();
+          }
+        }
+      }
+      // Update previous action state for next frame
+      this.prevActionState.set(slotIndex, input.action);
     }
 
     // Check win condition
@@ -353,7 +427,6 @@ export class TronGameState {
         y1: Math.floor(y1),
         x2: Math.floor(x2),
         y2: Math.floor(y2),
-        active: true,
         animFrame: Math.floor(Math.random() * PORTAL_FRAME_COUNT), // Random start frame
       };
     }
@@ -367,8 +440,6 @@ export class TronGameState {
     const py = player.getScreenY();
 
     for (const portal of this.portals) {
-      if (!portal.active) continue;
-
       // Check distance to first endpoint
       const d1 = Math.sqrt((px - portal.x1) ** 2 + (py - portal.y1) ** 2);
       if (d1 < PORTAL_RADIUS) {
@@ -399,6 +470,80 @@ export class TronGameState {
 
     // Set cooldown to prevent immediate re-teleport
     this.teleportCooldowns.set(player.slotIndex, this.TELEPORT_COOLDOWN_FRAMES);
+  }
+
+  // Check if player picks up an item
+  private checkItemPickup(player: TronPlayer): void {
+    const px = player.getScreenX();
+    const py = player.getScreenY();
+
+    for (const item of this.items) {
+      if (!item.active) continue;
+
+      let collision = false;
+
+      if (item.mystery) {
+        // Triangular collision for mystery items (triangle pointing up)
+        collision = this.pointInTriangle(
+          px, py,
+          item.x, item.y - ITEM_COLLISION_RADIUS,                    // Top vertex
+          item.x - ITEM_COLLISION_RADIUS, item.y + ITEM_COLLISION_RADIUS,  // Bottom-left
+          item.x + ITEM_COLLISION_RADIUS, item.y + ITEM_COLLISION_RADIUS   // Bottom-right
+        );
+      } else if (item.category === 'automatic') {
+        // Circular collision for automatic (round) items
+        const dist = Math.sqrt((px - item.x) ** 2 + (py - item.y) ** 2);
+        collision = dist < ITEM_COLLISION_RADIUS;
+      } else {
+        // Square/box collision for weapon (square) items
+        const halfSize = ITEM_COLLISION_RADIUS;
+        collision = px >= item.x - halfSize && px <= item.x + halfSize &&
+                    py >= item.y - halfSize && py <= item.y + halfSize;
+      }
+
+      if (collision) {
+        this.pickupItem(player, item);
+        item.active = false;
+      }
+    }
+  }
+
+  // Check if point (px, py) is inside triangle defined by vertices (x1,y1), (x2,y2), (x3,y3)
+  private pointInTriangle(
+    px: number, py: number,
+    x1: number, y1: number,
+    x2: number, y2: number,
+    x3: number, y3: number
+  ): boolean {
+    // Using barycentric coordinates / sign method
+    const sign = (p1x: number, p1y: number, p2x: number, p2y: number, p3x: number, p3y: number) =>
+      (p1x - p3x) * (p2y - p3y) - (p2x - p3x) * (p1y - p3y);
+
+    const d1 = sign(px, py, x1, y1, x2, y2);
+    const d2 = sign(px, py, x2, y2, x3, y3);
+    const d3 = sign(px, py, x3, y3, x1, y1);
+
+    const hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+    const hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+
+    return !(hasNeg && hasPos);
+  }
+
+  // Handle item pickup
+  private pickupItem(player: TronPlayer, item: GameItem): void {
+    if (item.category === 'automatic') {
+      const def = AUTOMATIC_ITEMS.find(d => d.sprite === item.sprite);
+      if (def) {
+        // Activate effect (TODO: implement actual effect behavior)
+        player.activateEffect(item.sprite, def.duration || 0);
+      }
+    } else {
+      const def = WEAPON_ITEMS.find(d => d.sprite === item.sprite);
+      if (def) {
+        // Equip weapon (either shot-based with ammo, or time-based with duration)
+        player.equipWeapon(item.sprite, def.ammo, def.duration);
+      }
+    }
   }
 
   private checkRoundEnd(): void {
@@ -445,13 +590,13 @@ export class TronGameState {
     }
 
     // Transition to waiting after a brief delay
-    // In the actual implementation, this happens after some frames
     // Note: Don't clear playersReady here - players can signal ready during round_end
     // and their status should be preserved. playersReady is cleared in initRound().
-    setTimeout(() => {
+    this.roundEndTimeout = setTimeout(() => {
       if (this.phase === 'round_end') {
         this.phase = 'waiting_ready';
       }
+      this.roundEndTimeout = null;
     }, 2000);
   }
 
@@ -463,6 +608,7 @@ export class TronGameState {
       countdown: this.countdown,
       roundWinner: this.roundWinner,
       portals: this.portals,
+      items: this.items,
     };
 
     const matchState: TronMatchState = {
@@ -491,6 +637,7 @@ export class TronGameState {
     this.countdown = state.round.countdown;
     this.roundWinner = state.round.roundWinner;
     this.portals = state.round.portals;
+    this.items = state.round.items || [];
 
     // Update player states
     for (const playerState of state.round.players) {

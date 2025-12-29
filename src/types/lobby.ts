@@ -39,10 +39,6 @@ export function getSlotColorName(mode: GameMode, slotIndex: SlotIndex): string {
   return slotIndex % 2 === 0 ? 'Purple' : 'Brown';
 }
 
-export function getTeam(slotIndex: SlotIndex): 1 | 2 {
-  return slotIndex % 2 === 0 ? 1 : 2;
-}
-
 export interface PlayerSlot {
   slotIndex: SlotIndex;
   peerId: string | null;  // null = slot is open

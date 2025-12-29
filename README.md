@@ -41,6 +41,12 @@ npm run build
 
 # Preview production build
 npm run preview
+
+# Rebuild sprite sheet (after adding/modifying sprites in public/assets/sprites/items/)
+npm run sprites
+
+# Deploy to GitHub Pages
+npm run deploy
 ```
 
 ## 🌐 Deployment

@@ -1,7 +1,7 @@
 // TronPlayer - Player entity with movement and trail
 
 import type { SlotIndex } from '../types/lobby';
-import type { TronPlayerState, TrailSegment, TronInput } from '../types/game';
+import type { TronPlayerState, TrailSegment, TronInput, EquippedWeapon, ActiveEffect } from '../types/game';
 
 // Game constants
 export const PLAY_WIDTH = 750;
@@ -55,6 +55,10 @@ export class TronPlayer {
   // Track previous screen position for diagonal collision detection
   prevScreenX: number = -1;
   prevScreenY: number = -1;
+
+  // Item state
+  equippedWeapon: EquippedWeapon | null = null;
+  activeEffects: ActiveEffect[] = [];
 
   constructor(
     slotIndex: SlotIndex,
@@ -176,6 +180,63 @@ export class TronPlayer {
     this.direction = direction;
     this.alive = true;
     this.trail = [];
+    this.equippedWeapon = null;
+    this.activeEffects = [];
+  }
+
+  // Equip a weapon (replaces current weapon)
+  equipWeapon(sprite: string, ammo?: number, duration?: number): void {
+    this.equippedWeapon = {
+      sprite,
+      ...(ammo !== undefined && { ammo }),
+      ...(duration !== undefined && { remainingFrames: duration }),
+    };
+  }
+
+  // Activate an effect (stacks with existing effects)
+  activateEffect(sprite: string, durationFrames: number): void {
+    // If effect already exists, refresh duration
+    const existing = this.activeEffects.find(e => e.sprite === sprite);
+    if (existing) {
+      existing.remainingFrames = Math.max(existing.remainingFrames, durationFrames);
+    } else if (durationFrames > 0) {
+      // Only add if duration > 0 (instant effects don't get added)
+      this.activeEffects.push({ sprite, remainingFrames: durationFrames });
+    }
+  }
+
+  // Use equipped weapon - for shot-based weapons (reduces ammo, returns true if fired)
+  useWeapon(): boolean {
+    if (!this.equippedWeapon || !this.equippedWeapon.ammo || this.equippedWeapon.ammo <= 0) {
+      return false;
+    }
+    this.equippedWeapon.ammo--;
+    if (this.equippedWeapon.ammo <= 0) {
+      this.equippedWeapon = null;
+    }
+    return true;
+  }
+
+  // Tick time-based weapon (decrement duration while action held)
+  tickWeapon(): void {
+    if (!this.equippedWeapon?.remainingFrames) return;
+    this.equippedWeapon.remainingFrames--;
+    if (this.equippedWeapon.remainingFrames <= 0) {
+      this.equippedWeapon = null;
+    }
+  }
+
+  // Tick active effects (decrement durations, remove expired)
+  tickEffects(): void {
+    for (const effect of this.activeEffects) {
+      effect.remainingFrames--;
+    }
+    this.activeEffects = this.activeEffects.filter(e => e.remainingFrames > 0);
+  }
+
+  // Check if player has a specific effect active
+  hasEffect(sprite: string): boolean {
+    return this.activeEffects.some(e => e.sprite === sprite);
   }
 
   // Serialize for network transmission
@@ -188,6 +249,8 @@ export class TronPlayer {
       alive: this.alive,
       color: this.color,
       nickname: this.nickname,
+      equippedWeapon: this.equippedWeapon,
+      activeEffects: [...this.activeEffects],
     };
   }
 
@@ -197,5 +260,7 @@ export class TronPlayer {
     this.y = state.y;
     this.direction = state.direction;
     this.alive = state.alive;
+    this.equippedWeapon = state.equippedWeapon;
+    this.activeEffects = state.activeEffects ? [...state.activeEffects] : [];
   }
 }

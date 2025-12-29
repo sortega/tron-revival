@@ -31,7 +31,7 @@ export class TronGame implements Screen {
 
   // Last time we processed a frame (for consistent timing)
   private lastFrameTime: number = 0;
-  private readonly TARGET_FRAME_TIME = 1000 / 60; // 60fps
+  private readonly TARGET_FRAME_TIME = 1000 / 70; // 70fps
 
   // Track loaded level to detect changes
   private loadedLevelIndex: number = -1;
