@@ -5,6 +5,7 @@ import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, Tel
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
 import { SpriteAtlas } from '../sprites';
+import { SPRITE_HASH } from './spriteHash';
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
@@ -96,7 +97,7 @@ export class TronRenderer {
   private async loadSprites(): Promise<void> {
     try {
       this.spriteAtlas = new SpriteAtlas();
-      await this.spriteAtlas.load(`${import.meta.env.BASE_URL}assets/sprites/items.json`);
+      await this.spriteAtlas.load(`${import.meta.env.BASE_URL}assets/sprites/items.${SPRITE_HASH}.json`);
     } catch (error) {
       console.error('Failed to load sprite atlas:', error);
     }
