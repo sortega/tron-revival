@@ -10,7 +10,7 @@ export type UseSound = typeof USE_SOUNDS[number];
 
 // All sound names
 const SOUND_NAMES = [
-  'round_start', 'laughs', 'teleport',
+  'round_start', 'laughs', 'teleport', 'drill',
   ...PICKUP_SOUNDS,
   ...USE_SOUNDS,
 ] as const;
@@ -29,6 +29,7 @@ const SOUND_FILES: Record<SoundName, string> = {
   rifle: 'rifle.mp3',
   shotgun: 'shotgun.mp3',
   uzi: 'uzi.mp3',
+  drill: 'drill.mp3',
   bomb: 'bomb.mp3',
   alarm: 'alarm.mp3',
 };
