@@ -25,6 +25,25 @@ import type {
 
 const APP_ID = 'teratron-lobby';
 
+// Word list for human-friendly room codes (short, common, phonetically distinct)
+const ROOM_WORDS = [
+  'red', 'blue', 'gold', 'jade', 'pink', 'gray', 'lime', 'plum', 'rose', 'teal',
+  'bear', 'bird', 'crab', 'deer', 'duck', 'fish', 'frog', 'goat', 'hawk', 'lion',
+  'moon', 'star', 'rain', 'snow', 'wind', 'fire', 'lake', 'rock', 'sand', 'wave',
+  'cake', 'drum', 'fork', 'harp', 'kite', 'lamp', 'mask', 'ring', 'vase', 'bell',
+  'arch', 'barn', 'cave', 'dome', 'gate', 'hill', 'mill', 'pier', 'tower', 'well',
+];
+
+// Generate a speakable room code like "red-bear-moon"
+function generateRoomCode(): string {
+  const words: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const index = Math.floor(Math.random() * ROOM_WORDS.length);
+    words.push(ROOM_WORDS[index]!);
+  }
+  return words.join('-');
+}
+
 // Free TURN servers for NAT traversal
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -116,7 +135,7 @@ export class LobbyConnection {
       throw new Error('Only host can create room');
     }
 
-    const roomId = nanoid(10);
+    const roomId = generateRoomCode();
     this.joinTrysteroRoom(roomId);
     return roomId;
   }
@@ -263,8 +282,8 @@ export class LobbyConnection {
   }
 
   leaveSlot(): void {
-    this.sendOrProcessLocally({ type: 'leave' });
     this.mySlotIndex = null;
+    this.sendOrProcessLocally({ type: 'leave' });
   }
 
   changeSlot(targetSlot: SlotIndex): void {
@@ -345,11 +364,11 @@ export class LobbyConnection {
     switch (msg.type) {
       case 'announce': {
         // Peer announces themselves without joining a slot
-        const existingUnassigned = this.lobbyState.unassignedPeers.find(p => p.peerId === peerId);
+        const existingUnassigned = this.lobbyState.spectators.find(p => p.peerId === peerId);
         if (existingUnassigned) {
           existingUnassigned.nickname = msg.nickname;
         } else {
-          this.lobbyState.unassignedPeers.push({ peerId, nickname: msg.nickname });
+          this.lobbyState.spectators.push({ peerId, nickname: msg.nickname });
         }
         this.broadcastLobbyState();
         break;
@@ -371,7 +390,7 @@ export class LobbyConnection {
         }
 
         // Remove from unassigned peers if present
-        this.lobbyState.unassignedPeers = this.lobbyState.unassignedPeers.filter(p => p.peerId !== peerId);
+        this.lobbyState.spectators = this.lobbyState.spectators.filter(p => p.peerId !== peerId);
 
         // Assign slot (mark as host if it's the host peer)
         this.lobbyState.slots[slotIndex] = {
@@ -425,7 +444,7 @@ export class LobbyConnection {
           break;
         }
         // Check if unassigned
-        const unassigned = this.lobbyState.unassignedPeers.find(p => p.peerId === peerId);
+        const unassigned = this.lobbyState.spectators.find(p => p.peerId === peerId);
         if (unassigned) {
           unassigned.nickname = msg.nickname;
           this.broadcastLobbyState();
@@ -441,7 +460,7 @@ export class LobbyConnection {
           break;
         }
         // Check if unassigned peer (or host not in slot)
-        const unassigned = this.lobbyState.unassignedPeers.find(p => p.peerId === peerId);
+        const unassigned = this.lobbyState.spectators.find(p => p.peerId === peerId);
         if (unassigned) {
           this.addChatMessage(null, unassigned.nickname, msg.text);
         } else if (isHostPeer) {
@@ -452,13 +471,17 @@ export class LobbyConnection {
       }
 
       case 'leave': {
-        // Remove from slot if in one
+        // Remove from slot if in one - move to spectators
         const slot = findSlotByPeerId(this.lobbyState, peerId);
         if (slot) {
+          // Move player to spectators
+          const nickname = slot.nickname;
           this.lobbyState.slots[slot.slotIndex] = createEmptySlot(slot.slotIndex);
+          // Add to unassigned peers (spectators) if not already there
+          if (!this.lobbyState.spectators.some(p => p.peerId === peerId)) {
+            this.lobbyState.spectators.push({ peerId, nickname });
+          }
         }
-        // Remove from unassigned peers
-        this.lobbyState.unassignedPeers = this.lobbyState.unassignedPeers.filter(p => p.peerId !== peerId);
         this.broadcastLobbyState();
         break;
       }
@@ -518,9 +541,9 @@ export class LobbyConnection {
     }
 
     // Remove from unassigned peers
-    const prevLength = this.lobbyState.unassignedPeers.length;
-    this.lobbyState.unassignedPeers = this.lobbyState.unassignedPeers.filter(p => p.peerId !== peerId);
-    if (this.lobbyState.unassignedPeers.length !== prevLength) {
+    const prevLength = this.lobbyState.spectators.length;
+    this.lobbyState.spectators = this.lobbyState.spectators.filter(p => p.peerId !== peerId);
+    if (this.lobbyState.spectators.length !== prevLength) {
       changed = true;
     }
 

@@ -54,7 +54,7 @@ export interface ChatMessage {
   timestamp: number;
 }
 
-export interface UnassignedPeer {
+export interface Spectator {
   peerId: string;
   nickname: string;
 }
@@ -65,7 +65,7 @@ export interface LobbyState {
   gameMode: GameMode;
   slots: [PlayerSlot, PlayerSlot, PlayerSlot, PlayerSlot];
   chatMessages: ChatMessage[];
-  unassignedPeers: UnassignedPeer[];
+  spectators: Spectator[];
 }
 
 export function createEmptySlot(slotIndex: SlotIndex): PlayerSlot {
@@ -92,7 +92,7 @@ export function createInitialLobbyState(roomId: string, hostPeerId: string): Lob
     gameMode: 'ffa',
     slots,
     chatMessages: [],
-    unassignedPeers: [],
+    spectators: [],
   };
 }
 

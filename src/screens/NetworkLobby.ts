@@ -4,7 +4,7 @@ import type { Screen, ScreenManager, LobbyOptions } from './ScreenManager';
 import { LobbyConnection } from '../network/LobbyConnection';
 import { GameConnection } from '../network/GameConnection';
 import type { LobbyState, SlotIndex, GameMode } from '../types/lobby';
-import { getSlotColor, canStartGame, getFilledSlotCount } from '../types/lobby';
+import { getSlotColor, canStartGame, getFilledSlotCount, findFirstOpenSlot } from '../types/lobby';
 import type { GameConfig, GamePlayer, Spectator } from '../types/game';
 import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
 
@@ -60,7 +60,7 @@ export class NetworkLobby implements Screen {
           display: none;
           flex: 1;
           display: grid;
-          grid-template-columns: 250px 1fr 300px;
+          grid-template-columns: 250px 350px 300px;
           gap: 1rem;
           max-width: 1200px;
           margin: 0 auto;
@@ -113,9 +113,11 @@ export class NetworkLobby implements Screen {
               statusEl.style.color = '#0f0';
               document.getElementById('lobbyContent')!.style.display = 'grid';
             } else {
-              statusEl.textContent = 'Connected - Waiting for lobby data...';
+              // Guest: show lobby content immediately with connecting UI
+              statusEl.textContent = 'Connecting...';
               statusEl.style.color = '#ff0';
-              // Don't show lobby content until we receive state
+              document.getElementById('lobbyContent')!.style.display = 'grid';
+              this.renderConnectingUI();
             }
           } else {
             statusEl.textContent = 'Disconnected';
@@ -143,6 +145,8 @@ export class NetworkLobby implements Screen {
             this.connectionTimeoutId = null;
           }
           this.connection.announce(this.myNickname);
+          // Auto-join the first open slot
+          this.autoJoinFirstSlot();
         }
         this.updateUI();
       },
@@ -173,8 +177,9 @@ export class NetworkLobby implements Screen {
     if (this.options.mode === 'host') {
       const roomId = this.connection.createRoom(this.myNickname);
       console.log('[NetworkLobby] Created room:', roomId);
-      // Host announces itself (same as guest would)
+      // Host announces itself and joins first slot
       this.connection.announce(this.myNickname);
+      this.autoJoinFirstSlot();
     } else if (this.options.roomId) {
       this.connection.joinRoom(this.options.roomId, this.myNickname);
       // Guest will announce after receiving lobby state
@@ -267,17 +272,29 @@ export class NetworkLobby implements Screen {
             color: #0f0;
             font-family: monospace;
             word-break: break-all;
+            text-align: center;
+            letter-spacing: 0.1em;
           ">${roomId}</div>
-          <button id="copyLinkBtn" style="
-            width: 100%;
-            margin-top: 0.5rem;
-            padding: 0.5rem;
-            font-family: monospace;
-            cursor: pointer;
-            background: #002;
-            color: #08f;
-            border: 1px solid #08f;
-          ">COPY LINK</button>
+          <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+            <button id="copyCodeBtn" style="
+              flex: 1;
+              padding: 0.5rem;
+              font-family: monospace;
+              cursor: pointer;
+              background: #002;
+              color: #08f;
+              border: 1px solid #08f;
+            ">📋 CODE</button>
+            <button id="copyLinkBtn" style="
+              flex: 1;
+              padding: 0.5rem;
+              font-family: monospace;
+              cursor: pointer;
+              background: #002;
+              color: #08f;
+              border: 1px solid #08f;
+            ">🔗 LINK</button>
+          </div>
         </div>
 
         <button id="startGameBtn" style="
@@ -333,12 +350,22 @@ export class NetworkLobby implements Screen {
         if (input) input.value = newNickname;
       });
 
+      document.getElementById('copyCodeBtn')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(roomId).then(() => {
+          const btn = document.getElementById('copyCodeBtn');
+          if (btn) {
+            btn.textContent = '✓ COPIED';
+            setTimeout(() => { btn.textContent = '📋 CODE'; }, 2000);
+          }
+        });
+      });
+
       document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
         navigator.clipboard.writeText(link).then(() => {
           const btn = document.getElementById('copyLinkBtn');
           if (btn) {
-            btn.textContent = 'COPIED!';
-            setTimeout(() => { btn.textContent = 'COPY LINK'; }, 2000);
+            btn.textContent = '✓ COPIED';
+            setTimeout(() => { btn.textContent = '🔗 LINK'; }, 2000);
           }
         });
       });
@@ -407,6 +434,40 @@ export class NetworkLobby implements Screen {
           </div>
         </div>
 
+        <div style="margin-bottom: 1rem;">
+          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Room Code:</label>
+          <div style="
+            background: #000;
+            padding: 0.5rem;
+            border: 1px solid #333;
+            color: #0f0;
+            font-family: monospace;
+            word-break: break-all;
+            text-align: center;
+            letter-spacing: 0.1em;
+          ">${roomId}</div>
+          <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+            <button id="copyCodeBtn" style="
+              flex: 1;
+              padding: 0.5rem;
+              font-family: monospace;
+              cursor: pointer;
+              background: #002;
+              color: #08f;
+              border: 1px solid #08f;
+            ">📋 CODE</button>
+            <button id="copyLinkBtn" style="
+              flex: 1;
+              padding: 0.5rem;
+              font-family: monospace;
+              cursor: pointer;
+              background: #002;
+              color: #08f;
+              border: 1px solid #08f;
+            ">🔗 LINK</button>
+          </div>
+        </div>
+
         <div style="
           background: #110;
           padding: 1rem;
@@ -448,6 +509,26 @@ export class NetworkLobby implements Screen {
         if (input) input.value = newNickname;
       });
 
+      document.getElementById('copyCodeBtn')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(roomId).then(() => {
+          const btn = document.getElementById('copyCodeBtn');
+          if (btn) {
+            btn.textContent = '✓ COPIED';
+            setTimeout(() => { btn.textContent = '📋 CODE'; }, 2000);
+          }
+        });
+      });
+
+      document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(link).then(() => {
+          const btn = document.getElementById('copyLinkBtn');
+          if (btn) {
+            btn.textContent = '✓ COPIED';
+            setTimeout(() => { btn.textContent = '🔗 LINK'; }, 2000);
+          }
+        });
+      });
+
       document.getElementById('disconnectBtn')?.addEventListener('click', () => {
         this.connection.disconnect();
         this.screenManager.showMainMenu();
@@ -460,7 +541,7 @@ export class NetworkLobby implements Screen {
     if (!panel || !this.lobbyState) return;
 
     const isHost = this.connection.isHostMode();
-    const myPeerId = this.connection.getMyPeerId();
+    const mySlotIndex = this.connection.getMySlotIndex();
     const mode = this.lobbyState.gameMode;
 
     let slotsHtml = '';
@@ -470,29 +551,29 @@ export class NetworkLobby implements Screen {
       slotsHtml = `
         <div style="margin-bottom: 1rem;">
           <h4 style="color: ${getSlotColor('team', 0)}; margin-bottom: 0.5rem;">TEAM PURPLE</h4>
-          ${this.renderSlot(0, mode, myPeerId, isHost)}
-          ${this.renderSlot(2, mode, myPeerId, isHost)}
+          ${this.renderSlot(0, mode, mySlotIndex, isHost)}
+          ${this.renderSlot(2, mode, mySlotIndex, isHost)}
         </div>
         <hr style="border-color: #333; margin: 1rem 0;" />
         <div>
           <h4 style="color: ${getSlotColor('team', 1)}; margin-bottom: 0.5rem;">TEAM BROWN</h4>
-          ${this.renderSlot(1, mode, myPeerId, isHost)}
-          ${this.renderSlot(3, mode, myPeerId, isHost)}
+          ${this.renderSlot(1, mode, mySlotIndex, isHost)}
+          ${this.renderSlot(3, mode, mySlotIndex, isHost)}
         </div>
       `;
     } else {
       // FFA mode: simple list
       slotsHtml = `
-        ${this.renderSlot(0, mode, myPeerId, isHost)}
-        ${this.renderSlot(1, mode, myPeerId, isHost)}
-        ${this.renderSlot(2, mode, myPeerId, isHost)}
-        ${this.renderSlot(3, mode, myPeerId, isHost)}
+        ${this.renderSlot(0, mode, mySlotIndex, isHost)}
+        ${this.renderSlot(1, mode, mySlotIndex, isHost)}
+        ${this.renderSlot(2, mode, mySlotIndex, isHost)}
+        ${this.renderSlot(3, mode, mySlotIndex, isHost)}
       `;
     }
 
-    // Render unassigned peers (host is now in this list like everyone else)
+    // Render unassigned peers (spectators)
     const hostPeerId = this.lobbyState.hostPeerId;
-    const unassignedHtml = this.lobbyState.unassignedPeers.map(peer => {
+    const unassignedHtml = this.lobbyState.spectators.map(peer => {
       const isPeerHost = peer.peerId === hostPeerId;
       return `
         <div style="
@@ -506,7 +587,7 @@ export class NetworkLobby implements Screen {
           border-radius: 4px;
         ">
           <div style="flex: 1;">
-            <div style="color: #888;">${isPeerHost ? '👑 ' : ''}${peer.nickname}</div>
+            <div style="color: #888;">${peer.nickname}${isPeerHost ? ' 🛠️' : ''}</div>
           </div>
         </div>
       `;
@@ -515,16 +596,16 @@ export class NetworkLobby implements Screen {
     panel.innerHTML = `
       <h3 style="color: #0ff; margin-bottom: 1rem;">Players</h3>
       ${slotsHtml}
-      ${this.lobbyState.unassignedPeers.length > 0 ? `
-        <h3 style="color: #666; margin-top: 1.5rem; margin-bottom: 1rem;">Non players</h3>
+      ${this.lobbyState.spectators.length > 0 ? `
+        <h3 style="color: #666; margin-top: 1.5rem; margin-bottom: 1rem;">Spectators</h3>
         ${unassignedHtml}
       ` : ''}
     `;
 
-    // Add click handlers for slot joins (both host and guest)
+    // Add click handlers for slot joins and leaves
     for (let i = 0; i < 4; i++) {
-      const btn = document.getElementById(`joinSlot${i}`);
-      btn?.addEventListener('click', () => {
+      // Join button
+      document.getElementById(`joinSlot${i}`)?.addEventListener('click', () => {
         const mySlotIndex = this.connection.getMySlotIndex();
         if (mySlotIndex === null) {
           // Not in any slot yet - join this slot
@@ -534,23 +615,38 @@ export class NetworkLobby implements Screen {
           this.connection.changeSlot(i as SlotIndex);
         }
       });
+      // Leave button
+      document.getElementById(`leaveSlot${i}`)?.addEventListener('click', () => {
+        this.connection.leaveSlot();
+      });
     }
   }
 
-  private renderSlot(index: SlotIndex, mode: GameMode, myPeerId: string | null, _isHost: boolean): string {
+  private renderSlot(index: SlotIndex, mode: GameMode, mySlotIndex: SlotIndex | null, _isHost: boolean): string {
     const slot = this.lobbyState!.slots[index];
     const color = getSlotColor(mode, index);
     const isOccupied = slot.peerId !== null;
-    const isMe = slot.peerId !== null && slot.peerId === myPeerId;
-    const mySlotIndex = this.connection.getMySlotIndex();
+    const isMe = slot.slotIndex === mySlotIndex;
 
     let statusText: string;
     let actionBtn = '';
 
     if (isOccupied) {
       statusText = slot.nickname || 'Player';
-      if (slot.isHost) statusText = '👑 ' + statusText;
       if (isMe) statusText += ' (You)';
+      if (slot.isHost) statusText += ' 🛠️';
+      // Show leave button if this is my slot
+      if (isMe) {
+        actionBtn = `<button id="leaveSlot${index}" style="
+          padding: 0.25rem 0.5rem;
+          font-size: 0.8rem;
+          font-family: monospace;
+          cursor: pointer;
+          background: #200;
+          color: #f44;
+          border: 1px solid #f44;
+        ">LEAVE</button>`;
+      }
     } else {
       statusText = 'Open';
       // Show join button for empty slots (if not this slot)
@@ -685,7 +781,7 @@ export class NetworkLobby implements Screen {
       }));
 
     // Build spectators from unassigned peers
-    const spectators: Spectator[] = lobbyState.unassignedPeers.map(peer => ({
+    const spectators: Spectator[] = lobbyState.spectators.map(peer => ({
       nickname: peer.nickname,
     }));
 
@@ -711,6 +807,104 @@ export class NetworkLobby implements Screen {
     );
 
     return { gameConfig, gameConnection };
+  }
+
+  private autoJoinFirstSlot(): void {
+    if (!this.lobbyState) return;
+    const openSlot = findFirstOpenSlot(this.lobbyState);
+    if (openSlot !== null) {
+      this.connection.joinSlot(openSlot, this.myNickname);
+    }
+  }
+
+  // Render UI while waiting for lobby data (guest only)
+  private renderConnectingUI(): void {
+    const roomId = this.options.roomId || '';
+    const link = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+
+    // Settings panel - show room code and disconnect button
+    const settingsPanel = document.getElementById('settingsPanel');
+    if (settingsPanel) {
+      settingsPanel.innerHTML = `
+        <h3 style="color: #0ff; margin-bottom: 1rem;">Info</h3>
+
+        <div style="margin-bottom: 1rem;">
+          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Game Mode:</label>
+          <div style="display: flex; gap: 0.5rem;">
+            <button disabled style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">FFA</button>
+            <button disabled style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">TEAMS</button>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Your Nickname:</label>
+          <div style="display: flex; gap: 0.5rem;">
+            <input id="nicknameInput" type="text" value="${this.myNickname}" disabled style="flex: 1; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333; box-sizing: border-box;" />
+            <button disabled style="padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333; font-size: 1rem;">🎲</button>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Room Code:</label>
+          <div style="background: #000; padding: 0.5rem; border: 1px solid #333; color: #0f0; font-family: monospace; text-align: center; letter-spacing: 0.1em;">${roomId}</div>
+          <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+            <button id="copyCodeBtn" style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #002; color: #08f; border: 1px solid #08f;">📋 CODE</button>
+            <button id="copyLinkBtn" style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #002; color: #08f; border: 1px solid #08f;">🔗 LINK</button>
+          </div>
+        </div>
+
+        <div style="background: #110; padding: 1rem; border: 1px solid #440; border-radius: 4px; color: #ff0; text-align: center; margin-bottom: 1rem;">
+          Connecting to room...
+        </div>
+
+        <button id="disconnectBtn" style="width: 100%; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #200; color: #f44; border: 1px solid #f44;">DISCONNECT</button>
+      `;
+
+      document.getElementById('copyCodeBtn')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(roomId).then(() => {
+          const btn = document.getElementById('copyCodeBtn');
+          if (btn) { btn.textContent = '✓ COPIED'; setTimeout(() => { btn.textContent = '📋 CODE'; }, 2000); }
+        });
+      });
+
+      document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(link).then(() => {
+          const btn = document.getElementById('copyLinkBtn');
+          if (btn) { btn.textContent = '✓ COPIED'; setTimeout(() => { btn.textContent = '🔗 LINK'; }, 2000); }
+        });
+      });
+
+      document.getElementById('disconnectBtn')?.addEventListener('click', () => {
+        this.connection.disconnect();
+        this.screenManager.showMainMenu();
+      });
+    }
+
+    // Players panel - show empty slots
+    const playersPanel = document.getElementById('playersPanel');
+    if (playersPanel) {
+      playersPanel.innerHTML = `
+        <h3 style="color: #0ff; margin-bottom: 1rem;">Players</h3>
+        <div style="color: #666; text-align: center; padding: 2rem;">
+          Waiting for lobby data...
+        </div>
+      `;
+    }
+
+    // Chat panel - show empty
+    const chatPanel = document.getElementById('chatPanel');
+    if (chatPanel) {
+      chatPanel.innerHTML = `
+        <h3 style="color: #0ff; margin-bottom: 0.5rem;">Chat</h3>
+        <div style="flex: 1; overflow-y: auto; background: #000; padding: 0.5rem; border: 1px solid #333; border-radius: 4px; margin-bottom: 0.5rem; min-height: 200px;">
+          <div style="color: #666; font-style: italic;">Connecting...</div>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <input disabled type="text" placeholder="Type a message..." style="flex: 1; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333;" />
+          <button disabled style="padding: 0.5rem 1rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">SEND</button>
+        </div>
+      `;
+    }
   }
 
   cleanup(): void {
