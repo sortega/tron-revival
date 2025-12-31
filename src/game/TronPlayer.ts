@@ -56,6 +56,9 @@ export class TronPlayer {
   prevScreenX: number = -1;
   prevScreenY: number = -1;
 
+  // Frame counter for slow movement (speedFactor < 1)
+  moveFrameCounter: number = 0;
+
   // Item state
   equippedWeapon: EquippedWeapon | null = null;
   activeEffects: ActiveEffect[] = [];
@@ -182,6 +185,7 @@ export class TronPlayer {
     this.trail = [];
     this.equippedWeapon = null;
     this.activeEffects = [];
+    this.moveFrameCounter = 0;
   }
 
   // Equip a weapon (replaces current weapon)
@@ -193,16 +197,13 @@ export class TronPlayer {
     };
   }
 
-  // Activate an effect (stacks with existing effects)
+  // Activate an effect (replaces any existing effect - only one auto effect at a time)
   activateEffect(sprite: string, durationFrames: number): void {
-    // If effect already exists, refresh duration
-    const existing = this.activeEffects.find(e => e.sprite === sprite);
-    if (existing) {
-      existing.remainingFrames = Math.max(existing.remainingFrames, durationFrames);
-    } else if (durationFrames > 0) {
-      // Only add if duration > 0 (instant effects don't get added)
-      this.activeEffects.push({ sprite, remainingFrames: durationFrames });
+    if (durationFrames > 0) {
+      // Clear all existing effects - new effect replaces old one
+      this.activeEffects = [{ sprite, remainingFrames: durationFrames }];
     }
+    // Instant effects (duration 0) don't get added to activeEffects
   }
 
   // Use equipped weapon - for shot-based weapons (reduces ammo, returns true if fired)

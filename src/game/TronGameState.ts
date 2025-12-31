@@ -245,77 +245,117 @@ export class TronGameState {
       }
     }
 
-    // First, update all players and collect new trail segments
+    // Calculate speedFactors for all players
+    const speedFactors = this.calculateSpeedFactors(inputs);
+
+    // Calculate moves per frame for each player
+    const movesPerPlayer: Map<SlotIndex, number> = new Map();
+    for (const player of this.players) {
+      if (!player.alive) continue;
+
+      const factor = speedFactors.get(player.slotIndex) ?? 1;
+      let movesThisFrame: number;
+
+      if (factor >= 1) {
+        // Fast: move 'factor' times this frame
+        movesThisFrame = factor;
+      } else {
+        // Slow: move once every N frames where N = 2 - factor
+        // factor 0 -> every 2 frames, factor -1 -> every 3 frames, etc.
+        player.moveFrameCounter++;
+        const frameInterval = 2 - factor;
+        console.log('frameInterval', frameInterval);
+        console.log('frameCounter', player.moveFrameCounter);
+        if (player.moveFrameCounter >= frameInterval) {
+          movesThisFrame = 1;
+          player.moveFrameCounter = 0;
+        } else {
+          movesThisFrame = 0;
+        }
+      }
+
+      movesPerPlayer.set(player.slotIndex, movesThisFrame);
+    }
+
+    console.log('movesPerPlayer', movesPerPlayer);
+
+    // Find maximum moves this frame (for step-by-step simulation)
+    const maxMoves = Math.max(1, ...Array.from(movesPerPlayer.values()));
+
+    // Track new trail segments for network transmission
     const newSegmentsByPlayer: Map<SlotIndex, TrailSegment[]> = new Map();
-
     for (const player of this.players) {
-      if (!player.alive) continue;
-
-      const input = inputs.get(player.slotIndex) || { left: false, right: false, action: false };
-      const newSegments = player.update(input);
-      newSegmentsByPlayer.set(player.slotIndex, newSegments);
-
-      // Check teleport collision (if not on cooldown)
-      const cooldown = this.teleportCooldowns.get(player.slotIndex) || 0;
-      if (cooldown === 0) {
-        this.checkTeleport(player);
-      }
+      newSegmentsByPlayer.set(player.slotIndex, []);
     }
 
-    // Check collisions BEFORE adding new trail pixels
-    // This allows players to collide with existing trails
-    const dyingPlayers: Set<TronPlayer> = new Set();
+    // Process movements step by step (ensures proper collision detection with speedup)
+    for (let step = 0; step < maxMoves; step++) {
+      // Move all players that should move this step
+      for (const player of this.players) {
+        if (!player.alive) continue;
 
-    for (const player of this.players) {
-      if (!player.alive) continue;
+        const playerMoves = movesPerPlayer.get(player.slotIndex) ?? 1;
+        if (step >= playerMoves) continue; // This player doesn't move this step
 
-      if (player.checkCollision(this.occupiedPixels)) {
-        dyingPlayers.add(player);
+        const input = inputs.get(player.slotIndex) || { left: false, right: false, action: false };
+        const newSegments = player.update(input);
+
+        // Check collision immediately after move
+        if (player.checkCollision(this.occupiedPixels)) {
+          player.kill();
+          this.queueSound('laughs');
+          continue;
+        }
+
+        // Add trail segments to occupied pixels immediately
+        for (const seg of newSegments) {
+          this.occupiedPixels.add(`${seg.x},${seg.y}`);
+        }
+
+        // Accumulate for network transmission
+        const existing = newSegmentsByPlayer.get(player.slotIndex) || [];
+        existing.push(...newSegments);
+        newSegmentsByPlayer.set(player.slotIndex, existing);
       }
-    }
 
-    // Check for diagonal crossings between players this frame
-    // Two players moving diagonally can pass through each other if we only check pixels
-    const alivePlayers = this.players.filter(p => p.alive);
-    for (let i = 0; i < alivePlayers.length; i++) {
-      const p1 = alivePlayers[i];
-      if (!p1 || p1.prevScreenX < 0) continue;
+      // Check for diagonal crossings between players after each step
+      const alivePlayers = this.players.filter(p => p.alive);
+      for (let i = 0; i < alivePlayers.length; i++) {
+        const p1 = alivePlayers[i];
+        if (!p1 || p1.prevScreenX < 0) continue;
 
-      for (let j = i + 1; j < alivePlayers.length; j++) {
-        const p2 = alivePlayers[j];
-        if (!p2 || p2.prevScreenX < 0) continue;
+        for (let j = i + 1; j < alivePlayers.length; j++) {
+          const p2 = alivePlayers[j];
+          if (!p2 || p2.prevScreenX < 0) continue;
 
-        // Check if movement segments intersect
-        if (segmentsIntersect(
-          p1.prevScreenX, p1.prevScreenY, p1.getScreenX(), p1.getScreenY(),
-          p2.prevScreenX, p2.prevScreenY, p2.getScreenX(), p2.getScreenY()
-        )) {
-          // Both players die on diagonal collision
-          dyingPlayers.add(p1);
-          dyingPlayers.add(p2);
+          // Check if movement segments intersect
+          if (segmentsIntersect(
+            p1.prevScreenX, p1.prevScreenY, p1.getScreenX(), p1.getScreenY(),
+            p2.prevScreenX, p2.prevScreenY, p2.getScreenX(), p2.getScreenY()
+          )) {
+            // Both players die on diagonal collision
+            p1.kill();
+            p2.kill();
+            this.queueSound('laughs');
+          }
         }
       }
     }
 
-    // Now add new trail pixels to occupied set
-    for (const player of this.players) {
-      if (!player.alive) continue;
-
-      const segments = newSegmentsByPlayer.get(player.slotIndex) || [];
-      for (const seg of segments) {
-        this.occupiedPixels.add(`${seg.x},${seg.y}`);
-      }
-
-      // Store for network transmission
+    // Store trail segments for network transmission
+    for (const [slotIndex, segments] of newSegmentsByPlayer) {
       if (segments.length > 0) {
-        this.frameTrailSegments.set(player.slotIndex, segments);
+        this.frameTrailSegments.set(slotIndex, segments);
       }
     }
 
-    // Kill players that collided
-    for (const player of dyingPlayers) {
-      player.kill();
-      this.queueSound('laughs');
+    // Check teleport collision for alive players
+    for (const player of this.players) {
+      if (!player.alive) continue;
+      const cooldown = this.teleportCooldowns.get(player.slotIndex) || 0;
+      if (cooldown === 0) {
+        this.checkTeleport(player);
+      }
     }
 
     // Spawn items periodically
@@ -407,6 +447,55 @@ export class TronGameState {
       this.currentLevelIndex = (this.currentLevelIndex + 1) % LEVELS.length;
       this.initRound();
     }
+  }
+
+  // Calculate speedFactor for each player based on active effects and weapons
+  private calculateSpeedFactors(inputs: Map<SlotIndex, TronInput>): Map<SlotIndex, number> {
+    const speedFactors = new Map<SlotIndex, number>();
+
+    // Initialize with base speed and apply automatic effects to self
+    for (const player of this.players) {
+      let factor = 1; // Base speed
+
+      // Turbo auto effect: +1 to self
+      if (player.hasEffect('automatic_turbo')) {
+        factor += 1;
+      }
+
+      // Slow auto effect: -1 to self (you picked up slow, you're slower)
+      if (player.hasEffect('automatic_slow')) {
+        factor -= 1;
+      }
+
+      speedFactors.set(player.slotIndex, factor);
+    }
+
+    // Apply turbo/slow weapons (only when action is held)
+    for (const [slotIndex, input] of inputs) {
+      const player = this.players.find(p => p.slotIndex === slotIndex);
+      if (player?.alive && player.equippedWeapon && input.action) {
+        if (player.equippedWeapon.sprite === 'turbo') {
+          // Turbo weapon: +1 to self
+          speedFactors.set(slotIndex, (speedFactors.get(slotIndex) ?? 1) + 1);
+        } else if (player.equippedWeapon.sprite === 'slow') {
+          // Slow weapon: -1 to all others
+          for (const other of this.players) {
+            if (other.slotIndex !== slotIndex) {
+              speedFactors.set(other.slotIndex, (speedFactors.get(other.slotIndex) ?? 1) - 1);
+            }
+          }
+        }
+      }
+    }
+
+    // Debug: log non-standard speed factors
+    for (const [slot, factor] of speedFactors) {
+      if (factor !== 1) {
+        console.log(`[SpeedFactor] Player ${slot}: ${factor}`);
+      }
+    }
+
+    return speedFactors;
   }
 
   // Spawn a single teleport portal pair at round start

@@ -179,12 +179,12 @@ export interface ActiveEffect {
 
 // Automatic items (round) - instant activation on pickup
 export const AUTOMATIC_ITEMS: ItemDefinition[] = [
-  { name: 'Crossing', sprite: 'crossing', category: 'automatic', duration: 2100, pickupSound: 'shield' },  // 30s
-  { name: 'Shield', sprite: 'shield', category: 'automatic', duration: 2100, pickupSound: 'shield' },      // 30s
-  { name: 'Eraser', sprite: 'eraser', category: 'automatic', duration: 0, pickupSound: 'reset' },          // Instant
-  { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0 },                             // Instant
-  { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0 },                     // Instant
-  { name: 'Reverse', sprite: 'reverse', category: 'automatic', duration: 700 },                            // 10s
+  // { name: 'Crossing', sprite: 'crossing', category: 'automatic', duration: 2100, pickupSound: 'shield' },  // 30s
+  // { name: 'Shield', sprite: 'shield', category: 'automatic', duration: 2100, pickupSound: 'shield' },      // 30s
+  // { name: 'Eraser', sprite: 'eraser', category: 'automatic', duration: 0, pickupSound: 'reset' },          // Instant
+  // { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0 },                             // Instant
+  // { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0 },                     // Instant
+  // { name: 'Reverse', sprite: 'reverse', category: 'automatic', duration: 700 },                            // 10s
   { name: 'Slow', sprite: 'automatic_slow', category: 'automatic', duration: 1400, pickupSound: 'slow' },  // 20s
   { name: 'Turbo', sprite: 'automatic_turbo', category: 'automatic', duration: 1400, pickupSound: 'turbo' }, // 20s
 ];
@@ -192,15 +192,15 @@ export const AUTOMATIC_ITEMS: ItemDefinition[] = [
 // Weapon items (square) - manual activation with action button
 export const WEAPON_ITEMS: ItemDefinition[] = [
   // Shot-based weapons (use ammo)
-  { name: 'Glock', sprite: 'glock', category: 'weapon', ammo: 20, useSound: 'glock' },
-  { name: 'Rifle', sprite: 'rifle', category: 'weapon', ammo: 200, useSound: 'rifle' },
-  { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1, useSound: 'bomb' },
-  { name: 'Lock Borders', sprite: 'lock_borders', category: 'weapon', ammo: 1, useSound: 'alarm' },
-  { name: 'Shotgun', sprite: 'shotgun', category: 'weapon', ammo: 20, useSound: 'shotgun' },
+  // { name: 'Glock', sprite: 'glock', category: 'weapon', ammo: 20, useSound: 'glock' },
+  // { name: 'Rifle', sprite: 'rifle', category: 'weapon', ammo: 200, useSound: 'rifle' },
+  // { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1, useSound: 'bomb' },
+  // { name: 'Lock Borders', sprite: 'lock_borders', category: 'weapon', ammo: 1, useSound: 'alarm' },
+  // { name: 'Shotgun', sprite: 'shotgun', category: 'weapon', ammo: 20, useSound: 'shotgun' },
   // Time-based weapons (use duration)
-  { name: 'Uzi', sprite: 'uzi', category: 'weapon', duration: 700, useSound: 'uzi', loopSound: true }, // 10s
-  { name: 'Turbo', sprite: 'turbo', category: 'weapon', duration: 700, pickupSound: 'turbo' },  // 10s
-  { name: 'Slow', sprite: 'slow', category: 'weapon', duration: 700, pickupSound: 'slow' },     // 10s
+  // { name: 'Uzi', sprite: 'uzi', category: 'weapon', duration: 700, useSound: 'uzi', loopSound: true }, // 10s
+  { name: 'Turbo', sprite: 'turbo', category: 'weapon', duration: 700, useSound: 'slow' },   // 10s
+  { name: 'Slow', sprite: 'slow', category: 'weapon', duration: 700, useSound: 'turbo' },     // 10s
 ];
 
 // Item constants

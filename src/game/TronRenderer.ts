@@ -313,15 +313,36 @@ export class TronRenderer {
         const hasWeapon = !!playerState.equippedWeapon;
         const hasEffect = playerState.activeEffects && playerState.activeEffects.length > 0;
 
-        // Layout: weapon on top half, effect on bottom half
-        // Draw equipped weapon icon and ammo (top half)
+        // Layout: effect on top half, weapon on bottom half
+        // Draw active effect icon and timer (top half)
+        if (hasEffect) {
+          const effect = playerState.activeEffects[0];
+          if (effect && this.spriteAtlas?.isLoaded()) {
+            // Draw effect sidebar icon (uses _sidebar sprite)
+            this.spriteAtlas.draw(
+              this.ctx,
+              effect.sprite + '_sidebar',
+              centerX,
+              y + slotHeight * 0.25
+            );
+            // Draw remaining seconds below icon in black
+            const remainingSecs = Math.ceil(effect.remainingFrames / 70);
+            this.ctx.fillStyle = '#000';
+            this.ctx.font = 'bold 14px monospace';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'top';
+            this.ctx.fillText(`${remainingSecs}s`, centerX, y + slotHeight * 0.25 + 22);
+          }
+        }
+
+        // Draw equipped weapon icon and ammo (bottom half)
         if (hasWeapon && playerState.equippedWeapon && this.spriteAtlas?.isLoaded()) {
           // Draw weapon sidebar icon (uses _sidebar sprite)
           this.spriteAtlas.draw(
             this.ctx,
             playerState.equippedWeapon.sprite + '_sidebar',
             centerX,
-            y + slotHeight * 0.25
+            y + slotHeight * 0.75
           );
           // Draw ammo/time below icon in black
           const { ammo, remainingFrames } = playerState.equippedWeapon;
@@ -331,35 +352,14 @@ export class TronRenderer {
             this.ctx.font = 'bold 14px monospace';
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'top';
-            this.ctx.fillText(`${Math.ceil(remainingFrames / 60)}s`, centerX, y + slotHeight * 0.25 + 22);
+            this.ctx.fillText(`${Math.ceil(remainingFrames / 70)}s`, centerX, y + slotHeight * 0.75 + 22);
           } else if (ammo !== undefined && ammo > 1) {
             // Shot-based weapon: show ammo count (skip single-use)
             this.ctx.fillStyle = '#000';
             this.ctx.font = 'bold 14px monospace';
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'top';
-            this.ctx.fillText(String(ammo), centerX, y + slotHeight * 0.25 + 22);
-          }
-        }
-
-        // Draw active effect icon and timer (bottom half)
-        if (hasEffect) {
-          const effect = playerState.activeEffects[0];
-          if (effect && this.spriteAtlas?.isLoaded()) {
-            // Draw effect sidebar icon (uses _sidebar sprite)
-            this.spriteAtlas.draw(
-              this.ctx,
-              effect.sprite + '_sidebar',
-              centerX,
-              y + slotHeight * 0.75
-            );
-            // Draw remaining seconds below icon in black
-            const remainingSecs = Math.ceil(effect.remainingFrames / 60);
-            this.ctx.fillStyle = '#000';
-            this.ctx.font = 'bold 14px monospace';
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'top';
-            this.ctx.fillText(`${remainingSecs}s`, centerX, y + slotHeight * 0.75 + 22);
+            this.ctx.fillText(String(ammo), centerX, y + slotHeight * 0.75 + 22);
           }
         }
 
