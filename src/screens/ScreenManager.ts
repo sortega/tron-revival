@@ -42,8 +42,8 @@ export class ScreenManager {
     const roomId = urlParams.get('room');
 
     if (roomId) {
-      // Auto-join as guest
-      this.showNetworkLobby({ mode: 'guest', roomId });
+      // Auto-join as guest (lowercase for case-insensitivity)
+      this.showNetworkLobby({ mode: 'guest', roomId: roomId.toLowerCase() });
     } else {
       this.showMainMenu();
     }

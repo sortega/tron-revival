@@ -37,26 +37,26 @@ export class NetworkLobby implements Screen {
     this.myNickname = localStorage.getItem('teratron-nickname') || generateNickname();
 
     this.container.innerHTML = `
-      <div style="
-        display: flex;
-        flex-direction: column;
-        min-height: 100vh;
-        padding: 1rem;
-      ">
-        <h1 style="
+      <style>
+        .lobby-container {
+          display: flex;
+          flex-direction: column;
+          min-height: 100vh;
+          padding: 1rem;
+        }
+        .lobby-title {
           color: #0ff;
           text-shadow: 0 0 10px #0ff;
           margin-bottom: 1rem;
           text-align: center;
-        ">LOBBY</h1>
-
-        <div id="connectionStatus" style="
+          font-size: 2rem;
+        }
+        .lobby-status {
           text-align: center;
           color: #ff0;
           margin-bottom: 1rem;
-        ">Connecting...</div>
-
-        <div id="lobbyContent" style="
+        }
+        .lobby-grid {
           display: none;
           flex: 1;
           display: grid;
@@ -65,32 +65,78 @@ export class NetworkLobby implements Screen {
           max-width: 1200px;
           margin: 0 auto;
           width: 100%;
-        ">
+        }
+        .lobby-panel {
+          background: #111;
+          padding: 1rem;
+          border-radius: 4px;
+          border: 1px solid #333;
+        }
+        .lobby-panel-chat {
+          display: flex;
+          flex-direction: column;
+        }
+        /* Tablet: 2 columns, chat below */
+        @media (max-width: 950px) {
+          .lobby-grid {
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto auto;
+          }
+          .lobby-panel-chat {
+            grid-column: 1 / -1;
+          }
+        }
+        /* Mobile: single column */
+        @media (max-width: 600px) {
+          .lobby-container {
+            padding: 0.5rem;
+          }
+          .lobby-title {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+          }
+          .lobby-grid {
+            grid-template-columns: 1fr;
+            gap: 0.75rem;
+          }
+          .lobby-panel {
+            padding: 0.75rem;
+          }
+          .lobby-panel-chat {
+            grid-column: auto;
+            max-height: 300px;
+          }
+          /* Make buttons and inputs touch-friendly */
+          .lobby-panel button {
+            min-height: 44px;
+            font-size: 0.9rem;
+          }
+          .lobby-panel input {
+            min-height: 44px;
+            font-size: 16px; /* Prevents iOS zoom */
+          }
+          .lobby-panel h3 {
+            font-size: 1rem;
+          }
+          .lobby-panel label {
+            font-size: 0.8rem;
+          }
+        }
+      </style>
+      <div class="lobby-container">
+        <h1 class="lobby-title">LOBBY</h1>
+
+        <div id="connectionStatus" class="lobby-status">Connecting...</div>
+
+        <div id="lobbyContent" class="lobby-grid">
           <!-- Left Panel: Settings/Info -->
-          <div id="settingsPanel" style="
-            background: #111;
-            padding: 1rem;
-            border-radius: 4px;
-            border: 1px solid #333;
-          "></div>
+          <div id="settingsPanel" class="lobby-panel"></div>
 
           <!-- Center Panel: Player Slots -->
-          <div id="playersPanel" style="
-            background: #111;
-            padding: 1rem;
-            border-radius: 4px;
-            border: 1px solid #333;
-          "></div>
+          <div id="playersPanel" class="lobby-panel"></div>
 
           <!-- Right Panel: Chat -->
-          <div id="chatPanel" style="
-            background: #111;
-            padding: 1rem;
-            border-radius: 4px;
-            border: 1px solid #333;
-            display: flex;
-            flex-direction: column;
-          "></div>
+          <div id="chatPanel" class="lobby-panel lobby-panel-chat"></div>
         </div>
       </div>
     `;
@@ -713,7 +759,7 @@ export class NetworkLobby implements Screen {
 
     panel.innerHTML = `
       <h3 style="color: #0ff; margin-bottom: 0.5rem;">Chat</h3>
-      <div id="chatMessages" style="
+      <div id="chatMessages" class="lobby-chat-messages" style="
         flex: 1;
         overflow-y: auto;
         background: #000;
@@ -721,8 +767,8 @@ export class NetworkLobby implements Screen {
         border: 1px solid #333;
         border-radius: 4px;
         margin-bottom: 0.5rem;
-        min-height: 200px;
-        max-height: 400px;
+        min-height: 150px;
+        max-height: 300px;
       ">${messagesHtml}</div>
       <div style="display: flex; gap: 0.5rem;">
         <input id="chatInput" type="text" placeholder="Type a message..." style="

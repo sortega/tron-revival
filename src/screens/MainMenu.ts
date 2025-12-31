@@ -120,7 +120,7 @@ export class MainMenu implements Screen {
             align-items: center;
           ">
             <label style="color: #888; font-size: 0.9rem;">Enter room code or paste link:</label>
-            <input id="roomCodeInput" type="text" placeholder="abc123xyz" style="
+            <input id="roomCodeInput" type="text" placeholder="red-bear-moon" style="
               padding: 0.5rem;
               font-size: 1rem;
               font-family: monospace;
@@ -261,8 +261,8 @@ export class MainMenu implements Screen {
       }
     }
 
-    // Otherwise treat it as a room ID (must be non-empty)
-    return input.length > 0 ? input : null;
+    // Otherwise treat it as a room ID (must be non-empty, lowercase for case-insensitivity)
+    return input.length > 0 ? input.toLowerCase() : null;
   }
 
   cleanup(): void {
