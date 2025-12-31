@@ -34,7 +34,7 @@ export class TronRenderer {
   // Resize handler (stored for cleanup)
   private readonly resizeHandler: () => void;
 
-  constructor(container: HTMLElement, players: GamePlayer[]) {
+  constructor(container: HTMLElement, players: GamePlayer[], fullscreen: boolean = false) {
     this.players = players;
 
     // Create main canvas - scaled to fit viewport while keeping aspect ratio
@@ -43,35 +43,43 @@ export class TronRenderer {
     this.canvas.height = CANVAS_HEIGHT;
     this.canvas.style.display = 'block';
     this.canvas.style.imageRendering = 'pixelated';
-    this.canvas.style.border = '2px solid #333';
 
-    // Scale canvas to use more screen space (up to 90% of viewport width/height)
-    // Keep aspect ratio (4:3)
-    const maxWidth = Math.min(window.innerWidth * 0.9, 1600);
-    const maxHeight = Math.min(window.innerHeight * 0.85, 1200);
-    const scaleX = maxWidth / CANVAS_WIDTH;
-    const scaleY = maxHeight / CANVAS_HEIGHT;
-    const scale = Math.min(scaleX, scaleY);
+    if (fullscreen) {
+      // Mobile: fill container, CSS handles sizing
+      this.canvas.style.width = '100%';
+      this.canvas.style.height = '100%';
+      this.canvas.style.objectFit = 'contain';
+      this.canvas.style.border = 'none';
+      this.resizeHandler = () => {}; // No resize needed
+    } else {
+      // Desktop: scale with constraints
+      this.canvas.style.border = '2px solid #333';
+      const maxWidth = Math.min(window.innerWidth * 0.9, 1600);
+      const maxHeight = Math.min(window.innerHeight * 0.85, 1200);
+      const scaleX = maxWidth / CANVAS_WIDTH;
+      const scaleY = maxHeight / CANVAS_HEIGHT;
+      const scale = Math.min(scaleX, scaleY);
 
-    this.canvas.style.width = `${CANVAS_WIDTH * scale}px`;
-    this.canvas.style.height = `${CANVAS_HEIGHT * scale}px`;
+      this.canvas.style.width = `${CANVAS_WIDTH * scale}px`;
+      this.canvas.style.height = `${CANVAS_HEIGHT * scale}px`;
+
+      // Handle window resize
+      this.resizeHandler = () => {
+        const maxW = Math.min(window.innerWidth * 0.9, 1600);
+        const maxH = Math.min(window.innerHeight * 0.85, 1200);
+        const sX = maxW / CANVAS_WIDTH;
+        const sY = maxH / CANVAS_HEIGHT;
+        const s = Math.min(sX, sY);
+        this.canvas.style.width = `${CANVAS_WIDTH * s}px`;
+        this.canvas.style.height = `${CANVAS_HEIGHT * s}px`;
+      };
+      window.addEventListener('resize', this.resizeHandler);
+    }
 
     this.ctx = this.canvas.getContext('2d')!;
     this.ctx.imageSmoothingEnabled = false;
 
     container.appendChild(this.canvas);
-
-    // Handle window resize
-    this.resizeHandler = () => {
-      const maxW = Math.min(window.innerWidth * 0.9, 1600);
-      const maxH = Math.min(window.innerHeight * 0.85, 1200);
-      const sX = maxW / CANVAS_WIDTH;
-      const sY = maxH / CANVAS_HEIGHT;
-      const s = Math.min(sX, sY);
-      this.canvas.style.width = `${CANVAS_WIDTH * s}px`;
-      this.canvas.style.height = `${CANVAS_HEIGHT * s}px`;
-    };
-    window.addEventListener('resize', this.resizeHandler);
 
     // Create off-screen trail canvas
     this.trailCanvas = document.createElement('canvas');
@@ -417,7 +425,7 @@ export class TronRenderer {
     // Instructions
     this.ctx.fillStyle = '#888';
     this.ctx.font = '20px monospace';
-    this.ctx.fillText('Press SPACE when ready', PLAY_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
+    this.ctx.fillText('Press ACTION when ready', PLAY_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
   }
 
   private drawWaitingReadyOverlay(match: TronMatchState): void {
@@ -459,7 +467,7 @@ export class TronRenderer {
     this.ctx.font = '16px monospace';
     this.ctx.textAlign = 'center';
     const instructionY = startY + this.players.length * 35 + 40;
-    this.ctx.fillText('Press SPACE when ready', PLAY_WIDTH / 2, instructionY);
+    this.ctx.fillText('Press ACTION when ready', PLAY_WIDTH / 2, instructionY);
   }
 
   // Clean up

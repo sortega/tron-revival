@@ -7,7 +7,7 @@ import { LEVELS } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
 import { TronGameState } from './TronGameState';
 import { TronRenderer } from './TronRenderer';
-import { TronInputHandler } from './TronInput';
+import { TronInputHandler, isTouchDevice } from './TronInput';
 
 export class TronGame implements Screen {
   private container: HTMLElement;
@@ -50,7 +50,82 @@ export class TronGame implements Screen {
   }
 
   render(): void {
-    // Create container HTML
+    const isTouch = isTouchDevice();
+
+    if (isTouch) {
+      this.renderMobileLayout();
+    } else {
+      this.renderDesktopLayout();
+    }
+
+    // Initialize input handler
+    this.inputHandler = new TronInputHandler('arrows');
+
+    // Setup touch controls if on mobile
+    if (isTouch) {
+      const joystickZone = document.getElementById('joystickZone');
+      const actionButton = document.getElementById('actionButton');
+      if (joystickZone && actionButton) {
+        this.inputHandler.initTouchControls(joystickZone, actionButton);
+      }
+    }
+
+    // Setup network handlers
+    this.setupNetworkHandlers();
+
+    // Initialize game state
+    if (this.config.isHost) {
+      // Host creates authoritative game state
+      this.gameState = new TronGameState(this.config.players, this.config.gameMode);
+    } else {
+      // Guest creates local state for rendering (updated from network)
+      this.gameState = new TronGameState(this.config.players, this.config.gameMode);
+    }
+
+    // Event listeners
+    document.getElementById('backBtn')?.addEventListener('click', () => {
+      this.cleanup();
+      this.screenManager.showMainMenu();
+    });
+
+    // Fullscreen button (mobile only)
+    document.getElementById('fullscreenBtn')?.addEventListener('click', () => {
+      const elem = document.documentElement;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = document as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const el = elem as any;
+
+      // Check if already in fullscreen
+      const isFullscreen = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement;
+
+      if (isFullscreen) {
+        // Exit fullscreen
+        if (doc.exitFullscreen) {
+          doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          doc.webkitExitFullscreen();
+        } else if (doc.mozCancelFullScreen) {
+          doc.mozCancelFullScreen();
+        }
+      } else {
+        // Enter fullscreen
+        if (el.requestFullscreen) {
+          el.requestFullscreen();
+        } else if (el.webkitRequestFullscreen) {
+          el.webkitRequestFullscreen();
+        } else if (el.mozRequestFullScreen) {
+          el.mozRequestFullScreen();
+        }
+      }
+    });
+
+    // Start game loop
+    this.lastFrameTime = performance.now();
+    this.startGameLoop();
+  }
+
+  private renderDesktopLayout(): void {
     this.container.innerHTML = `
       <div style="
         display: flex;
@@ -88,39 +163,199 @@ export class TronGame implements Screen {
           margin-top: 1rem;
           text-align: center;
         ">
-          <div>LEFT/RIGHT: Turn | SPACE: Ready</div>
+          <div>LEFT/RIGHT: Turn | SPACE: Ready/Fire</div>
         </div>
       </div>
     `;
 
-    // Initialize renderer
+    // Initialize renderer (desktop mode)
     const canvasContainer = document.getElementById('gameCanvas')!;
-    this.renderer = new TronRenderer(canvasContainer, this.config.players);
+    this.renderer = new TronRenderer(canvasContainer, this.config.players, false);
+  }
 
-    // Initialize input handler
-    this.inputHandler = new TronInputHandler('arrows');
+  private renderMobileLayout(): void {
+    // Force landscape orientation hint
+    this.container.innerHTML = `
+      <style>
+        .mobile-game-container {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100vw;
+          height: 100vh;
+          height: 100dvh; /* Dynamic viewport height for mobile */
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #000;
+          touch-action: none;
+          user-select: none;
+          -webkit-user-select: none;
+          overflow: hidden;
+        }
+        .mobile-game-layout {
+          position: relative;
+          width: 100%;
+          height: 100%;
+        }
+        .control-zone {
+          position: absolute;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10;
+        }
+        .control-zone-left {
+          left: 5px;
+          bottom: 5px;
+        }
+        .control-zone-right {
+          right: 5px;
+          bottom: 5px;
+        }
+        .joystick-zone {
+          width: 100px;
+          height: 100px;
+          position: relative;
+          background: rgba(0, 255, 255, 0.15);
+          border-radius: 50%;
+          border: 2px solid rgba(0, 255, 255, 0.4);
+        }
+        .action-button {
+          width: 60px;
+          height: 60px;
+          border-radius: 50%;
+          background: rgba(0, 255, 0, 0.25);
+          border: 3px solid rgba(0, 255, 0, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #0f0;
+          font-family: monospace;
+          font-size: 0.6rem;
+          font-weight: bold;
+          text-shadow: 0 0 5px #0f0;
+          opacity: 0.8;
+          transition: transform 0.1s, opacity 0.1s;
+        }
+        .canvas-container {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .canvas-container canvas {
+          max-width: 100%;
+          max-height: 100%;
+          object-fit: contain;
+        }
+        .back-button-mobile {
+          position: absolute;
+          top: 5px;
+          left: 5px;
+          padding: 6px 10px;
+          font-family: monospace;
+          font-size: 0.7rem;
+          background: rgba(32, 0, 0, 0.7);
+          color: #f44;
+          border: 1px solid #f44;
+          border-radius: 4px;
+          z-index: 100;
+          cursor: pointer;
+        }
+        .fullscreen-button {
+          position: absolute;
+          top: 5px;
+          right: 5px;
+          padding: 6px 10px;
+          font-family: monospace;
+          font-size: 0.7rem;
+          background: rgba(0, 32, 32, 0.7);
+          color: #0ff;
+          border: 1px solid #0ff;
+          border-radius: 4px;
+          z-index: 100;
+          cursor: pointer;
+        }
+        /* Portrait orientation warning */
+        @media (orientation: portrait) {
+          .rotate-hint {
+            display: flex !important;
+          }
+          .mobile-game-layout {
+            display: none !important;
+          }
+        }
+        @media (orientation: landscape) {
+          .rotate-hint {
+            display: none !important;
+          }
+        }
+        .rotate-hint {
+          display: none;
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: #000;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          color: #0ff;
+          font-family: monospace;
+          text-align: center;
+          padding: 2rem;
+          z-index: 200;
+        }
+        .rotate-icon {
+          font-size: 4rem;
+          margin-bottom: 1rem;
+          animation: rotate-phone 2s ease-in-out infinite;
+        }
+        @keyframes rotate-phone {
+          0%, 100% { transform: rotate(0deg); }
+          50% { transform: rotate(90deg); }
+        }
+      </style>
 
-    // Setup network handlers
-    this.setupNetworkHandlers();
+      <div class="mobile-game-container">
+        <!-- Rotate hint for portrait mode -->
+        <div class="rotate-hint">
+          <div class="rotate-icon">📱</div>
+          <div style="font-size: 1.2rem; margin-bottom: 0.5rem;">Rotate your device</div>
+          <div style="color: #888;">Play in landscape mode</div>
+        </div>
 
-    // Initialize game state
-    if (this.config.isHost) {
-      // Host creates authoritative game state
-      this.gameState = new TronGameState(this.config.players, this.config.gameMode);
-    } else {
-      // Guest creates local state for rendering (updated from network)
-      this.gameState = new TronGameState(this.config.players, this.config.gameMode);
-    }
+        <!-- Game layout -->
+        <div class="mobile-game-layout">
+          <!-- Top buttons -->
+          <button id="backBtn" class="back-button-mobile">✕</button>
+          <button id="fullscreenBtn" class="fullscreen-button">⛶</button>
+          <!-- Full-screen Canvas -->
+          <div id="gameCanvas" class="canvas-container"></div>
 
-    // Event listeners
-    document.getElementById('backBtn')?.addEventListener('click', () => {
-      this.cleanup();
-      this.screenManager.showMainMenu();
-    });
+          <!-- Overlaid controls -->
+          <!-- Left: Joystick -->
+          <div class="control-zone control-zone-left">
+            <div id="joystickZone" class="joystick-zone"></div>
+          </div>
 
-    // Start game loop
-    this.lastFrameTime = performance.now();
-    this.startGameLoop();
+          <!-- Right: Action button -->
+          <div class="control-zone control-zone-right">
+            <div id="actionButton" class="action-button">ACTION</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Initialize renderer (mobile fullscreen mode)
+    const canvasContainer = document.getElementById('gameCanvas')!;
+    this.renderer = new TronRenderer(canvasContainer, this.config.players, true);
   }
 
   private setupNetworkHandlers(): void {

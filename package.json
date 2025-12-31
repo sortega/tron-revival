@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "nanoid": "^5.0.9",
+    "nipplejs": "^0.10.2",
     "trystero": "^0.21.0",
     "unique-names-generator": "^4.7.1"
   }
