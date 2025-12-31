@@ -36,28 +36,57 @@ const SOUND_FILES: Record<SoundName, string> = {
 
 export class SoundManager {
   private sounds: Map<SoundName, HTMLAudioElement> = new Map();
-  private loaded = false;
+  private loadedCount = 0;
+  private totalCount = Object.keys(SOUND_FILES).length;
   private loopingSounds: Map<string, HTMLAudioElement> = new Map();
+  private preloadPromise: Promise<void>;
 
   constructor() {
-    this.preloadSounds();
+    this.preloadPromise = this.preloadSounds();
   }
 
-  private preloadSounds(): void {
+  private preloadSounds(): Promise<void> {
     const basePath = `${import.meta.env.BASE_URL}assets/sounds/`;
+    const loadPromises: Promise<void>[] = [];
 
     for (const [name, file] of Object.entries(SOUND_FILES)) {
-      const audio = new Audio(basePath + file);
+      const audio = new Audio();
       audio.preload = 'auto';
+
+      const loadPromise = new Promise<void>((resolve) => {
+        audio.addEventListener('canplaythrough', () => {
+          this.loadedCount++;
+          resolve();
+        }, { once: true });
+
+        audio.addEventListener('error', () => {
+          console.warn(`Failed to load sound: ${name}`);
+          this.loadedCount++;
+          resolve(); // Still resolve to not block other sounds
+        }, { once: true });
+      });
+
+      // Set src after adding listeners to ensure events fire
+      audio.src = basePath + file;
       this.sounds.set(name as SoundName, audio);
+      loadPromises.push(loadPromise);
     }
 
-    this.loaded = true;
+    return Promise.all(loadPromises).then(() => {
+      console.log(`[SoundManager] Loaded ${this.loadedCount}/${this.totalCount} sounds`);
+    });
+  }
+
+  // Wait for all sounds to load
+  async waitForLoad(): Promise<void> {
+    await this.preloadPromise;
+  }
+
+  isLoaded(): boolean {
+    return this.loadedCount >= this.totalCount;
   }
 
   play(name: SoundName): void {
-    if (!this.loaded) return;
-
     const audio = this.sounds.get(name);
     if (audio) {
       // Clone the audio to allow overlapping sounds
@@ -71,8 +100,6 @@ export class SoundManager {
 
   // Start a looping sound with a unique key (e.g., player slot)
   playLoop(name: SoundName, key: string): void {
-    if (!this.loaded) return;
-
     // Don't restart if already playing
     if (this.loopingSounds.has(key)) return;
 
@@ -114,4 +141,9 @@ export function getSoundManager(): SoundManager {
     instance = new SoundManager();
   }
   return instance;
+}
+
+// Initialize sound manager early to start preloading
+export function initSoundManager(): SoundManager {
+  return getSoundManager();
 }

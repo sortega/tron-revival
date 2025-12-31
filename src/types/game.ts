@@ -61,12 +61,22 @@ export interface TronMatchState {
   gameMode: GameMode;
 }
 
+// Sound event for network sync
+export interface SoundEvent {
+  sound: string;  // SoundName, but using string for serialization
+  loop?: boolean;
+  loopKey?: string;
+  stopLoop?: string;  // Key of loop to stop
+}
+
 // Full game state for network broadcast
 export interface TronGameStateData {
   round: TronRoundState;
   match: TronMatchState;
   // Trail data sent separately for efficiency - only new segments
   newTrailSegments: { slotIndex: SlotIndex; segments: TrailSegment[] }[];
+  // Sound events to play on this frame
+  soundEvents: SoundEvent[];
 }
 
 // Input includes action key for ready signal

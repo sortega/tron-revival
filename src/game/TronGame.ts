@@ -2,12 +2,13 @@
 
 import type { Screen, ScreenManager } from '../screens/ScreenManager';
 import type { GameConnection } from '../network/GameConnection';
-import type { GameConfig, TronInput, TronGameStateData, TrailSegment } from '../types/game';
+import type { GameConfig, TronInput, TronGameStateData, TrailSegment, SoundEvent } from '../types/game';
 import { LEVELS } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
 import { TronGameState } from './TronGameState';
 import { TronRenderer } from './TronRenderer';
 import { TronInputHandler, isTouchDevice } from './TronInput';
+import { getSoundManager, type SoundName } from './SoundManager';
 
 export class TronGame implements Screen {
   private container: HTMLElement;
@@ -437,6 +438,9 @@ export class TronGame implements Screen {
         this.renderer.addTrailSegments(slotIndex, segments);
       }
 
+      // Play sounds locally
+      this.playSoundEvents(stateData.soundEvents);
+
       // Broadcast state to guests
       this.broadcastState(stateData);
 
@@ -462,6 +466,11 @@ export class TronGame implements Screen {
         // Clear pending segments after processing
         this.pendingTrailSegments.clear();
 
+        // Play sounds from received state
+        if (this.receivedState.soundEvents) {
+          this.playSoundEvents(this.receivedState.soundEvents);
+        }
+
         // Render
         this.renderer.render(this.receivedState.round, this.receivedState.match);
       } else {
@@ -481,6 +490,19 @@ export class TronGame implements Screen {
   private broadcastState(state: TronGameStateData): void {
     // Broadcast full Tron state to all guests
     this.connection.broadcastTronState(state);
+  }
+
+  private playSoundEvents(events: SoundEvent[]): void {
+    const sound = getSoundManager();
+    for (const event of events) {
+      if (event.stopLoop) {
+        sound.stopLoop(event.stopLoop);
+      } else if (event.loop && event.loopKey) {
+        sound.playLoop(event.sound as SoundName, event.loopKey);
+      } else if (event.sound) {
+        sound.play(event.sound as SoundName);
+      }
+    }
   }
 
   private loadLevel(levelIndex: number): void {

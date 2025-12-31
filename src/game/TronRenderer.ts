@@ -433,33 +433,47 @@ export class TronRenderer {
     this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
 
-    // Title
+    // Title - show round number
     this.ctx.fillStyle = '#0ff';
     this.ctx.font = 'bold 36px monospace';
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
-    this.ctx.fillText('WAITING FOR PLAYERS', PLAY_WIDTH / 2, CANVAS_HEIGHT / 2 - 80);
+    const title = match.currentRound > 1 ? `ROUND ${match.currentRound}` : 'GET READY';
+    this.ctx.fillText(title, PLAY_WIDTH / 2, CANVAS_HEIGHT / 2 - 100);
 
-    // Player ready status - start below title with proper spacing
+    // Player scores and ready status
     this.ctx.textBaseline = 'alphabetic';
-    const startY = CANVAS_HEIGHT / 2 - 20;
+    const startY = CANVAS_HEIGHT / 2 - 30;
 
-    this.players.forEach((player, i) => {
+    // Sort players by score (descending) for display
+    const sortedPlayers = [...this.players].sort((a, b) => {
+      const scoreA = match.scores[a.slotIndex] || 0;
+      const scoreB = match.scores[b.slotIndex] || 0;
+      return scoreB - scoreA;
+    });
+
+    sortedPlayers.forEach((player, i) => {
       const isReady = match.playersReady.includes(player.slotIndex);
-      const statusText = isReady ? 'READY' : 'waiting...';
-      const statusColor = isReady ? '#0f0' : '#666';
+      const score = match.scores[player.slotIndex] || 0;
       const y = startY + i * 35;
 
-      // Nickname right-aligned on left side
+      // Score
+      this.ctx.fillStyle = '#ff0';
+      this.ctx.font = 'bold 20px monospace';
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText(String(score), PLAY_WIDTH / 2 - 120, y);
+
+      // Nickname
       this.ctx.fillStyle = player.color;
       this.ctx.font = '20px monospace';
-      this.ctx.textAlign = 'right';
-      this.ctx.fillText(player.nickname, PLAY_WIDTH / 2 - 20, y);
-
-      // Status left-aligned on right side
-      this.ctx.fillStyle = statusColor;
       this.ctx.textAlign = 'left';
-      this.ctx.fillText(statusText, PLAY_WIDTH / 2 + 20, y);
+      this.ctx.fillText(player.nickname, PLAY_WIDTH / 2 - 100, y);
+
+      // Ready status
+      const statusText = isReady ? 'READY' : 'waiting...';
+      this.ctx.fillStyle = isReady ? '#0f0' : '#666';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(statusText, PLAY_WIDTH / 2 + 100, y);
     });
 
     // Instructions

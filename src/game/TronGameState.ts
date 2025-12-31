@@ -10,6 +10,7 @@ import type {
   RoundPhase,
   TeleportPortal,
   GameItem,
+  SoundEvent,
 } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import {
@@ -89,6 +90,9 @@ export class TronGameState {
   // New trail segments this frame (for network efficiency)
   private frameTrailSegments: Map<SlotIndex, TrailSegment[]> = new Map();
 
+  // Sound events this frame (for network sync)
+  private frameSoundEvents: SoundEvent[] = [];
+
   // Track previous action state for one-shot ready detection
   private prevActionState: Map<SlotIndex, boolean> = new Map();
 
@@ -109,6 +113,21 @@ export class TronGameState {
 
     // Initialize players for first round
     this.initRound();
+  }
+
+  // Queue a sound event for network sync
+  private queueSound(sound: string): void {
+    this.frameSoundEvents.push({ sound });
+  }
+
+  // Queue a looping sound
+  private queueLoopSound(sound: string, loopKey: string): void {
+    this.frameSoundEvents.push({ sound, loop: true, loopKey });
+  }
+
+  // Queue stopping a looping sound
+  private queueStopLoop(loopKey: string): void {
+    this.frameSoundEvents.push({ sound: '', stopLoop: loopKey });
   }
 
   // Set level obstacle pixels (called by TronGame after loading level image)
@@ -209,7 +228,7 @@ export class TronGameState {
     if (this.countdown <= 0) {
       this.countdown = 0;
       this.phase = 'playing';
-      getSoundManager().play('round_start');
+      this.queueSound('round_start');
     }
   }
 
@@ -296,7 +315,7 @@ export class TronGameState {
     // Kill players that collided
     for (const player of dyingPlayers) {
       player.kill();
-      getSoundManager().play('laughs');
+      this.queueSound('laughs');
     }
 
     // Spawn items periodically
@@ -320,7 +339,6 @@ export class TronGameState {
     }
 
     // Handle weapon use (action button)
-    const sound = getSoundManager();
     for (const [slotIndex, input] of inputs) {
       const player = this.players.find(p => p.slotIndex === slotIndex);
       if (player?.alive && player.equippedWeapon) {
@@ -331,7 +349,7 @@ export class TronGameState {
           const wasPressed = this.prevActionState.get(slotIndex) || false;
           if (input.action && !wasPressed && player.useWeapon()) {
             if (weaponDef?.useSound) {
-              sound.play(weaponDef.useSound);
+              this.queueSound(weaponDef.useSound);
             }
           }
         } else if (player.equippedWeapon.remainingFrames !== undefined) {
@@ -341,20 +359,20 @@ export class TronGameState {
             player.tickWeapon();
             // Start looping sound if defined
             if (weaponDef?.loopSound && weaponDef.useSound) {
-              sound.playLoop(weaponDef.useSound, loopKey);
+              this.queueLoopSound(weaponDef.useSound, loopKey);
             }
             // Stop loop if weapon ran out
             if (!player.equippedWeapon) {
-              sound.stopLoop(loopKey);
+              this.queueStopLoop(loopKey);
             }
           } else {
             // Action released - stop looping sound
-            sound.stopLoop(loopKey);
+            this.queueStopLoop(loopKey);
           }
         }
       } else {
         // Player dead or no weapon - stop any looping sound
-        sound.stopLoop(`weapon-${slotIndex}`);
+        this.queueStopLoop(`weapon-${slotIndex}`);
       }
       // Update previous action state for next frame
       this.prevActionState.set(slotIndex, input.action);
@@ -497,7 +515,7 @@ export class TronGameState {
     // Set cooldown to prevent immediate re-teleport
     this.teleportCooldowns.set(player.slotIndex, this.TELEPORT_COOLDOWN_FRAMES);
 
-    getSoundManager().play('teleport');
+    this.queueSound('teleport');
   }
 
   // Check if player picks up an item
@@ -571,7 +589,7 @@ export class TronGameState {
       player.equipWeapon(item.sprite, def.ammo, def.duration);
     }
 
-    getSoundManager().play(def.pickupSound || 'item_pickup');
+    this.queueSound(def.pickupSound || 'item_pickup');
   }
 
   private checkRoundEnd(): void {
@@ -651,10 +669,15 @@ export class TronGameState {
       ([slotIndex, segments]) => ({ slotIndex, segments })
     );
 
+    // Capture and clear sound events
+    const soundEvents = [...this.frameSoundEvents];
+    this.frameSoundEvents = [];
+
     return {
       round: roundState,
       match: matchState,
       newTrailSegments,
+      soundEvents,
     };
   }
 
