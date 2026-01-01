@@ -335,19 +335,28 @@ export class TronGameState {
         // Check collision immediately after move
         const collisionPixel = player.checkCollision(this.pixelOwners);
         if (collisionPixel) {
-          player.kill();
-          // Check if ridiculous death (crashed into own color)
           const pixelOwner = this.pixelOwners.get(collisionPixel);
-          if (pixelOwner === player.color) {
-            // Ridiculous death!
-            const count = (this.ridiculousDeaths.get(player.slotIndex) || 0) + 1;
-            this.ridiculousDeaths.set(player.slotIndex, count);
-            this.frameRidiculousDeaths.push(player.slotIndex);
-            this.queueSound('panico');
-          } else {
-            this.queueSound('laughs');
+          const hasShield = player.hasEffect('shield');
+          const hasCrossing = player.hasEffect('crossing');
+          const isOwnColor = pixelOwner === player.color;
+
+          // Shield: complete invincibility
+          // Crossing: can pass through own color only
+          const isProtected = hasShield || (hasCrossing && isOwnColor);
+
+          if (!isProtected) {
+            player.kill();
+            if (isOwnColor) {
+              // Ridiculous death!
+              const count = (this.ridiculousDeaths.get(player.slotIndex) || 0) + 1;
+              this.ridiculousDeaths.set(player.slotIndex, count);
+              this.frameRidiculousDeaths.push(player.slotIndex);
+              this.queueSound('panico');
+            } else {
+              this.queueSound('laughs');
+            }
+            continue;
           }
-          continue;
         }
 
         // Add trail segments to collision map
@@ -376,10 +385,16 @@ export class TronGameState {
             p1.prevScreenX, p1.prevScreenY, p1.getScreenX(), p1.getScreenY(),
             p2.prevScreenX, p2.prevScreenY, p2.getScreenX(), p2.getScreenY()
           )) {
-            // Both players die on diagonal collision
-            p1.kill();
-            p2.kill();
-            this.queueSound('laughs');
+            // Players with shield survive diagonal collision
+            const p1HasShield = p1.hasEffect('shield');
+            const p2HasShield = p2.hasEffect('shield');
+
+            if (!p1HasShield) p1.kill();
+            if (!p2HasShield) p2.kill();
+
+            if (!p1HasShield || !p2HasShield) {
+              this.queueSound('laughs');
+            }
           }
         }
       }
