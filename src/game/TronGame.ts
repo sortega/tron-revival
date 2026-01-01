@@ -34,6 +34,15 @@ export class TronGame implements Screen {
   private lastFrameTime: number = 0;
   private readonly TARGET_FRAME_TIME = 1000 / 70; // 70fps
 
+  // FPS tracking for debug display (circular buffer)
+  private frameTimes: number[] = new Array(70).fill(0);
+  private frameTimeIndex: number = 0;
+  private frameCount: number = 0;
+  private lastFpsUpdate: number = 0;
+  private currentFps: number = 70;
+  private showFps: boolean = localStorage.getItem('showFps') === 'true';
+  private fpsKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+
   // Track loaded level to detect changes
   private loadedLevelIndex: number = -1;
   private levelLoading: boolean = false;
@@ -155,6 +164,15 @@ export class TronGame implements Screen {
         (e.currentTarget as HTMLElement).style.display = 'none';
       }
     });
+
+    // FPS toggle with 'f' key
+    this.fpsKeyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'f' || e.key === 'F') {
+        this.showFps = !this.showFps;
+        localStorage.setItem('showFps', this.showFps ? 'true' : 'false');
+      }
+    };
+    document.addEventListener('keydown', this.fpsKeyHandler);
 
     // Start game loop
     this.lastFrameTime = performance.now();
@@ -515,12 +533,23 @@ export class TronGame implements Screen {
   private startGameLoop(): void {
     const loop = (currentTime: number): void => {
       // Calculate delta time
-      const deltaTime = currentTime - this.lastFrameTime;
+      let deltaTime = currentTime - this.lastFrameTime;
 
-      // Only process frame if enough time has passed
-      if (deltaTime >= this.TARGET_FRAME_TIME) {
-        this.lastFrameTime = currentTime - (deltaTime % this.TARGET_FRAME_TIME);
+      // Process multiple frames if needed (decouples game logic from display refresh)
+      // Cap at 5 frames per RAF to prevent spiral of death when tab is backgrounded
+      let framesProcessed = 0;
+      const maxFramesPerRaf = 5;
+
+      while (deltaTime >= this.TARGET_FRAME_TIME && framesProcessed < maxFramesPerRaf) {
+        this.lastFrameTime += this.TARGET_FRAME_TIME;
+        deltaTime -= this.TARGET_FRAME_TIME;
         this.processFrame();
+        framesProcessed++;
+      }
+
+      // If we hit the cap, reset timing to prevent accumulating debt
+      if (framesProcessed >= maxFramesPerRaf) {
+        this.lastFrameTime = currentTime;
       }
 
       this.animationId = requestAnimationFrame(loop);
@@ -531,6 +560,24 @@ export class TronGame implements Screen {
 
   private processFrame(): void {
     if (!this.inputHandler || !this.renderer || !this.gameState) return;
+
+    // Track FPS using circular buffer (O(1) per frame)
+    const now = performance.now();
+    this.frameTimes[this.frameTimeIndex] = now;
+    this.frameTimeIndex = (this.frameTimeIndex + 1) % 70;
+    if (this.frameCount < 70) this.frameCount++;
+
+    // Update FPS display every 500ms
+    if (now - this.lastFpsUpdate > 500 && this.frameCount >= 2) {
+      // Find oldest and newest times in circular buffer
+      const oldestIndex = this.frameCount < 70 ? 0 : this.frameTimeIndex;
+      const newestIndex = (this.frameTimeIndex + 69) % 70;
+      const elapsed = this.frameTimes[newestIndex]! - this.frameTimes[oldestIndex]!;
+      if (elapsed > 0) {
+        this.currentFps = Math.round((this.frameCount - 1) * 1000 / elapsed);
+      }
+      this.lastFpsUpdate = now;
+    }
 
     // Check if level needs to be loaded (for both host and guest)
     const currentLevelIndex = this.gameState.currentLevelIndex;
@@ -573,6 +620,13 @@ export class TronGame implements Screen {
         this.renderer.restoreLevel();
       }
 
+      // Handle ridiculous death events
+      if (stateData.ridiculousDeathSlots) {
+        for (const slot of stateData.ridiculousDeathSlots) {
+          this.renderer.triggerRidiculousDeath(slot);
+        }
+      }
+
       // Play sounds locally
       this.playSoundEvents(stateData.soundEvents);
 
@@ -580,7 +634,7 @@ export class TronGame implements Screen {
       this.broadcastState(stateData);
 
       // Render
-      this.renderer.render(stateData.round, stateData.match);
+      this.renderer.render(stateData.round, stateData.match, this.showFps ? this.currentFps : undefined);
     } else {
       // Guest: Send input to host and render received state
 
@@ -617,6 +671,14 @@ export class TronGame implements Screen {
           this.receivedState.eraserUsed = undefined;
         }
 
+        // Handle ridiculous death events
+        if (this.receivedState.ridiculousDeathSlots) {
+          for (const slot of this.receivedState.ridiculousDeathSlots) {
+            this.renderer.triggerRidiculousDeath(slot);
+          }
+          this.receivedState.ridiculousDeathSlots = undefined;
+        }
+
         // Play sounds from received state (clear after playing to prevent replay)
         if (this.receivedState.soundEvents && this.receivedState.soundEvents.length > 0) {
           this.playSoundEvents(this.receivedState.soundEvents);
@@ -624,11 +686,11 @@ export class TronGame implements Screen {
         }
 
         // Render
-        this.renderer.render(this.receivedState.round, this.receivedState.match);
+        this.renderer.render(this.receivedState.round, this.receivedState.match, this.showFps ? this.currentFps : undefined);
       } else {
         // Render initial state while waiting for first update
         const stateData = this.gameState.serialize();
-        this.renderer.render(stateData.round, stateData.match);
+        this.renderer.render(stateData.round, stateData.match, this.showFps ? this.currentFps : undefined);
       }
     }
 
@@ -683,6 +745,12 @@ export class TronGame implements Screen {
     if (this.animationId !== null) {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
+    }
+
+    // Cleanup FPS key handler
+    if (this.fpsKeyHandler) {
+      document.removeEventListener('keydown', this.fpsKeyHandler);
+      this.fpsKeyHandler = null;
     }
 
     // Cleanup input handler

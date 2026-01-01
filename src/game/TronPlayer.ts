@@ -136,22 +136,23 @@ export class TronPlayer {
     return newSegments;
   }
 
-  // Check collision against a set of occupied pixels
-  // Returns true if collision detected
+  // Check collision against occupied pixels (map of pixel coord -> color)
+  // Returns the pixel coordinate that was hit, or null if no collision
   // For diagonal movement, also checks intermediate pixels to prevent "slipping through"
-  checkCollision(occupiedPixels: Set<string>): boolean {
-    if (!this.alive) return false;
+  checkCollision(pixelOwners: Map<string, string>): string | null {
+    if (!this.alive) return null;
 
     const currX = this.getScreenX();
     const currY = this.getScreenY();
 
     // Check current position
-    if (occupiedPixels.has(`${currX},${currY}`)) {
-      return true;
+    const currKey = `${currX},${currY}`;
+    if (pixelOwners.has(currKey)) {
+      return currKey;
     }
 
     // If we haven't moved yet (prevScreenX < 0), only check current position
-    if (this.prevScreenX < 0) return false;
+    if (this.prevScreenX < 0) return null;
 
     const dx = currX - this.prevScreenX;
     const dy = currY - this.prevScreenY;
@@ -163,12 +164,15 @@ export class TronPlayer {
       const interX = `${this.prevScreenX + dx},${this.prevScreenY}`;
       const interY = `${this.prevScreenX},${this.prevScreenY + dy}`;
 
-      if (occupiedPixels.has(interX) || occupiedPixels.has(interY)) {
-        return true;
+      if (pixelOwners.has(interX)) {
+        return interX;
+      }
+      if (pixelOwners.has(interY)) {
+        return interY;
       }
     }
 
-    return false;
+    return null;
   }
 
   // Kill the player

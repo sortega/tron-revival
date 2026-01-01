@@ -71,11 +71,16 @@ export class TronGameState {
   gameMode: GameMode;
   levelMode: LevelMode;
 
-  // Trail collision tracking
-  occupiedPixels: Set<string> = new Set();
+  // Trail collision tracking - maps pixel coordinates to their color
+  pixelOwners: Map<string, string> = new Map();
 
-  // Level obstacles (stored separately for eraser restore)
-  private levelObstacles: Set<string> = new Set();
+  // Ridiculous death tracking (crashing into own color)
+  ridiculousDeaths: Map<SlotIndex, number> = new Map();
+  // Track ridiculous death events this frame (for sidebar display) - multiple players can have it
+  frameRidiculousDeaths: SlotIndex[] = [];
+
+  // Level obstacles with colors (stored separately for eraser restore)
+  private levelObstacles: Map<string, string> = new Map();
 
   // Teleport portals
   portals: TeleportPortal[] = [];
@@ -131,9 +136,10 @@ export class TronGameState {
       }
     }
 
-    // Initialize scores
+    // Initialize scores and ridiculous death counts
     for (const config of playerConfigs) {
       this.scores.set(config.slotIndex, 0);
+      this.ridiculousDeaths.set(config.slotIndex, 0);
     }
 
     // Initialize players for first round
@@ -155,13 +161,13 @@ export class TronGameState {
     this.frameSoundEvents.push({ sound: '', stopLoop: loopKey });
   }
 
-  // Set level obstacle pixels (called by TronGame after loading level image)
-  setLevelObstacles(obstacles: Set<string>): void {
+  // Set level obstacle pixels with colors (called by TronGame after loading level image)
+  setLevelObstacles(obstacles: Map<string, string>): void {
     // Store separately for eraser restore
-    this.levelObstacles = new Set(obstacles);
+    this.levelObstacles = new Map(obstacles);
     // Add to collision map
-    for (const pixel of obstacles) {
-      this.occupiedPixels.add(pixel);
+    for (const [pixel, color] of obstacles) {
+      this.pixelOwners.set(pixel, color);
     }
   }
 
@@ -179,7 +185,7 @@ export class TronGameState {
     this.phase = 'countdown';
     this.countdown = COUNTDOWN_SECONDS;
     this.roundWinner = null;
-    this.occupiedPixels.clear();
+    this.pixelOwners.clear();
     this.frameTrailSegments.clear();
     this.playersReady.clear();
     this.prevActionState.clear();
@@ -327,15 +333,26 @@ export class TronGameState {
         const newSegments = player.update(input);
 
         // Check collision immediately after move
-        if (player.checkCollision(this.occupiedPixels)) {
+        const collisionPixel = player.checkCollision(this.pixelOwners);
+        if (collisionPixel) {
           player.kill();
-          this.queueSound('laughs');
+          // Check if ridiculous death (crashed into own color)
+          const pixelOwner = this.pixelOwners.get(collisionPixel);
+          if (pixelOwner === player.color) {
+            // Ridiculous death!
+            const count = (this.ridiculousDeaths.get(player.slotIndex) || 0) + 1;
+            this.ridiculousDeaths.set(player.slotIndex, count);
+            this.frameRidiculousDeaths.push(player.slotIndex);
+            this.queueSound('panico');
+          } else {
+            this.queueSound('laughs');
+          }
           continue;
         }
 
-        // Add trail segments to occupied pixels immediately
+        // Add trail segments to collision map
         for (const seg of newSegments) {
-          this.occupiedPixels.add(`${seg.x},${seg.y}`);
+          this.pixelOwners.set(`${seg.x},${seg.y}`, player.color);
         }
 
         // Accumulate for network transmission
@@ -483,10 +500,10 @@ export class TronGameState {
         const x = z + i * 150;
         if (x < PLAY_WIDTH) {
           // Top edge (y=0)
-          this.occupiedPixels.add(`${x},0`);
+          this.pixelOwners.set(`${x},0`, lock.color);
           segments.push({ x, y: 0 });
           // Bottom edge (y=PLAY_HEIGHT-1)
-          this.occupiedPixels.add(`${x},${PLAY_HEIGHT - 1}`);
+          this.pixelOwners.set(`${x},${PLAY_HEIGHT - 1}`, lock.color);
           segments.push({ x, y: PLAY_HEIGHT - 1 });
         }
       }
@@ -496,10 +513,10 @@ export class TronGameState {
         const y = z + i * 150;
         if (y < PLAY_HEIGHT) {
           // Left edge (x=0)
-          this.occupiedPixels.add(`0,${y}`);
+          this.pixelOwners.set(`0,${y}`, lock.color);
           segments.push({ x: 0, y });
           // Right edge (x=PLAY_WIDTH-1)
-          this.occupiedPixels.add(`${PLAY_WIDTH - 1},${y}`);
+          this.pixelOwners.set(`${PLAY_WIDTH - 1},${y}`, lock.color);
           segments.push({ x: PLAY_WIDTH - 1, y });
         }
       }
@@ -794,8 +811,8 @@ export class TronGameState {
       player.trail = [];
     }
 
-    // Reset occupied pixels to only level obstacles
-    this.occupiedPixels = new Set(this.levelObstacles);
+    // Reset collision map to only level obstacles
+    this.pixelOwners = new Map(this.levelObstacles);
 
     // Stop any active border locks
     if (this.borderLocks.size > 0) {
@@ -885,6 +902,7 @@ export class TronGameState {
       playersReady: Array.from(this.playersReady),
       gameMode: this.gameMode,
       levelMode: this.levelMode,
+      ridiculousDeath: Object.fromEntries(this.ridiculousDeaths),
     };
 
     const newTrailSegments = Array.from(this.frameTrailSegments.entries()).map(
@@ -905,6 +923,10 @@ export class TronGameState {
     const eraserUsed = this.frameEraserUsed || undefined;
     this.frameEraserUsed = false;
 
+    // Capture and clear ridiculous death slots
+    const ridiculousDeathSlots = this.frameRidiculousDeaths.length > 0 ? [...this.frameRidiculousDeaths] : undefined;
+    this.frameRidiculousDeaths = [];
+
     return {
       round: roundState,
       match: matchState,
@@ -912,6 +934,7 @@ export class TronGameState {
       borderSegments,
       soundEvents,
       eraserUsed,
+      ridiculousDeathSlots,
     };
   }
 
@@ -943,13 +966,23 @@ export class TronGameState {
       this.scores.set(Number(slot) as SlotIndex, score);
     }
 
+    // Update ridiculous death counts
+    if (state.match.ridiculousDeath) {
+      for (const [slot, count] of Object.entries(state.match.ridiculousDeath)) {
+        this.ridiculousDeaths.set(Number(slot) as SlotIndex, count);
+      }
+    }
+
+    // Update ridiculous death slots (for rendering)
+    this.frameRidiculousDeaths = state.ridiculousDeathSlots ?? [];
+
     // Add new trail segments
     for (const { slotIndex, segments } of state.newTrailSegments) {
       const player = this.players.find(p => p.slotIndex === slotIndex);
       if (player) {
         for (const seg of segments) {
           player.trail.push(seg);
-          this.occupiedPixels.add(`${seg.x},${seg.y}`);
+          this.pixelOwners.set(`${seg.x},${seg.y}`, player.color);
         }
       }
     }

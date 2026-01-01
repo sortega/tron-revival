@@ -10,7 +10,7 @@ export type UseSound = typeof USE_SOUNDS[number];
 
 // All sound names
 const SOUND_NAMES = [
-  'round_start', 'laughs', 'teleport', 'drill',
+  'round_start', 'laughs', 'teleport', 'drill', 'panico',
   ...PICKUP_SOUNDS,
   ...USE_SOUNDS,
 ] as const;
@@ -20,6 +20,7 @@ const SOUND_FILES: Record<SoundName, string> = {
   round_start: 'round_start.mp3',
   laughs: 'laughs.mp3',
   teleport: 'teleport.mp3',
+  panico: 'panico.mp3',
   item_pickup: 'item_pickup.mp3',
   shield: 'shield.mp3',
   turbo: 'turbo.mp3',

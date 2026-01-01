@@ -31,6 +31,9 @@ export class TronRenderer {
   // Sprite atlas for items/portals
   private spriteAtlas: SpriteAtlas | null = null;
 
+  // Ridiculous death display - slots that died ridiculously this round
+  private ridiculousDeathSlots: Set<SlotIndex> = new Set();
+
   // Resize handler (stored for cleanup)
   private readonly resizeHandler: () => void;
 
@@ -112,7 +115,7 @@ export class TronRenderer {
   }
 
   // Main render function
-  render(round: TronRoundState, match: TronMatchState): void {
+  render(round: TronRoundState, match: TronMatchState, fps?: number): void {
     // Clear the play area
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
@@ -161,6 +164,15 @@ export class TronRenderer {
         this.drawWaitingReadyOverlay(match);
         break;
     }
+
+    // Draw FPS counter (debug)
+    if (fps !== undefined) {
+      this.ctx.fillStyle = fps < 60 ? '#f44' : fps < 68 ? '#ff0' : '#0f0';
+      this.ctx.font = '12px monospace';
+      this.ctx.textAlign = 'left';
+      this.ctx.textBaseline = 'top';
+      this.ctx.fillText(`${fps} FPS`, 4, 4);
+    }
   }
 
   // Add trail segments to the off-screen canvas
@@ -183,9 +195,14 @@ export class TronRenderer {
     }
   }
 
-  // Clear all trails (for new round)
+  // Clear all trails and restore level (for new round)
   clearTrails(): void {
     this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    this.ridiculousDeathSlots.clear();
+    // Restore level canvas (removes lock borders modifications)
+    if (this.currentLevelImage) {
+      this.levelCtx.drawImage(this.currentLevelImage, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    }
   }
 
   // Restore level to original state (for eraser)
@@ -200,10 +217,15 @@ export class TronRenderer {
     }
   }
 
-  // Load a level background and return obstacle pixels
-  // Returns a Promise that resolves with the set of obstacle pixel coordinates
-  async loadLevel(level: LevelDefinition): Promise<Set<string>> {
-    const obstacles = new Set<string>();
+  // Trigger ridiculous death display for a player
+  triggerRidiculousDeath(slotIndex: SlotIndex): void {
+    this.ridiculousDeathSlots.add(slotIndex);
+  }
+
+  // Load a level background and return obstacle pixels with their colors
+  // Returns a Promise that resolves with a map of pixel coordinates -> hex color
+  async loadLevel(level: LevelDefinition): Promise<Map<string, string>> {
+    const obstacles = new Map<string, string>();
 
     // Load the level image
     const img = new Image();
@@ -220,7 +242,7 @@ export class TronRenderer {
     // Draw to level canvas
     this.levelCtx.drawImage(img, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
 
-    // Extract non-black pixels as obstacles
+    // Extract non-black pixels as obstacles with their colors
     const imageData = this.levelCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     const data = imageData.data;
 
@@ -231,9 +253,11 @@ export class TronRenderer {
         const g = data[idx + 1] ?? 0;
         const b = data[idx + 2] ?? 0;
 
-        // Non-black pixels are obstacles (threshold to handle near-black colors)
-        if (r > 10 || g > 10 || b > 10) {
-          obstacles.add(`${x},${y}`);
+        // Non-black pixels are obstacles (only pitch black is passable)
+        if (r !== 0 || g !== 0 || b !== 0) {
+          // Convert to hex color
+          const color = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+          obstacles.set(`${x},${y}`, color);
         }
       }
     }
@@ -324,6 +348,19 @@ export class TronRenderer {
 
       if (player && playerState) {
         const centerX = panelX + STATUS_WIDTH / 2;
+
+        // Check if ridiculous death should be shown (overrides other displays)
+        if (this.ridiculousDeathSlots.has(slotIndex) && this.spriteAtlas?.isLoaded()) {
+          // Draw ridiculous death sprite covering the slot (50x150)
+          this.spriteAtlas.draw(
+            this.ctx,
+            'ridiculous_death',
+            centerX,
+            y + slotHeight / 2
+          );
+          continue; // Skip normal rendering for this slot
+        }
+
         const hasWeapon = !!playerState.equippedWeapon;
         const hasEffect = playerState.activeEffects && playerState.activeEffects.length > 0;
 
@@ -455,8 +492,25 @@ export class TronRenderer {
     const title = match.currentRound > 1 ? `ROUND ${match.currentRound}` : 'GET READY';
     this.ctx.fillText(title, PLAY_WIDTH / 2, CANVAS_HEIGHT / 2 - 100);
 
-    // Player scores and ready status
+    // Column positions
+    const winsX = PLAY_WIDTH / 2 - 160;
+    const mrX = PLAY_WIDTH / 2 - 120;
+    const nicknameX = PLAY_WIDTH / 2 - 90;
+    const statusX = PLAY_WIDTH / 2 + 80;
+    const maxNicknameWidth = 150; // Max width before truncation
+
+    // Headers
+    this.ctx.fillStyle = '#888';
+    this.ctx.font = 'bold 14px monospace';
     this.ctx.textBaseline = 'alphabetic';
+    const headerY = CANVAS_HEIGHT / 2 - 55;
+    this.ctx.textAlign = 'right';
+    this.ctx.fillText('Wins', winsX, headerY);
+    this.ctx.fillText('MR', mrX, headerY);
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText('Player', nicknameX, headerY);
+
+    // Player scores and ready status
     const startY = CANVAS_HEIGHT / 2 - 30;
 
     // Sort players by score (descending) for display
@@ -469,25 +523,37 @@ export class TronRenderer {
     sortedPlayers.forEach((player, i) => {
       const isReady = match.playersReady.includes(player.slotIndex);
       const score = match.scores[player.slotIndex] || 0;
+      const mr = match.ridiculousDeath?.[player.slotIndex] || 0;
       const y = startY + i * 35;
 
-      // Score
+      // Wins (score)
       this.ctx.fillStyle = '#ff0';
       this.ctx.font = 'bold 20px monospace';
       this.ctx.textAlign = 'right';
-      this.ctx.fillText(String(score), PLAY_WIDTH / 2 - 120, y);
+      this.ctx.fillText(String(score), winsX, y);
 
-      // Nickname
+      // MR count
+      this.ctx.fillStyle = mr > 0 ? '#f44' : '#666';
+      this.ctx.fillText(String(mr), mrX, y);
+
+      // Nickname (truncated with ellipsis if too long)
       this.ctx.fillStyle = player.color;
       this.ctx.font = '20px monospace';
       this.ctx.textAlign = 'left';
-      this.ctx.fillText(player.nickname, PLAY_WIDTH / 2 - 100, y);
+      let nickname = player.nickname;
+      while (this.ctx.measureText(nickname).width > maxNicknameWidth && nickname.length > 3) {
+        nickname = nickname.slice(0, -1);
+      }
+      if (nickname !== player.nickname) {
+        nickname = nickname.slice(0, -2) + '…';
+      }
+      this.ctx.fillText(nickname, nicknameX, y);
 
       // Ready status
       const statusText = isReady ? 'READY' : 'waiting...';
       this.ctx.fillStyle = isReady ? '#0f0' : '#666';
       this.ctx.textAlign = 'left';
-      this.ctx.fillText(statusText, PLAY_WIDTH / 2 + 100, y);
+      this.ctx.fillText(statusText, statusX, y);
     });
 
     // Instructions

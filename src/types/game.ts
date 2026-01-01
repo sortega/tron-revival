@@ -61,6 +61,7 @@ export interface TronMatchState {
   playersReady: SlotIndex[];  // Slots that pressed action
   gameMode: GameMode;
   levelMode: LevelMode;
+  ridiculousDeath: Partial<Record<SlotIndex, number>>;  // Deaths by crashing into own color
 }
 
 // Sound event for network sync
@@ -83,6 +84,8 @@ export interface TronGameStateData {
   soundEvents: SoundEvent[];
   // Eraser was used - renderer should clear trails and restore level
   eraserUsed?: boolean;
+  // Ridiculous death happened - show it in these players' sidebar slots
+  ridiculousDeathSlots?: SlotIndex[];
 }
 
 // Input includes action key for ready signal

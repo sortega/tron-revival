@@ -4,12 +4,12 @@ export type SlotIndex = 0 | 1 | 2 | 3;
 export type GameMode = 'ffa' | 'team';
 export type LevelMode = 'cycle' | string;  // 'cycle' or specific level id
 
-// FFA colors
+// FFA colors (full #rrggbb format)
 export const FFA_COLORS: Record<SlotIndex, string> = {
-  0: '#f44', // Red
-  1: '#4f4', // Green
-  2: '#44f', // Blue
-  3: '#ff4', // Yellow
+  0: '#ff4444', // Red
+  1: '#44ff44', // Green
+  2: '#4444ff', // Blue
+  3: '#ffff44', // Yellow
 };
 
 export const FFA_COLOR_NAMES: Record<SlotIndex, string> = {
@@ -19,10 +19,10 @@ export const FFA_COLOR_NAMES: Record<SlotIndex, string> = {
   3: 'Yellow',
 };
 
-// Team colors
+// Team colors (full #rrggbb format)
 export const TEAM_COLORS = {
-  purple: '#a0a', // Team Purple (slots 0, 2)
-  brown: '#a60',  // Team Brown (slots 1, 3)
+  purple: '#aa00aa', // Team Purple (slots 0, 2)
+  brown: '#aa6600',  // Team Brown (slots 1, 3)
 };
 
 export function getSlotColor(mode: GameMode, slotIndex: SlotIndex): string {
