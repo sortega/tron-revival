@@ -77,10 +77,10 @@ export class TronGame implements Screen {
     // Initialize game state
     if (this.config.isHost) {
       // Host creates authoritative game state
-      this.gameState = new TronGameState(this.config.players, this.config.gameMode);
+      this.gameState = new TronGameState(this.config.players, this.config.gameMode, this.config.levelMode);
     } else {
       // Guest creates local state for rendering (updated from network)
-      this.gameState = new TronGameState(this.config.players, this.config.gameMode);
+      this.gameState = new TronGameState(this.config.players, this.config.gameMode, this.config.levelMode);
     }
 
     // Event listeners

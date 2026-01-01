@@ -1,6 +1,6 @@
 // Game types - clean interface between lobby and game
 
-import type { SlotIndex, GameMode } from './lobby';
+import type { SlotIndex, GameMode, LevelMode } from './lobby';
 
 export interface GamePlayer {
   slotIndex: SlotIndex;
@@ -18,6 +18,7 @@ export interface GameConfig {
   spectators: Spectator[];
   isHost: boolean;
   gameMode: GameMode;
+  levelMode: LevelMode;
 }
 
 // === Tron Game Types ===
@@ -59,6 +60,7 @@ export interface TronMatchState {
   currentLevelIndex: number;  // Index into LEVELS array
   playersReady: SlotIndex[];  // Slots that pressed action
   gameMode: GameMode;
+  levelMode: LevelMode;
 }
 
 // Sound event for network sync

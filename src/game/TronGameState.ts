@@ -1,6 +1,6 @@
 // TronGameState - Host-authoritative game state manager
 
-import type { SlotIndex, GameMode } from '../types/lobby';
+import type { SlotIndex, GameMode, LevelMode } from '../types/lobby';
 import type {
   TronRoundState,
   TronMatchState,
@@ -69,6 +69,7 @@ export class TronGameState {
   currentLevelIndex: number = 0;
   playersReady: Set<SlotIndex> = new Set();
   gameMode: GameMode;
+  levelMode: LevelMode;
 
   // Trail collision tracking
   occupiedPixels: Set<string> = new Set();
@@ -117,9 +118,18 @@ export class TronGameState {
   // Player configs for restarting rounds
   private playerConfigs: GamePlayer[];
 
-  constructor(playerConfigs: GamePlayer[], gameMode: GameMode) {
+  constructor(playerConfigs: GamePlayer[], gameMode: GameMode, levelMode: LevelMode) {
     this.playerConfigs = playerConfigs;
     this.gameMode = gameMode;
+    this.levelMode = levelMode;
+
+    // Set initial level based on levelMode
+    if (levelMode !== 'cycle') {
+      const levelIndex = LEVELS.findIndex(l => l.id === levelMode);
+      if (levelIndex >= 0) {
+        this.currentLevelIndex = levelIndex;
+      }
+    }
 
     // Initialize scores
     for (const config of playerConfigs) {
@@ -539,7 +549,10 @@ export class TronGameState {
     // Check if all players are ready
     if (this.playersReady.size >= this.players.length) {
       this.currentRound++;
-      this.currentLevelIndex = (this.currentLevelIndex + 1) % LEVELS.length;
+      // Only cycle levels if levelMode is 'cycle', otherwise keep same level
+      if (this.levelMode === 'cycle') {
+        this.currentLevelIndex = (this.currentLevelIndex + 1) % LEVELS.length;
+      }
       this.initRound();
     }
   }
@@ -871,6 +884,7 @@ export class TronGameState {
       currentLevelIndex: this.currentLevelIndex,
       playersReady: Array.from(this.playersReady),
       gameMode: this.gameMode,
+      levelMode: this.levelMode,
     };
 
     const newTrailSegments = Array.from(this.frameTrailSegments.entries()).map(
@@ -922,6 +936,7 @@ export class TronGameState {
     this.currentRound = state.match.currentRound;
     this.currentLevelIndex = state.match.currentLevelIndex;
     this.gameMode = state.match.gameMode;
+    this.levelMode = state.match.levelMode;
     this.playersReady = new Set(state.match.playersReady as SlotIndex[]);
 
     for (const [slot, score] of Object.entries(state.match.scores)) {

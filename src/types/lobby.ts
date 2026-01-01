@@ -2,6 +2,7 @@
 
 export type SlotIndex = 0 | 1 | 2 | 3;
 export type GameMode = 'ffa' | 'team';
+export type LevelMode = 'cycle' | string;  // 'cycle' or specific level id
 
 // FFA colors
 export const FFA_COLORS: Record<SlotIndex, string> = {
@@ -63,6 +64,7 @@ export interface LobbyState {
   roomId: string;
   hostPeerId: string;
   gameMode: GameMode;
+  levelMode: LevelMode;
   slots: [PlayerSlot, PlayerSlot, PlayerSlot, PlayerSlot];
   chatMessages: ChatMessage[];
   spectators: Spectator[];
@@ -90,6 +92,7 @@ export function createInitialLobbyState(roomId: string, hostPeerId: string): Lob
     roomId,
     hostPeerId,
     gameMode: 'ffa',
+    levelMode: 'cycle',
     slots,
     chatMessages: [],
     spectators: [],

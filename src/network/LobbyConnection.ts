@@ -7,6 +7,7 @@ import type {
   SlotIndex,
   ChatMessage,
   GameMode,
+  LevelMode,
 } from '../types/lobby';
 import {
   createInitialLobbyState,
@@ -263,6 +264,12 @@ export class LobbyConnection {
   setGameMode(mode: GameMode): void {
     if (!this.isHost || !this.lobbyState) return;
     this.lobbyState.gameMode = mode;
+    this.broadcastLobbyState();
+  }
+
+  setLevelMode(mode: LevelMode): void {
+    if (!this.isHost || !this.lobbyState) return;
+    this.lobbyState.levelMode = mode;
     this.broadcastLobbyState();
   }
 

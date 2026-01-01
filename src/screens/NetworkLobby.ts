@@ -6,6 +6,7 @@ import { GameConnection } from '../network/GameConnection';
 import type { LobbyState, SlotIndex, GameMode } from '../types/lobby';
 import { getSlotColor, canStartGame, getFilledSlotCount, findFirstOpenSlot } from '../types/lobby';
 import type { GameConfig, GamePlayer, Spectator } from '../types/game';
+import { LEVELS } from '../types/game';
 import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
 
 function generateNickname(): string {
@@ -255,6 +256,7 @@ export class NetworkLobby implements Screen {
 
     const isHost = this.connection.isHostMode();
     const roomId = this.lobbyState.roomId;
+    const levelMode = this.lobbyState.levelMode;
     const link = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
 
     if (isHost) {
@@ -283,6 +285,22 @@ export class NetworkLobby implements Screen {
               border: 1px solid ${this.lobbyState.gameMode === 'team' ? '#0f0' : '#333'};
             ">TEAMS</button>
           </div>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Level:</label>
+          <select id="levelSelect" style="
+            width: 100%;
+            padding: 0.5rem;
+            font-family: monospace;
+            background: #000;
+            color: #0ff;
+            border: 1px solid #0ff;
+            cursor: pointer;
+          ">
+            <option value="cycle" ${levelMode === 'cycle' ? 'selected' : ''}>Cycle All</option>
+            ${LEVELS.map(l => `<option value="${l.id}" ${levelMode === l.id ? 'selected' : ''}>${l.name}</option>`).join('')}
+          </select>
         </div>
 
         <div style="margin-bottom: 1rem;">
@@ -376,6 +394,11 @@ export class NetworkLobby implements Screen {
 
       document.getElementById('teamBtn')?.addEventListener('click', () => {
         this.connection.setGameMode('team');
+      });
+
+      document.getElementById('levelSelect')?.addEventListener('change', (e) => {
+        const levelMode = (e.target as HTMLSelectElement).value;
+        this.connection.setLevelMode(levelMode);
       });
 
       document.getElementById('nicknameInput')?.addEventListener('change', (e) => {
@@ -844,6 +867,7 @@ export class NetworkLobby implements Screen {
       spectators,
       isHost: this.connection.isHostMode(),
       gameMode: lobbyState.gameMode,
+      levelMode: lobbyState.levelMode,
     };
 
     const gameConnection = new GameConnection(
