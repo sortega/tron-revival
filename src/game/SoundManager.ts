@@ -40,6 +40,7 @@ export class SoundManager {
   private totalCount = Object.keys(SOUND_FILES).length;
   private loopingSounds: Map<string, HTMLAudioElement> = new Map();
   private preloadPromise: Promise<void>;
+  private muted: boolean = false;
 
   constructor() {
     this.preloadPromise = this.preloadSounds();
@@ -87,6 +88,8 @@ export class SoundManager {
   }
 
   play(name: SoundName): void {
+    if (this.muted) return;
+
     const audio = this.sounds.get(name);
     if (audio) {
       // Clone the audio to allow overlapping sounds
@@ -102,6 +105,7 @@ export class SoundManager {
   playLoop(name: SoundName, key: string): void {
     // Don't restart if already playing
     if (this.loopingSounds.has(key)) return;
+    if (this.muted) return;
 
     const audio = this.sounds.get(name);
     if (audio) {
@@ -130,6 +134,21 @@ export class SoundManager {
       audio.currentTime = 0;
     }
     this.loopingSounds.clear();
+  }
+
+  // Toggle mute state
+  toggleMute(): boolean {
+    this.muted = !this.muted;
+    if (this.muted) {
+      // Stop all currently playing loops when muting
+      this.stopAllLoops();
+    }
+    return this.muted;
+  }
+
+  // Check if muted
+  isMuted(): boolean {
+    return this.muted;
   }
 }
 

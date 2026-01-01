@@ -89,6 +89,21 @@ export class TronGame implements Screen {
       this.screenManager.showMainMenu();
     });
 
+    // Mute button
+    document.getElementById('muteBtn')?.addEventListener('click', () => {
+      const sound = getSoundManager();
+      const isMuted = sound.toggleMute();
+      const btn = document.getElementById('muteBtn');
+      if (btn) {
+        // Update button text based on device
+        if (isTouchDevice()) {
+          btn.textContent = isMuted ? '🔇' : '🔊';
+        } else {
+          btn.textContent = isMuted ? '🔇 MUTED' : '🔊 SOUND';
+        }
+      }
+    });
+
     // Fullscreen button (mobile only)
     document.getElementById('fullscreenBtn')?.addEventListener('click', () => {
       const elem = document.documentElement;
@@ -127,6 +142,7 @@ export class TronGame implements Screen {
   }
 
   private renderDesktopLayout(): void {
+    const soundManager = getSoundManager();
     this.container.innerHTML = `
       <div style="
         display: flex;
@@ -144,14 +160,24 @@ export class TronGame implements Screen {
           margin-bottom: 1rem;
         ">
           <h2 style="color: #0ff; margin: 0; text-shadow: 0 0 10px #0ff;">TERATRON</h2>
-          <button id="backBtn" style="
-            padding: 0.5rem 1rem;
-            font-family: monospace;
-            cursor: pointer;
-            background: #200;
-            color: #f44;
-            border: 1px solid #f44;
-          ">BACK TO MENU</button>
+          <div style="display: flex; gap: 0.5rem;">
+            <button id="muteBtn" style="
+              padding: 0.5rem 1rem;
+              font-family: monospace;
+              cursor: pointer;
+              background: #002;
+              color: #0ff;
+              border: 1px solid #0ff;
+            ">${soundManager.isMuted() ? '🔇 MUTED' : '🔊 SOUND'}</button>
+            <button id="backBtn" style="
+              padding: 0.5rem 1rem;
+              font-family: monospace;
+              cursor: pointer;
+              background: #200;
+              color: #f44;
+              border: 1px solid #f44;
+            ">BACK TO MENU</button>
+          </div>
         </div>
 
         <div id="gameCanvas" style="
@@ -175,6 +201,7 @@ export class TronGame implements Screen {
   }
 
   private renderMobileLayout(): void {
+    const soundManager = getSoundManager();
     // Force landscape orientation hint
     this.container.innerHTML = `
       <style>
@@ -282,6 +309,20 @@ export class TronGame implements Screen {
           z-index: 100;
           cursor: pointer;
         }
+        .mute-button {
+          position: absolute;
+          top: 5px;
+          right: 45px;
+          padding: 6px 10px;
+          font-family: monospace;
+          font-size: 0.7rem;
+          background: rgba(0, 32, 32, 0.7);
+          color: #0ff;
+          border: 1px solid #0ff;
+          border-radius: 4px;
+          z-index: 100;
+          cursor: pointer;
+        }
         /* Portrait orientation warning */
         @media (orientation: portrait) {
           .rotate-hint {
@@ -336,6 +377,7 @@ export class TronGame implements Screen {
         <div class="mobile-game-layout">
           <!-- Top buttons -->
           <button id="backBtn" class="back-button-mobile">✕</button>
+          <button id="muteBtn" class="mute-button">${soundManager.isMuted() ? '🔇' : '🔊'}</button>
           <button id="fullscreenBtn" class="fullscreen-button">⛶</button>
           <!-- Full-screen Canvas -->
           <div id="gameCanvas" class="canvas-container"></div>
