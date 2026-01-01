@@ -480,6 +480,21 @@ export class NetworkLobby implements Screen {
         </div>
 
         <div style="margin-bottom: 1rem;">
+          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Level:</label>
+          <select disabled style="
+            width: 100%;
+            padding: 0.5rem;
+            font-family: monospace;
+            background: #000;
+            color: #666;
+            border: 1px solid #333;
+            cursor: not-allowed;
+          ">
+            <option>${levelMode === 'cycle' ? 'Cycle All' : LEVELS.find(l => l.id === levelMode)?.name || levelMode}</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
           <label style="color: #888; display: block; margin-bottom: 0.5rem;">Your Nickname:</label>
           <div style="display: flex; gap: 0.5rem;">
             <input id="nicknameInput" type="text" value="${this.myNickname}" style="

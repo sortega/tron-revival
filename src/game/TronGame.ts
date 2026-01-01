@@ -30,6 +30,9 @@ export class TronGame implements Screen {
   // Guest accumulates trail segments between frames to avoid losing any
   private pendingTrailSegments: Map<SlotIndex, TrailSegment[]> = new Map();
 
+  // Guest accumulates ridiculous death events between frames
+  private pendingRidiculousDeaths: Set<SlotIndex> = new Set();
+
   // Last time we processed a frame (for consistent timing)
   private lastFrameTime: number = 0;
   private readonly TARGET_FRAME_TIME = 1000 / 70; // 70fps
@@ -520,6 +523,13 @@ export class TronGame implements Screen {
             existing.push(...segments);
             this.pendingTrailSegments.set(slotIndex, existing);
           }
+
+          // Accumulate ridiculous death events to avoid losing any between frames
+          if (state.ridiculousDeathSlots) {
+            for (const slot of state.ridiculousDeathSlots) {
+              this.pendingRidiculousDeaths.add(slot);
+            }
+          }
         },
         onHostDisconnected: () => {
           alert('Host disconnected');
@@ -671,13 +681,11 @@ export class TronGame implements Screen {
           this.receivedState.eraserUsed = undefined;
         }
 
-        // Handle ridiculous death events
-        if (this.receivedState.ridiculousDeathSlots) {
-          for (const slot of this.receivedState.ridiculousDeathSlots) {
-            this.renderer.triggerRidiculousDeath(slot);
-          }
-          this.receivedState.ridiculousDeathSlots = undefined;
+        // Handle ridiculous death events (from accumulated set)
+        for (const slot of this.pendingRidiculousDeaths) {
+          this.renderer.triggerRidiculousDeath(slot);
         }
+        this.pendingRidiculousDeaths.clear();
 
         // Play sounds from received state (clear after playing to prevent replay)
         if (this.receivedState.soundEvents && this.receivedState.soundEvents.length > 0) {
