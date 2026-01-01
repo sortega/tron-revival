@@ -34,6 +34,8 @@ const SOUND_FILES: Record<SoundName, string> = {
   alarm: 'alarm.mp3',
 };
 
+const MUTED_STORAGE_KEY = 'teratron-muted';
+
 export class SoundManager {
   private sounds: Map<SoundName, HTMLAudioElement> = new Map();
   private loadedCount = 0;
@@ -43,6 +45,8 @@ export class SoundManager {
   private muted: boolean = false;
 
   constructor() {
+    // Load mute preference from localStorage
+    this.muted = localStorage.getItem(MUTED_STORAGE_KEY) === 'true';
     this.preloadPromise = this.preloadSounds();
   }
 
@@ -139,6 +143,7 @@ export class SoundManager {
   // Toggle mute state
   toggleMute(): boolean {
     this.muted = !this.muted;
+    localStorage.setItem(MUTED_STORAGE_KEY, String(this.muted));
     if (this.muted) {
       // Stop all currently playing loops when muting
       this.stopAllLoops();
