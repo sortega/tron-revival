@@ -22,6 +22,12 @@ export function isTouchDevice(): boolean {
   return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
 
+// Detect iOS (fullscreen API not supported)
+export function isIOS(): boolean {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 export class TronInputHandler {
   private keys: TronInputState = { left: false, right: false, action: false };
   private keyMap: KeyMap;

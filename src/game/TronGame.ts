@@ -7,7 +7,7 @@ import { LEVELS } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
 import { TronGameState } from './TronGameState';
 import { TronRenderer } from './TronRenderer';
-import { TronInputHandler, isTouchDevice } from './TronInput';
+import { TronInputHandler, isTouchDevice, isIOS } from './TronInput';
 import { getSoundManager, type SoundName } from './SoundManager';
 
 export class TronGame implements Screen {
@@ -106,6 +106,13 @@ export class TronGame implements Screen {
 
     // Fullscreen button (mobile only)
     document.getElementById('fullscreenBtn')?.addEventListener('click', () => {
+      // On iOS, show instructions popup instead
+      if (isIOS()) {
+        const popup = document.getElementById('iosPopup');
+        if (popup) popup.style.display = 'flex';
+        return;
+      }
+
       const elem = document.documentElement;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = document as any;
@@ -133,6 +140,19 @@ export class TronGame implements Screen {
         } else if (el.mozRequestFullScreen) {
           el.mozRequestFullScreen();
         }
+      }
+    });
+
+    // iOS popup close button
+    document.getElementById('iosPopupClose')?.addEventListener('click', () => {
+      const popup = document.getElementById('iosPopup');
+      if (popup) popup.style.display = 'none';
+    });
+
+    // Close iOS popup when clicking outside
+    document.getElementById('iosPopup')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        (e.currentTarget as HTMLElement).style.display = 'none';
       }
     });
 
@@ -295,33 +315,79 @@ export class TronGame implements Screen {
           z-index: 100;
           cursor: pointer;
         }
-        .fullscreen-button {
+        .top-button {
           position: absolute;
           top: 5px;
-          right: 5px;
-          padding: 6px 10px;
+          padding: 6px;
+          width: 32px;
+          height: 32px;
           font-family: monospace;
-          font-size: 0.7rem;
+          font-size: 1rem;
+          line-height: 1;
           background: rgba(0, 32, 32, 0.7);
           color: #0ff;
           border: 1px solid #0ff;
           border-radius: 4px;
           z-index: 100;
           cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .fullscreen-button {
+          right: 5px;
         }
         .mute-button {
-          position: absolute;
-          top: 5px;
-          right: 45px;
-          padding: 6px 10px;
+          right: 42px;
+        }
+        .ios-popup {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.85);
+          z-index: 1000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .ios-popup-content {
+          background: #111;
+          border: 2px solid #0ff;
+          border-radius: 12px;
+          padding: 1.5rem;
+          max-width: 300px;
+          text-align: left;
+          position: relative;
+          color: #fff;
           font-family: monospace;
-          font-size: 0.7rem;
-          background: rgba(0, 32, 32, 0.7);
+        }
+        .ios-popup-content h3 {
           color: #0ff;
-          border: 1px solid #0ff;
-          border-radius: 4px;
-          z-index: 100;
+          margin: 0 0 1rem 0;
+          text-align: center;
+        }
+        .ios-popup-content p {
+          margin: 0.5rem 0;
+        }
+        .ios-popup-content ol {
+          margin: 1rem 0;
+          padding-left: 1.5rem;
+        }
+        .ios-popup-content li {
+          margin: 0.5rem 0;
+        }
+        .ios-popup-close {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          background: none;
+          border: none;
+          color: #888;
+          font-size: 1.2rem;
           cursor: pointer;
+          padding: 4px 8px;
         }
         /* Portrait orientation warning */
         @media (orientation: portrait) {
@@ -377,8 +443,23 @@ export class TronGame implements Screen {
         <div class="mobile-game-layout">
           <!-- Top buttons -->
           <button id="backBtn" class="back-button-mobile">✕</button>
-          <button id="muteBtn" class="mute-button">${soundManager.isMuted() ? '🔇' : '🔊'}</button>
-          <button id="fullscreenBtn" class="fullscreen-button">⛶</button>
+          <button id="muteBtn" class="top-button mute-button">${soundManager.isMuted() ? '🔇' : '🔊'}</button>
+          <button id="fullscreenBtn" class="top-button fullscreen-button">⛶</button>
+
+          <!-- iOS home screen popup -->
+          <div id="iosPopup" class="ios-popup" style="display: none;">
+            <div class="ios-popup-content">
+              <button id="iosPopupClose" class="ios-popup-close">✕</button>
+              <h3>Add to Home Screen</h3>
+              <p>For fullscreen experience on iOS:</p>
+              <ol>
+                <li>Tap the <strong>Share</strong> button <span style="font-size: 1.2em;">⬆️</span></li>
+                <li>Scroll down and tap <strong>"Add to Home Screen"</strong></li>
+                <li>Tap <strong>Add</strong></li>
+              </ol>
+              <p style="color: #888; font-size: 0.8em;">Then open from your home screen</p>
+            </div>
+          </div>
           <!-- Full-screen Canvas -->
           <div id="gameCanvas" class="canvas-container"></div>
 
