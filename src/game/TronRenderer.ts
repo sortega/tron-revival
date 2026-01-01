@@ -176,6 +176,19 @@ export class TronRenderer {
     }
   }
 
+  // Add border segments to the level canvas (for lock borders effect)
+  // Border pixels become part of the level background, not trails
+  addBorderSegments(color: string, segments: TrailSegment[]): void {
+    this.levelCtx.fillStyle = color;
+    for (const seg of segments) {
+      this.levelCtx.fillRect(seg.x, seg.y, 1, 1);
+    }
+    // Ensure level canvas is rendered even if it was blank
+    if (this.currentLevelId === null && segments.length > 0) {
+      this.currentLevelId = 'border-lock';
+    }
+  }
+
   // Clear all trails (for new round)
   clearTrails(): void {
     this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);

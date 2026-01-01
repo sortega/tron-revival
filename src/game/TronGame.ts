@@ -438,6 +438,13 @@ export class TronGame implements Screen {
         this.renderer.addTrailSegments(slotIndex, segments);
       }
 
+      // Add border segments to renderer (lock borders effect)
+      if (stateData.borderSegments) {
+        for (const { color, segments } of stateData.borderSegments) {
+          this.renderer.addBorderSegments(color, segments);
+        }
+      }
+
       // Play sounds locally
       this.playSoundEvents(stateData.soundEvents);
 
@@ -466,9 +473,19 @@ export class TronGame implements Screen {
         // Clear pending segments after processing
         this.pendingTrailSegments.clear();
 
-        // Play sounds from received state
-        if (this.receivedState.soundEvents) {
+        // Add border segments to renderer (lock borders effect)
+        if (this.receivedState.borderSegments) {
+          for (const { color, segments } of this.receivedState.borderSegments) {
+            this.renderer.addBorderSegments(color, segments);
+          }
+          // Clear after drawing to prevent replay
+          this.receivedState.borderSegments = undefined;
+        }
+
+        // Play sounds from received state (clear after playing to prevent replay)
+        if (this.receivedState.soundEvents && this.receivedState.soundEvents.length > 0) {
           this.playSoundEvents(this.receivedState.soundEvents);
+          this.receivedState.soundEvents = [];
         }
 
         // Render

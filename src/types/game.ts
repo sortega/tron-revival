@@ -75,6 +75,8 @@ export interface TronGameStateData {
   match: TronMatchState;
   // Trail data sent separately for efficiency - only new segments
   newTrailSegments: { slotIndex: SlotIndex; segments: TrailSegment[] }[];
+  // Border lock segments (for rendering animated border) - multiple players can have active locks
+  borderSegments?: { color: string; segments: TrailSegment[] }[];
   // Sound events to play on this frame
   soundEvents: SoundEvent[];
 }
@@ -195,7 +197,7 @@ export const WEAPON_ITEMS: ItemDefinition[] = [
   // { name: 'Glock', sprite: 'glock', category: 'weapon', ammo: 20, useSound: 'glock' },
   // { name: 'Rifle', sprite: 'rifle', category: 'weapon', ammo: 200, useSound: 'rifle' },
   // { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1, useSound: 'bomb' },
-  // { name: 'Lock Borders', sprite: 'lock_borders', category: 'weapon', ammo: 1, useSound: 'alarm' },
+  { name: 'Lock Borders', sprite: 'lock_borders', category: 'weapon', ammo: 1 },  // Sound handled via loop
   // { name: 'Shotgun', sprite: 'shotgun', category: 'weapon', ammo: 20, useSound: 'shotgun' },
   // Time-based weapons (use duration)
   // { name: 'Uzi', sprite: 'uzi', category: 'weapon', duration: 700, useSound: 'uzi', loopSound: true }, // 10s

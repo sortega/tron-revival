@@ -99,6 +99,15 @@ export class TronGameState {
   // Timeout for round end transition (stored for cleanup)
   private roundEndTimeout: ReturnType<typeof setTimeout> | null = null;
 
+  // Border lock animations (multiple players can have active locks)
+  private borderLocks: Map<SlotIndex, {
+    color: string;
+    progress: number;  // 0 to 150
+  }> = new Map();
+
+  // New border segments this frame (for rendering) - per player with color
+  private frameBorderSegments: { color: string; segments: TrailSegment[] }[] = [];
+
   // Player configs for restarting rounds
   private playerConfigs: GamePlayer[];
 
@@ -159,6 +168,8 @@ export class TronGameState {
     this.teleportCooldowns.clear();
     this.items = [];
     this.itemLauncher.reset();
+    this.borderLocks.clear();
+    this.frameBorderSegments.length = 0;
 
     const playerCount = this.playerConfigs.length;
 
@@ -264,8 +275,6 @@ export class TronGameState {
         // factor 0 -> every 2 frames, factor -1 -> every 3 frames, etc.
         player.moveFrameCounter++;
         const frameInterval = 2 - factor;
-        console.log('frameInterval', frameInterval);
-        console.log('frameCounter', player.moveFrameCounter);
         if (player.moveFrameCounter >= frameInterval) {
           movesThisFrame = 1;
           player.moveFrameCounter = 0;
@@ -276,8 +285,6 @@ export class TronGameState {
 
       movesPerPlayer.set(player.slotIndex, movesThisFrame);
     }
-
-    console.log('movesPerPlayer', movesPerPlayer);
 
     // Find maximum moves this frame (for step-by-step simulation)
     const maxMoves = Math.max(1, ...Array.from(movesPerPlayer.values()));
@@ -387,8 +394,20 @@ export class TronGameState {
         if (player.equippedWeapon.ammo !== undefined) {
           // Shot-based weapon: fire only on rising edge (new press)
           const wasPressed = this.prevActionState.get(slotIndex) || false;
+          const weaponSprite = player.equippedWeapon.sprite; // Save before useWeapon() clears it
           if (input.action && !wasPressed && player.useWeapon()) {
-            if (weaponDef?.useSound) {
+            // Special handling for lock_borders - starts border animation
+            if (weaponSprite === 'lock_borders') {
+              // Only start alarm if this is the first active border lock
+              const wasEmpty = this.borderLocks.size === 0;
+              this.borderLocks.set(slotIndex, {
+                color: player.color,
+                progress: 0,
+              });
+              if (wasEmpty) {
+                this.queueLoopSound('alarm', 'border-lock');
+              }
+            } else if (weaponDef?.useSound) {
               this.queueSound(weaponDef.useSound);
             }
           }
@@ -418,8 +437,75 @@ export class TronGameState {
       this.prevActionState.set(slotIndex, input.action);
     }
 
+    // Animate border lock if active
+    this.animateBorderLock();
+
     // Check win condition
     this.checkRoundEnd();
+  }
+
+  // Animate all active border lock effects
+  private animateBorderLock(): void {
+    this.frameBorderSegments.length = 0;
+
+    if (this.borderLocks.size === 0) {
+      return;
+    }
+
+    const completedLocks: SlotIndex[] = [];
+
+    // Process each active border lock
+    for (const [slotIndex, lock] of this.borderLocks) {
+      const z = lock.progress;
+      const segments: TrailSegment[] = [];
+
+      // Draw 5 segments on horizontal edges per frame (matching original)
+      for (let i = 0; i < 5; i++) {
+        const x = z + i * 150;
+        if (x < PLAY_WIDTH) {
+          // Top edge (y=0)
+          this.occupiedPixels.add(`${x},0`);
+          segments.push({ x, y: 0 });
+          // Bottom edge (y=PLAY_HEIGHT-1)
+          this.occupiedPixels.add(`${x},${PLAY_HEIGHT - 1}`);
+          segments.push({ x, y: PLAY_HEIGHT - 1 });
+        }
+      }
+
+      // Draw 4 segments on vertical edges per frame (600 height / 150 = 4)
+      for (let i = 0; i < 4; i++) {
+        const y = z + i * 150;
+        if (y < PLAY_HEIGHT) {
+          // Left edge (x=0)
+          this.occupiedPixels.add(`0,${y}`);
+          segments.push({ x: 0, y });
+          // Right edge (x=PLAY_WIDTH-1)
+          this.occupiedPixels.add(`${PLAY_WIDTH - 1},${y}`);
+          segments.push({ x: PLAY_WIDTH - 1, y });
+        }
+      }
+
+      // Store segments with this player's color
+      if (segments.length > 0) {
+        this.frameBorderSegments.push({ color: lock.color, segments });
+      }
+
+      // Advance progress
+      lock.progress++;
+      if (lock.progress >= 150) {
+        completedLocks.push(slotIndex);
+      }
+    }
+
+    // Remove completed locks
+    for (const slotIndex of completedLocks) {
+      this.borderLocks.delete(slotIndex);
+    }
+
+    // Stop alarm only when ALL border locks are done
+    if (this.borderLocks.size === 0 && completedLocks.length > 0) {
+      this.queueStopLoop('border-lock');
+    }
   }
 
   private tickWaitingReady(inputs: Map<SlotIndex, TronInput>): void {
@@ -485,13 +571,6 @@ export class TronGameState {
             }
           }
         }
-      }
-    }
-
-    // Debug: log non-standard speed factors
-    for (const [slot, factor] of speedFactors) {
-      if (factor !== 1) {
-        console.log(`[SpeedFactor] Player ${slot}: ${factor}`);
       }
     }
 
@@ -703,6 +782,12 @@ export class TronGameState {
   private endRound(alivePlayers: TronPlayer[]): void {
     this.phase = 'round_end';
 
+    // Stop all border lock animations and sound if any are active
+    if (this.borderLocks.size > 0) {
+      this.borderLocks.clear();
+      this.queueStopLoop('border-lock');
+    }
+
     const winner = alivePlayers[0];
     if (!winner) {
       // Draw - no points (no alive players)
@@ -762,10 +847,17 @@ export class TronGameState {
     const soundEvents = [...this.frameSoundEvents];
     this.frameSoundEvents = [];
 
+    // Capture and clear border segments
+    const borderSegments = this.frameBorderSegments.length > 0
+      ? [...this.frameBorderSegments]
+      : undefined;
+    this.frameBorderSegments.length = 0;
+
     return {
       round: roundState,
       match: matchState,
       newTrailSegments,
+      borderSegments,
       soundEvents,
     };
   }
