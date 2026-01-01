@@ -79,6 +79,8 @@ export interface TronGameStateData {
   borderSegments?: { color: string; segments: TrailSegment[] }[];
   // Sound events to play on this frame
   soundEvents: SoundEvent[];
+  // Eraser was used - renderer should clear trails and restore level
+  eraserUsed?: boolean;
 }
 
 // Input includes action key for ready signal
@@ -111,13 +113,13 @@ export const PORTAL_FRAME_COUNT = 30;  // Animation frames (portal_01 to portal_
 export interface LevelDefinition {
   id: string;
   name: string;
-  imagePath: string | null;  // null for blank level
+  imagePath: string;
 }
 
 // Level image filenames (relative to /assets/levels/)
 // The full path is constructed at runtime using import.meta.env.BASE_URL
-export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string | null }[] = [
-  { id: 'blank', name: 'Blank', imageFile: null },
+export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string }[] = [
+  { id: 'blank', name: 'Blank', imageFile: 'blank.png' },
   { id: 'pop-culture', name: 'Pop Culture', imageFile: 'pop-culture.png' },
   { id: 'selva', name: 'Selva', imageFile: 'selva.png' },
   { id: 'bricks', name: 'Bricks', imageFile: 'bricks.png' },
@@ -131,7 +133,7 @@ export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string | 
 export const LEVELS: LevelDefinition[] = LEVEL_DEFINITIONS.map(def => ({
   id: def.id,
   name: def.name,
-  imagePath: def.imageFile ? `${import.meta.env.BASE_URL}assets/levels/${def.imageFile}` : null,
+  imagePath: `${import.meta.env.BASE_URL}assets/levels/${def.imageFile}`,
 }));
 
 // === Item Types ===
@@ -181,13 +183,13 @@ export interface ActiveEffect {
 
 // Automatic items (round) - instant activation on pickup
 export const AUTOMATIC_ITEMS: ItemDefinition[] = [
-  // { name: 'Crossing', sprite: 'crossing', category: 'automatic', duration: 2100, pickupSound: 'shield' },  // 30s
-  // { name: 'Shield', sprite: 'shield', category: 'automatic', duration: 2100, pickupSound: 'shield' },      // 30s
-  // { name: 'Eraser', sprite: 'eraser', category: 'automatic', duration: 0, pickupSound: 'reset' },          // Instant
-  // { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0 },                             // Instant
-  // { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0 },                     // Instant
-  // { name: 'Reverse', sprite: 'reverse', category: 'automatic', duration: 700 },                            // 10s
-  { name: 'Slow', sprite: 'automatic_slow', category: 'automatic', duration: 1400, pickupSound: 'slow' },  // 20s
+  // { name: 'Crossing', sprite: 'crossing', category: 'automatic', duration: 2100, pickupSound: 'shield' },    // 30s
+  // { name: 'Shield', sprite: 'shield', category: 'automatic', duration: 2100, pickupSound: 'shield' },        // 30s
+  { name: 'Eraser', sprite: 'eraser', category: 'automatic', duration: 0, pickupSound: 'reset' },            // Instant
+  // { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0 },                               // Instant
+  // { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0 },                       // Instant
+  // { name: 'Reverse', sprite: 'reverse', category: 'automatic', duration: 700 },                              // 10s
+  { name: 'Slow', sprite: 'automatic_slow', category: 'automatic', duration: 1400, pickupSound: 'slow' },    // 20s
   { name: 'Turbo', sprite: 'automatic_turbo', category: 'automatic', duration: 1400, pickupSound: 'turbo' }, // 20s
 ];
 

@@ -568,6 +568,11 @@ export class TronGame implements Screen {
         }
       }
 
+      // Handle eraser - restore level and clear trails
+      if (stateData.eraserUsed) {
+        this.renderer.restoreLevel();
+      }
+
       // Play sounds locally
       this.playSoundEvents(stateData.soundEvents);
 
@@ -603,6 +608,13 @@ export class TronGame implements Screen {
           }
           // Clear after drawing to prevent replay
           this.receivedState.borderSegments = undefined;
+        }
+
+        // Handle eraser - restore level and clear trails
+        if (this.receivedState.eraserUsed) {
+          this.renderer.restoreLevel();
+          this.pendingTrailSegments.clear();
+          this.receivedState.eraserUsed = undefined;
         }
 
         // Play sounds from received state (clear after playing to prevent replay)

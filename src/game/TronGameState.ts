@@ -73,6 +73,9 @@ export class TronGameState {
   // Trail collision tracking
   occupiedPixels: Set<string> = new Set();
 
+  // Level obstacles (stored separately for eraser restore)
+  private levelObstacles: Set<string> = new Set();
+
   // Teleport portals
   portals: TeleportPortal[] = [];
   private nextPortalId = 0;
@@ -108,6 +111,9 @@ export class TronGameState {
   // New border segments this frame (for rendering) - per player with color
   private frameBorderSegments: { color: string; segments: TrailSegment[] }[] = [];
 
+  // Eraser was used this frame
+  private frameEraserUsed: boolean = false;
+
   // Player configs for restarting rounds
   private playerConfigs: GamePlayer[];
 
@@ -141,6 +147,9 @@ export class TronGameState {
 
   // Set level obstacle pixels (called by TronGame after loading level image)
   setLevelObstacles(obstacles: Set<string>): void {
+    // Store separately for eraser restore
+    this.levelObstacles = new Set(obstacles);
+    // Add to collision map
     for (const pixel of obstacles) {
       this.occupiedPixels.add(pixel);
     }
@@ -752,12 +761,37 @@ export class TronGameState {
     if (!def) return;
 
     if (item.category === 'automatic') {
-      player.activateEffect(item.sprite, def.duration || 0);
+      // Special handling for eraser - instant effect
+      if (item.sprite === 'eraser') {
+        this.activateEraser();
+      } else {
+        player.activateEffect(item.sprite, def.duration || 0);
+      }
     } else {
       player.equipWeapon(item.sprite, def.ammo, def.duration);
     }
 
     this.queueSound(def.pickupSound || 'item_pickup');
+  }
+
+  // Eraser: clear all trails, restore level, stop border locks
+  private activateEraser(): void {
+    // Clear all player trails
+    for (const player of this.players) {
+      player.trail = [];
+    }
+
+    // Reset occupied pixels to only level obstacles
+    this.occupiedPixels = new Set(this.levelObstacles);
+
+    // Stop any active border locks
+    if (this.borderLocks.size > 0) {
+      this.borderLocks.clear();
+      this.queueStopLoop('border-lock');
+    }
+
+    // Signal renderer to clear trails and restore level
+    this.frameEraserUsed = true;
   }
 
   private checkRoundEnd(): void {
@@ -853,12 +887,17 @@ export class TronGameState {
       : undefined;
     this.frameBorderSegments.length = 0;
 
+    // Capture and clear eraser flag
+    const eraserUsed = this.frameEraserUsed || undefined;
+    this.frameEraserUsed = false;
+
     return {
       round: roundState,
       match: matchState,
       newTrailSegments,
       borderSegments,
       soundEvents,
+      eraserUsed,
     };
   }
 

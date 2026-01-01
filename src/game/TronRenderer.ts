@@ -23,7 +23,7 @@ export class TronRenderer {
   // Off-screen canvas for level background
   private readonly levelCanvas: HTMLCanvasElement;
   private levelCtx: CanvasRenderingContext2D;
-  private currentLevelId: string | null = null;
+  private currentLevelImage: HTMLImageElement | null = null;
 
   // Player configs for rendering
   private players: GamePlayer[];
@@ -117,10 +117,8 @@ export class TronRenderer {
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
 
-    // Draw level background (if any)
-    if (this.currentLevelId !== null) {
-      this.ctx.drawImage(this.levelCanvas, 0, 0);
-    }
+    // Draw level background
+    this.ctx.drawImage(this.levelCanvas, 0, 0);
 
     // Draw trails from off-screen canvas
     this.ctx.drawImage(this.trailCanvas, 0, 0);
@@ -183,10 +181,6 @@ export class TronRenderer {
     for (const seg of segments) {
       this.levelCtx.fillRect(seg.x, seg.y, 1, 1);
     }
-    // Ensure level canvas is rendered even if it was blank
-    if (this.currentLevelId === null && segments.length > 0) {
-      this.currentLevelId = 'border-lock';
-    }
   }
 
   // Clear all trails (for new round)
@@ -194,17 +188,22 @@ export class TronRenderer {
     this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
   }
 
+  // Restore level to original state (for eraser)
+  // Clears trails and redraws original level image
+  restoreLevel(): void {
+    // Clear trails
+    this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+
+    // Restore level canvas from stored image
+    if (this.currentLevelImage) {
+      this.levelCtx.drawImage(this.currentLevelImage, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    }
+  }
+
   // Load a level background and return obstacle pixels
   // Returns a Promise that resolves with the set of obstacle pixel coordinates
   async loadLevel(level: LevelDefinition): Promise<Set<string>> {
     const obstacles = new Set<string>();
-
-    if (level.imagePath === null) {
-      // Blank level - clear level canvas
-      this.levelCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-      this.currentLevelId = null;
-      return obstacles;
-    }
 
     // Load the level image
     const img = new Image();
@@ -215,9 +214,11 @@ export class TronRenderer {
       img.onerror = () => reject(new Error(`Failed to load level image: ${level.imagePath}`));
     });
 
+    // Store the image for potential restoration (eraser)
+    this.currentLevelImage = img;
+
     // Draw to level canvas
     this.levelCtx.drawImage(img, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    this.currentLevelId = level.id;
 
     // Extract non-black pixels as obstacles
     const imageData = this.levelCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
