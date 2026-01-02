@@ -28,7 +28,10 @@ export interface TrailSegment {
   y: number;  // Screen pixel
 }
 
-// Projectile in flight (bullets from Glock, etc.)
+// Projectile type: 'bullet' = Glock (explodes on impact), 'tracer' = Rifle (clears trail, has lifespan)
+export type ProjectileType = 'bullet' | 'tracer';
+
+// Projectile in flight (bullets from Glock, tracers from Rifle)
 export interface Projectile {
   id: number;
   x: number;           // Fixed-point ×1000
@@ -36,6 +39,8 @@ export interface Projectile {
   direction: number;   // Angle in degrees
   ownerSlot: SlotIndex;
   speed: number;       // Speed in fixed-point (pixels × 1000)
+  type: ProjectileType;          // Determines behavior on collision
+  remainingFrames?: number;      // Lifespan for tracer bullets (undefined = infinite)
 }
 
 // Explosion animation
@@ -224,7 +229,7 @@ export const AUTOMATIC_ITEMS: ItemDefinition[] = [
 export const WEAPON_ITEMS: ItemDefinition[] = [
   // Shot-based weapons (use ammo)
   { name: 'Glock', sprite: 'glock', category: 'weapon', ammo: 20, useSound: 'glock' },
-  // { name: 'Rifle', sprite: 'rifle', category: 'weapon', ammo: 200, useSound: 'rifle' },
+  { name: 'Rifle', sprite: 'rifle', category: 'weapon', ammo: 200, useSound: 'rifle' },
   // { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1, useSound: 'bomb' },
   { name: 'Lock Borders', sprite: 'lock_borders', category: 'weapon', ammo: 1 },  // Sound handled via loop
   // { name: 'Shotgun', sprite: 'shotgun', category: 'weapon', ammo: 20, useSound: 'shotgun' },

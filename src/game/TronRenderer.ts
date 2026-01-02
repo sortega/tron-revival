@@ -333,19 +333,26 @@ export class TronRenderer {
     );
   }
 
-  // Draw a projectile (bullet)
+  // Draw a projectile (bullet or tracer)
   private drawProjectile(proj: Projectile): void {
-    if (!this.spriteAtlas?.isLoaded()) return;
-
     const x = Math.floor(proj.x / 1000);
     const y = Math.floor(proj.y / 1000);
 
-    // Convert direction to radians (sprite points right at 0°)
-    const rotation = (proj.direction * Math.PI) / 180;
-
-    this.spriteAtlas.drawWrapped(this.ctx, 'bullet', x, y, PLAY_WIDTH, PLAY_HEIGHT, {
-      rotation,
-    });
+    if (proj.type === 'tracer') {
+      // Tracer: single white pixel with faint glow
+      this.ctx.fillStyle = '#fff';
+      this.ctx.shadowColor = '#fff';
+      this.ctx.shadowBlur = 3;
+      this.ctx.fillRect(x, y, 1, 1);
+      this.ctx.shadowBlur = 0;
+    } else {
+      // Bullet: use sprite with rotation
+      if (!this.spriteAtlas?.isLoaded()) return;
+      const rotation = (proj.direction * Math.PI) / 180;
+      this.spriteAtlas.drawWrapped(this.ctx, 'bullet', x, y, PLAY_WIDTH, PLAY_HEIGHT, {
+        rotation,
+      });
+    }
   }
 
   // Draw an explosion animation

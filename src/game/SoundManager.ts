@@ -5,7 +5,7 @@ export const PICKUP_SOUNDS = ['item_pickup', 'shield', 'turbo', 'slow', 'reset']
 export type PickupSound = typeof PICKUP_SOUNDS[number];
 
 // Sounds used when weapons are fired
-export const USE_SOUNDS = ['glock', 'rifle', 'shotgun', 'uzi', 'bomb', 'alarm', 'slow', 'turbo'] as const;
+export const USE_SOUNDS = ['glock', 'rifle', 'shotgun', 'uzi', 'bomb', 'explosion', 'alarm', 'slow', 'turbo'] as const;
 export type UseSound = typeof USE_SOUNDS[number];
 
 // All sound names
@@ -32,6 +32,7 @@ const SOUND_FILES: Record<SoundName, string> = {
   uzi: 'uzi.mp3',
   drill: 'drill.mp3',
   bomb: 'bomb.mp3',
+  explosion: 'explosion.mp3',
   alarm: 'alarm.mp3',
 };
 

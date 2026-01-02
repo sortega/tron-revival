@@ -131,12 +131,25 @@ export class TronGameState {
   private nextProjectileId = 0;
   private nextExplosionId = 0;
 
-  // Projectile constants
+  // Projectile constants (Glock bullets)
   private readonly BULLET_BASE_SPEED = 5000;  // 5 pixels/frame in fixed-point (at speed factor 1)
   private readonly BULLET_KILL_RADIUS = 6;    // Kill players within 6 pixels
   private readonly BULLET_CLEAR_RADIUS = 5;   // Clear 10x10 area (±5)
   private readonly BULLET_ITEM_DAMAGE_RADIUS = 16; // Damage items within 16 pixels
   private readonly EXPLOSION_FRAMES = 39;     // 39 animation frames
+
+  // Rifle burst state and constants
+  private rifleBurstState: Map<SlotIndex, {
+    frameCounter: number;      // Counts frames since last burst
+    shotsRemaining: number;    // Shots left in current burst (0-5)
+    shotDelay: number;         // Delay counter between shots in burst
+  }> = new Map();
+  private readonly RIFLE_BURST_INTERVAL = 20;   // Frames between bursts
+  private readonly RIFLE_SHOTS_PER_BURST = 5;
+  private readonly RIFLE_SHOT_DELAY = 1;        // Frames between shots in burst
+  private readonly TRACER_LIFESPAN = 120;       // Frames before tracer expires
+  private readonly TRACER_KILL_RADIUS = 1;      // Original 1px touch-kill
+  private readonly TRACER_CLEAR_RADIUS = 1;     // 3x3 area on death
 
   // Player configs for restarting rounds
   private playerConfigs: GamePlayer[];
@@ -215,6 +228,7 @@ export class TronGameState {
     this.frameBorderSegments.length = 0;
     this.projectiles = [];
     this.explosions = [];
+    this.rifleBurstState.clear();
 
     const playerCount = this.playerConfigs.length;
 
@@ -461,11 +475,50 @@ export class TronGameState {
       const player = this.players.find(p => p.slotIndex === slotIndex);
       if (player?.alive && player.equippedWeapon) {
         const weaponDef = WEAPON_ITEMS.find(d => d.sprite === player.equippedWeapon!.sprite);
+        const weaponSprite = player.equippedWeapon.sprite;
 
-        if (player.equippedWeapon.ammo !== undefined) {
-          // Shot-based weapon: fire only on rising edge (new press)
+        // Rifle: special automatic burst-fire handling
+        if (weaponSprite === 'rifle') {
+          if (input.action && player.equippedWeapon) {
+            // Initialize or get burst state
+            let burst = this.rifleBurstState.get(slotIndex);
+            if (!burst) {
+              // Start at RIFLE_BURST_INTERVAL so first burst fires immediately
+              burst = { frameCounter: this.RIFLE_BURST_INTERVAL, shotsRemaining: 0, shotDelay: 0 };
+              this.rifleBurstState.set(slotIndex, burst);
+            }
+
+            burst.frameCounter++;
+
+            // Start new burst every 20 frames if not already bursting and have enough ammo
+            if (burst.shotsRemaining === 0 && burst.frameCounter >= this.RIFLE_BURST_INTERVAL) {
+              if ((player.equippedWeapon.ammo ?? 0) >= this.RIFLE_SHOTS_PER_BURST) {
+                burst.shotsRemaining = this.RIFLE_SHOTS_PER_BURST;
+                burst.shotDelay = 0;
+                burst.frameCounter = 0;
+                this.queueSound('rifle');  // Play sound at start of burst
+              }
+            }
+
+            // Fire shots in burst with delay
+            if (burst.shotsRemaining > 0) {
+              if (burst.shotDelay === 0) {
+                const playerSpeedFactor = speedFactors.get(player.slotIndex) ?? 1;
+                this.createTracerProjectile(player, playerSpeedFactor);
+                player.useWeapon();  // Decrement ammo by 1
+                burst.shotsRemaining--;
+                burst.shotDelay = this.RIFLE_SHOT_DELAY;
+              } else {
+                burst.shotDelay--;
+              }
+            }
+          } else {
+            // Action released or weapon gone - clear burst state
+            this.rifleBurstState.delete(slotIndex);
+          }
+        } else if (player.equippedWeapon.ammo !== undefined) {
+          // Other shot-based weapons: fire only on rising edge (new press)
           const wasPressed = this.prevActionState.get(slotIndex) || false;
-          const weaponSprite = player.equippedWeapon.sprite; // Save before useWeapon() clears it
           if (input.action && !wasPressed && player.useWeapon()) {
             // Special handling for glock - creates projectile
             if (weaponSprite === 'glock') {
@@ -590,7 +643,7 @@ export class TronGameState {
     }
   }
 
-  // Create a projectile from a player's position
+  // Create a bullet projectile from a player's position (Glock)
   private createProjectile(player: TronPlayer, speedFactor: number): void {
     const dirRad = (player.direction * Math.PI) / 180;
     // Start just outside kill radius (6 pixels) + 1 for safety = 7 pixels
@@ -604,6 +657,24 @@ export class TronGameState {
       direction: player.direction,
       ownerSlot: player.slotIndex,
       speed: bulletSpeed,
+      type: 'bullet',
+    });
+  }
+
+  // Create a tracer projectile from a player's position (Rifle)
+  private createTracerProjectile(player: TronPlayer, speedFactor: number): void {
+    const dirRad = (player.direction * Math.PI) / 180;
+    const startOffset = 7000; // 7 pixels ahead in fixed-point
+    const bulletSpeed = this.BULLET_BASE_SPEED * Math.max(0.5, speedFactor);
+    this.projectiles.push({
+      id: this.nextProjectileId++,
+      x: player.x + Math.cos(dirRad) * startOffset,
+      y: player.y + Math.sin(dirRad) * startOffset,
+      direction: player.direction,
+      ownerSlot: player.slotIndex,
+      speed: bulletSpeed,
+      type: 'tracer',
+      remainingFrames: this.TRACER_LIFESPAN,
     });
   }
 
@@ -616,12 +687,16 @@ export class TronGameState {
       const prevX = Math.floor(proj.x / 1000);
       const prevY = Math.floor(proj.y / 1000);
 
-      // Move bullet using its stored speed
+      // Move bullet using its stored speed (don't wrap yet - need unwrapped coords for collision)
       const dirRad = (proj.direction * Math.PI) / 180;
       proj.x += Math.cos(dirRad) * proj.speed;
       proj.y += Math.sin(dirRad) * proj.speed;
 
-      // Wrap around screen
+      // Get unwrapped coordinates for collision check (Bresenham handles wrap internally)
+      const unwrappedX = Math.floor(proj.x / 1000);
+      const unwrappedY = Math.floor(proj.y / 1000);
+
+      // Now wrap the stored position
       if (proj.x >= PLAY_WIDTH * 1000) proj.x -= PLAY_WIDTH * 1000;
       if (proj.x < 0) proj.x += PLAY_WIDTH * 1000;
       if (proj.y >= PLAY_HEIGHT * 1000) proj.y -= PLAY_HEIGHT * 1000;
@@ -630,15 +705,57 @@ export class TronGameState {
       const newX = Math.floor(proj.x / 1000);
       const newY = Math.floor(proj.y / 1000);
 
+      // Check portal teleportation (uses wrapped coordinates)
+      let teleported = false;
+      for (const portal of this.portals) {
+        const d1 = Math.sqrt((newX - portal.x1) ** 2 + (newY - portal.y1) ** 2);
+        if (d1 < PORTAL_RADIUS) {
+          this.teleportProjectile(proj, portal.x2, portal.y2);
+          teleported = true;
+          break;
+        }
+        const d2 = Math.sqrt((newX - portal.x2) ** 2 + (newY - portal.y2) ** 2);
+        if (d2 < PORTAL_RADIUS) {
+          this.teleportProjectile(proj, portal.x1, portal.y1);
+          teleported = true;
+          break;
+        }
+      }
+      if (teleported) continue;
+
       // Check all pixels along the path using Bresenham's line algorithm
-      const impactPoint = this.checkLineCollision(prevX, prevY, newX, newY);
+      // Use UNWRAPPED coordinates so Bresenham follows the actual path
+      // MUST check collision BEFORE clearing pixels for tracers!
+      const impactPoint = this.checkLineCollision(prevX, prevY, unwrappedX, unwrappedY);
       if (impactPoint) {
-        this.projectileImpact(impactPoint.x, impactPoint.y);
+        if (proj.type === 'bullet') {
+          this.projectileImpact(impactPoint.x, impactPoint.y);
+        } else {
+          // Clear path up to impact point, then expire
+          this.clearPixelPath(prevX, prevY, impactPoint.x, impactPoint.y);
+          this.tracerExpire(impactPoint.x, impactPoint.y);
+        }
         toRemove.push(proj.id);
         continue;
       }
 
+      // Tracer-specific: clear pixels along path and decrement lifespan
+      if (proj.type === 'tracer') {
+        this.clearPixelPath(prevX, prevY, unwrappedX, unwrappedY);
+
+        // Decrement lifespan
+        if (proj.remainingFrames !== undefined) {
+          proj.remainingFrames--;
+          if (proj.remainingFrames <= 0) {
+            this.tracerExpire(newX, newY);
+            toRemove.push(proj.id);
+            continue;
+          }
+        }
+      }
+
       // Check collision with players (shield does NOT protect!)
+      const killRadius = proj.type === 'bullet' ? this.BULLET_KILL_RADIUS : this.TRACER_KILL_RADIUS;
       let hitPlayer = false;
       for (const player of this.players) {
         if (!player.alive) continue;
@@ -646,8 +763,14 @@ export class TronGameState {
         const py = player.getScreenY();
         // Check distance to the line segment, not just endpoints
         const dist = this.pointToLineDistance(px, py, prevX, prevY, newX, newY);
-        if (dist < this.BULLET_KILL_RADIUS) {
-          this.projectileImpact(px, py);
+        if (dist < killRadius) {
+          if (proj.type === 'bullet') {
+            this.projectileImpact(px, py);
+          } else {
+            this.tracerExpire(px, py);
+            player.kill();
+            this.queueSound('laughs');
+          }
           toRemove.push(proj.id);
           hitPlayer = true;
           break;
@@ -662,17 +785,94 @@ export class TronGameState {
         // Check distance to the line segment
         const dist = this.pointToLineDistance(item.x, item.y, prevX, prevY, newX, newY);
         if (dist < ITEM_COLLISION_RADIUS) {
-          this.projectileImpact(item.x, item.y);
+          if (proj.type === 'bullet') {
+            this.projectileImpact(item.x, item.y);
+          } else {
+            this.tracerExpire(item.x, item.y);
+            item.active = false;  // Tracer destroys the item it hits
+          }
           toRemove.push(proj.id);
           hitItem = true;
           break;
         }
       }
       if (hitItem) continue;
+
+      // Check collision with other projectiles
+      for (const other of this.projectiles) {
+        if (other.id === proj.id) continue;
+        if (toRemove.includes(other.id)) continue;
+        const otherX = Math.floor(other.x / 1000);
+        const otherY = Math.floor(other.y / 1000);
+        const dist = Math.sqrt((newX - otherX) ** 2 + (newY - otherY) ** 2);
+        if (dist < 3) {  // Small collision radius for projectiles
+          // Both projectiles are destroyed
+          const midX = Math.floor((newX + otherX) / 2);
+          const midY = Math.floor((newY + otherY) / 2);
+          // If either is a bullet, create explosion
+          if (proj.type === 'bullet' || other.type === 'bullet') {
+            this.projectileImpact(midX, midY);
+          } else {
+            this.tracerExpire(midX, midY);
+          }
+          toRemove.push(proj.id);
+          toRemove.push(other.id);
+          break;
+        }
+      }
     }
 
     // Remove impacted projectiles
     this.projectiles = this.projectiles.filter(p => !toRemove.includes(p.id));
+  }
+
+  // Teleport a projectile to exit portal position
+  private teleportProjectile(proj: Projectile, portalX: number, portalY: number): void {
+    const dirRad = (proj.direction * Math.PI) / 180;
+    // Exit at outer ring of destination portal, maintaining direction
+    proj.x = (portalX + Math.cos(dirRad) * PORTAL_OUTER_RADIUS) * 1000;
+    proj.y = (portalY + Math.sin(dirRad) * PORTAL_OUTER_RADIUS) * 1000;
+  }
+
+  // Clear pixels along projectile path (for tracer bullets)
+  private clearPixelPath(x0: number, y0: number, x1: number, y1: number): void {
+    // Bresenham's algorithm - clear each pixel along path
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+
+    let x = x0, y = y0;
+    while (true) {
+      const wx = ((x % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH;
+      const wy = ((y % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT;
+      const key = `${wx},${wy}`;
+      this.pixelOwners.delete(key);
+      this.levelObstacles.delete(key);  // Also clear level obstacles
+      this.frameClearedAreas.push({ x: wx, y: wy, radius: 0 });  // Single pixel
+
+      if (x === x1 && y === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x += sx; }
+      if (e2 < dx) { err += dx; y += sy; }
+    }
+  }
+
+  // Tracer bullet expiration (no explosion)
+  private tracerExpire(x: number, y: number): void {
+    // Clear 3x3 area
+    for (let dx = -this.TRACER_CLEAR_RADIUS; dx <= this.TRACER_CLEAR_RADIUS; dx++) {
+      for (let dy = -this.TRACER_CLEAR_RADIUS; dy <= this.TRACER_CLEAR_RADIUS; dy++) {
+        const cx = ((x + dx) % PLAY_WIDTH + PLAY_WIDTH) % PLAY_WIDTH;
+        const cy = ((y + dy) % PLAY_HEIGHT + PLAY_HEIGHT) % PLAY_HEIGHT;
+        const key = `${cx},${cy}`;
+        this.pixelOwners.delete(key);
+        this.levelObstacles.delete(key);  // Also clear level obstacles
+      }
+    }
+    this.frameClearedAreas.push({ x, y, radius: this.TRACER_CLEAR_RADIUS });
+    // No explosion, no bomb sound
   }
 
   // Check all pixels along a line for collision (Bresenham's algorithm)
@@ -690,8 +890,10 @@ export class TronGameState {
       // Check this pixel (with wrap-around)
       const wx = ((x % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH;
       const wy = ((y % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT;
+      const key = `${wx},${wy}`;
 
-      if (this.pixelOwners.has(`${wx},${wy}`)) {
+      // Check both player trails AND level obstacles
+      if (this.pixelOwners.has(key) || this.levelObstacles.has(key)) {
         return { x: wx, y: wy };
       }
 
@@ -775,7 +977,9 @@ export class TronGameState {
       }
     }
 
-    this.queueSound('bomb');
+    // TODO: Original game may have used a different explosion sound for Glock bullets
+    // (the one we have is EXPLOSIO.WAV which might be for bombs only)
+    this.queueSound('explosion');
   }
 
   // Advance explosion animations
