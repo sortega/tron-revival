@@ -236,9 +236,6 @@ export class TronGameState {
       this.roundEndTimeout = null;
     }
 
-    // Stop any looping sounds from previous round
-    getSoundManager().stopAllLoops();
-
     this.phase = 'countdown';
     this.countdown = COUNTDOWN_SECONDS;
     this.roundWinner = null;
@@ -1418,7 +1415,10 @@ export class TronGameState {
   private endRound(alivePlayers: TronPlayer[]): void {
     this.phase = 'round_end';
 
-    // Stop all sound loops at end of round (ensures no lingering loops)
+    // Clear any pending sound events (prevents loop-start events from replaying after round ends)
+    this.frameSoundEvents = [];
+
+    // Stop all sound loops at end of round
     getSoundManager().stopAllLoops();
 
     // Clear border lock state
