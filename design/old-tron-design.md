@@ -174,7 +174,7 @@ These require the player to press the action button to use. Ammo displayed in pa
 - **Projectile**: Each bullet travels ~120 frames, speed 5 units/frame
 - **Sound**: armado.wav (equip), fusil.wav (every 20 frames)
 
-#### 3. Ametralladora (Machine Gun) - Graph 119
+#### 3. Ametralladora (Uzi) - Graph 119
 - **Ammo**: 700 shots
 - **Fire mode**: Hold action button for continuous spray
 - **Effect**: Sprays 20 bullets per frame with random spread (±30° deviation)

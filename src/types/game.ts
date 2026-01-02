@@ -233,11 +233,11 @@ export const WEAPON_ITEMS: ItemDefinition[] = [
   // Shot-based weapons (use ammo)
   { name: 'Glock', sprite: 'glock', category: 'weapon', ammo: 20, useSound: 'glock' },
   { name: 'Rifle', sprite: 'rifle', category: 'weapon', ammo: 200, useSound: 'rifle' },
-  // { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1, useSound: 'bomb' },
+  { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1, useSound: 'bomb' },
   { name: 'Lock Borders', sprite: 'lock_borders', category: 'weapon', ammo: 1 },  // Sound handled via loop
   // { name: 'Shotgun', sprite: 'shotgun', category: 'weapon', ammo: 20, useSound: 'shotgun' },
   // Time-based weapons (use duration)
-  // { name: 'Uzi', sprite: 'uzi', category: 'weapon', duration: 700, useSound: 'uzi', loopSound: true }, // 10s
+  { name: 'Uzi', sprite: 'uzi', category: 'weapon', duration: 700, useSound: 'uzi', loopSound: true }, // 10s
   { name: 'Turbo', sprite: 'turbo', category: 'weapon', duration: 700, useSound: 'slow' },   // 10s
   { name: 'Slow', sprite: 'slow', category: 'weapon', duration: 700, useSound: 'turbo' },     // 10s
 ];

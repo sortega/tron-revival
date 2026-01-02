@@ -152,6 +152,13 @@ export class TronGameState {
   private readonly TRACER_KILL_RADIUS = 1;      // Original 1px touch-kill
   private readonly TRACER_CLEAR_RADIUS = 1;     // 3x3 area on death
 
+  // Uzi weapon constants
+  private readonly UZI_TRACERS_PER_FRAME = 20;  // Spray 20 bullets per frame
+  private readonly UZI_SPREAD_DEGREES = 30;     // ±30° random deviation
+  private readonly UZI_MIN_SPEED = 5000;       // 5 pixels/frame in fixed-point
+  private readonly UZI_MAX_SPEED = 25000;       // 25 pixels/frame in fixed-point
+  private readonly UZI_TRACER_LIFESPAN = 2;     // 1 frame lifespan (immediate spray effect)
+
   // Color blindness effect state (triggered by Swap item)
   private colorBlindnessRemainingFrames: number = 0;
   private readonly COLOR_BLINDNESS_DURATION = 280;   // 4 seconds at 70fps
@@ -561,6 +568,10 @@ export class TronGameState {
           // Time-based weapon: consume duration while held
           const loopKey = `weapon-${slotIndex}`;
           if (input.action) {
+            // Uzi: spray 20 tracers per frame while held
+            if (weaponDef?.sprite === 'uzi') {
+              this.createUziTracers(player);
+            }
             player.tickWeapon();
             // Start looping sound if defined
             if (weaponDef?.loopSound && weaponDef.useSound) {
@@ -699,6 +710,33 @@ export class TronGameState {
       remainingFrames: this.TRACER_LIFESPAN,
       ownerCooldown: this.PROJECTILE_OWNER_COOLDOWN,
     });
+  }
+
+  // Create Uzi spray tracers (20 per frame with random spread and speed)
+  private createUziTracers(player: TronPlayer): void {
+    const startOffset = 3000; // 3 pixels ahead in fixed-point
+
+    for (let i = 0; i < this.UZI_TRACERS_PER_FRAME; i++) {
+      // Random direction within ±30° of player heading
+      const spreadAngle = (Math.random() * 2 - 1) * this.UZI_SPREAD_DEGREES;
+      const direction = player.direction + spreadAngle;
+      const dirRad = (direction * Math.PI) / 180;
+
+      // Random speed between 10-50 pixels/frame
+      const speed = this.UZI_MIN_SPEED + Math.random() * (this.UZI_MAX_SPEED - this.UZI_MIN_SPEED);
+
+      this.projectiles.push({
+        id: this.nextProjectileId++,
+        x: player.x + Math.cos(dirRad) * startOffset,
+        y: player.y + Math.sin(dirRad) * startOffset,
+        direction: direction,
+        ownerSlot: player.slotIndex,
+        speed: speed,
+        type: 'tracer',
+        remainingFrames: this.UZI_TRACER_LIFESPAN,
+        ownerCooldown: this.PROJECTILE_OWNER_COOLDOWN,
+      });
+    }
   }
 
   // Move projectiles and check collisions
