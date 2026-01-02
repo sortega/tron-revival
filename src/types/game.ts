@@ -41,6 +41,7 @@ export interface Projectile {
   speed: number;       // Speed in fixed-point (pixels × 1000)
   type: ProjectileType;          // Determines behavior on collision
   remainingFrames?: number;      // Lifespan for tracer bullets (undefined = infinite)
+  ownerCooldown?: number;        // Frames until owner collision is checked (prevents instant self-kill)
 }
 
 // Explosion animation

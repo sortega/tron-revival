@@ -147,6 +147,7 @@ export class TronGameState {
   private readonly RIFLE_BURST_INTERVAL = 20;   // Frames between bursts
   private readonly RIFLE_SHOTS_PER_BURST = 5;
   private readonly RIFLE_SHOT_DELAY = 1;        // Frames between shots in burst
+  private readonly PROJECTILE_OWNER_COOLDOWN = 10; // Frames before owner collision is checked
   private readonly TRACER_LIFESPAN = 120;       // Frames before tracer expires
   private readonly TRACER_KILL_RADIUS = 1;      // Original 1px touch-kill
   private readonly TRACER_CLEAR_RADIUS = 1;     // 3x3 area on death
@@ -190,6 +191,19 @@ export class TronGameState {
   // Queue stopping a looping sound
   private queueStopLoop(loopKey: string): void {
     this.frameSoundEvents.push({ sound: '', stopLoop: loopKey });
+  }
+
+  // Kill a player and handle ridiculous death if applicable
+  private killPlayerWithSound(player: TronPlayer, isRidiculousDeath: boolean): void {
+    player.kill();
+    if (isRidiculousDeath) {
+      const count = (this.ridiculousDeaths.get(player.slotIndex) || 0) + 1;
+      this.ridiculousDeaths.set(player.slotIndex, count);
+      this.frameRidiculousDeaths.push(player.slotIndex);
+      this.queueSound('panico');
+    } else {
+      this.queueSound('laughs');
+    }
   }
 
   // Set level obstacle pixels with colors (called by TronGame after loading level image)
@@ -379,16 +393,7 @@ export class TronGameState {
           const isProtected = hasShield || (hasCrossing && isOwnColor);
 
           if (!isProtected) {
-            player.kill();
-            if (isOwnColor) {
-              // Ridiculous death!
-              const count = (this.ridiculousDeaths.get(player.slotIndex) || 0) + 1;
-              this.ridiculousDeaths.set(player.slotIndex, count);
-              this.frameRidiculousDeaths.push(player.slotIndex);
-              this.queueSound('panico');
-            } else {
-              this.queueSound('laughs');
-            }
+            this.killPlayerWithSound(player, isOwnColor);
             continue;
           }
         }
@@ -646,8 +651,7 @@ export class TronGameState {
   // Create a bullet projectile from a player's position (Glock)
   private createProjectile(player: TronPlayer, speedFactor: number): void {
     const dirRad = (player.direction * Math.PI) / 180;
-    // Start just outside kill radius (6 pixels) + 1 for safety = 7 pixels
-    const startOffset = 7000; // 7 pixels ahead in fixed-point
+    const startOffset = 5000; // 5 pixels ahead in fixed-point
     // Bullet speed scales with player speed factor (minimum 0.5x to prevent too slow bullets)
     const bulletSpeed = this.BULLET_BASE_SPEED * Math.max(0.5, speedFactor);
     this.projectiles.push({
@@ -658,13 +662,14 @@ export class TronGameState {
       ownerSlot: player.slotIndex,
       speed: bulletSpeed,
       type: 'bullet',
+      ownerCooldown: this.PROJECTILE_OWNER_COOLDOWN,
     });
   }
 
   // Create a tracer projectile from a player's position (Rifle)
   private createTracerProjectile(player: TronPlayer, speedFactor: number): void {
     const dirRad = (player.direction * Math.PI) / 180;
-    const startOffset = 7000; // 7 pixels ahead in fixed-point
+    const startOffset = 3000; // 3 pixels ahead in fixed-point
     const bulletSpeed = this.BULLET_BASE_SPEED * Math.max(0.5, speedFactor);
     this.projectiles.push({
       id: this.nextProjectileId++,
@@ -675,6 +680,7 @@ export class TronGameState {
       speed: bulletSpeed,
       type: 'tracer',
       remainingFrames: this.TRACER_LIFESPAN,
+      ownerCooldown: this.PROJECTILE_OWNER_COOLDOWN,
     });
   }
 
@@ -729,7 +735,7 @@ export class TronGameState {
       const impactPoint = this.checkLineCollision(prevX, prevY, unwrappedX, unwrappedY);
       if (impactPoint) {
         if (proj.type === 'bullet') {
-          this.projectileImpact(impactPoint.x, impactPoint.y);
+          this.projectileImpact(impactPoint.x, impactPoint.y, proj.ownerSlot);
         } else {
           // Clear path up to impact point, then expire
           this.clearPixelPath(prevX, prevY, impactPoint.x, impactPoint.y);
@@ -754,22 +760,29 @@ export class TronGameState {
         }
       }
 
+      // Decrement owner cooldown
+      if (proj.ownerCooldown !== undefined && proj.ownerCooldown > 0) {
+        proj.ownerCooldown--;
+      }
+      const skipOwner = proj.ownerCooldown !== undefined && proj.ownerCooldown > 0;
+
       // Check collision with players (shield does NOT protect!)
       const killRadius = proj.type === 'bullet' ? this.BULLET_KILL_RADIUS : this.TRACER_KILL_RADIUS;
       let hitPlayer = false;
       for (const player of this.players) {
         if (!player.alive) continue;
+        // Skip owner during cooldown period
+        if (skipOwner && player.slotIndex === proj.ownerSlot) continue;
         const px = player.getScreenX();
         const py = player.getScreenY();
         // Check distance to the line segment, not just endpoints
         const dist = this.pointToLineDistance(px, py, prevX, prevY, newX, newY);
         if (dist < killRadius) {
           if (proj.type === 'bullet') {
-            this.projectileImpact(px, py);
+            this.projectileImpact(px, py, proj.ownerSlot);
           } else {
             this.tracerExpire(px, py);
-            player.kill();
-            this.queueSound('laughs');
+            this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot);
           }
           toRemove.push(proj.id);
           hitPlayer = true;
@@ -786,7 +799,7 @@ export class TronGameState {
         const dist = this.pointToLineDistance(item.x, item.y, prevX, prevY, newX, newY);
         if (dist < ITEM_COLLISION_RADIUS) {
           if (proj.type === 'bullet') {
-            this.projectileImpact(item.x, item.y);
+            this.projectileImpact(item.x, item.y, proj.ownerSlot);
           } else {
             this.tracerExpire(item.x, item.y);
             item.active = false;  // Tracer destroys the item it hits
@@ -809,9 +822,10 @@ export class TronGameState {
           // Both projectiles are destroyed
           const midX = Math.floor((newX + otherX) / 2);
           const midY = Math.floor((newY + otherY) / 2);
-          // If either is a bullet, create explosion
+          // If either is a bullet, create explosion (pass first bullet's owner for self-kill check)
           if (proj.type === 'bullet' || other.type === 'bullet') {
-            this.projectileImpact(midX, midY);
+            const bulletOwner = proj.type === 'bullet' ? proj.ownerSlot : other.ownerSlot;
+            this.projectileImpact(midX, midY, bulletOwner);
           } else {
             this.tracerExpire(midX, midY);
           }
@@ -935,7 +949,7 @@ export class TronGameState {
   }
 
   // Handle projectile impact - explosion, clear area, kill nearby players
-  private projectileImpact(x: number, y: number): void {
+  private projectileImpact(x: number, y: number, ownerSlot?: SlotIndex): void {
     // Create explosion animation
     this.explosions.push({
       id: this.nextExplosionId++,
@@ -963,8 +977,8 @@ export class TronGameState {
       const py = player.getScreenY();
       const dist = Math.sqrt((px - x) ** 2 + (py - y) ** 2);
       if (dist < this.BULLET_KILL_RADIUS) {
-        player.kill();
-        this.queueSound('laughs');
+        const isSelfKill = ownerSlot !== undefined && player.slotIndex === ownerSlot;
+        this.killPlayerWithSound(player, isSelfKill);
       }
     }
 
