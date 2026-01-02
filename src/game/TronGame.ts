@@ -2,7 +2,7 @@
 
 import type { Screen, ScreenManager } from '../screens/ScreenManager';
 import type { GameConnection } from '../network/GameConnection';
-import type { GameConfig, TronInput, TronGameStateData, TrailSegment, SoundEvent } from '../types/game';
+import type { GameConfig, TronInput, TronGameStateData, TrailSegment, SoundEvent, RoundPhase } from '../types/game';
 import { LEVELS } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
 import { TronGameState } from './TronGameState';
@@ -48,6 +48,9 @@ export class TronGame implements Screen {
 
   // Track loaded level to detect changes
   private loadedLevelIndex: number = -1;
+
+  // Track previous round phase to detect transitions and stop sound loops
+  private previousPhase: RoundPhase | null = null;
   private levelLoading: boolean = false;
 
   constructor(
@@ -532,6 +535,7 @@ export class TronGame implements Screen {
           }
         },
         onHostDisconnected: () => {
+          getSoundManager().stopAllLoops();  // Stop any lingering sound loops
           alert('Host disconnected');
           this.cleanup();
           this.screenManager.showMainMenu();
@@ -663,6 +667,16 @@ export class TronGame implements Screen {
         // Update local game state from network
         this.gameState.updateFromState(this.receivedState);
 
+        // Stop all sound loops on phase transitions to round_end or countdown
+        // This ensures loops don't persist due to missed network messages
+        const currentPhase = this.receivedState.round.phase;
+        if (this.previousPhase !== currentPhase) {
+          if (currentPhase === 'round_end' || currentPhase === 'countdown') {
+            getSoundManager().stopAllLoops();
+          }
+          this.previousPhase = currentPhase;
+        }
+
         // Add all pending trail segments to renderer (accumulated between frames)
         for (const [slotIndex, segments] of this.pendingTrailSegments) {
           if (segments.length > 0) {
@@ -764,6 +778,9 @@ export class TronGame implements Screen {
   }
 
   cleanup(): void {
+    // Stop all sound loops
+    getSoundManager().stopAllLoops();
+
     // Stop game loop
     if (this.animationId !== null) {
       cancelAnimationFrame(this.animationId);

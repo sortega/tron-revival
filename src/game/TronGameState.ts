@@ -1293,11 +1293,11 @@ export class TronGameState {
   private endRound(alivePlayers: TronPlayer[]): void {
     this.phase = 'round_end';
 
-    // Stop all border lock animations and sound if any are active
-    if (this.borderLocks.size > 0) {
-      this.borderLocks.clear();
-      this.queueStopLoop('border-lock');
-    }
+    // Stop all sound loops at end of round (ensures no lingering loops)
+    getSoundManager().stopAllLoops();
+
+    // Clear border lock state
+    this.borderLocks.clear();
 
     const winner = alivePlayers[0];
     if (!winner) {
