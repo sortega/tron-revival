@@ -221,7 +221,7 @@ export const AUTOMATIC_ITEMS: ItemDefinition[] = [
   { name: 'Eraser', sprite: 'eraser', category: 'automatic', duration: 0, pickupSound: 'reset' },            // Instant
   // { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0 },                               // Instant
   // { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0 },                       // Instant
-  // { name: 'Reverse', sprite: 'reverse', category: 'automatic', duration: 700 },                              // 10s
+  { name: 'Control Reversal', sprite: 'reverse', category: 'automatic', duration: 700, pickupSound: 'item_pickup' }, // 10s - self-debuff!
   { name: 'Slow', sprite: 'automatic_slow', category: 'automatic', duration: 1400, pickupSound: 'slow' },    // 20s
   { name: 'Turbo', sprite: 'automatic_turbo', category: 'automatic', duration: 1400, pickupSound: 'turbo' }, // 20s
 ];

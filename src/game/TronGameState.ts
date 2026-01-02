@@ -377,7 +377,13 @@ export class TronGameState {
         const playerMoves = movesPerPlayer.get(player.slotIndex) ?? 1;
         if (step >= playerMoves) continue; // This player doesn't move this step
 
-        const input = inputs.get(player.slotIndex) || { left: false, right: false, action: false };
+        let input = inputs.get(player.slotIndex) || { left: false, right: false, action: false };
+
+        // Control Reversal effect swaps left/right
+        if (player.hasEffect('reverse')) {
+          input = { left: input.right, right: input.left, action: input.action };
+        }
+
         const newSegments = player.update(input);
 
         // Check collision immediately after move
