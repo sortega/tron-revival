@@ -625,6 +625,13 @@ export class TronGame implements Screen {
         }
       }
 
+      // Clear areas from bullet impacts
+      if (stateData.clearedAreas) {
+        for (const { x, y, radius } of stateData.clearedAreas) {
+          this.renderer.clearArea(x, y, radius);
+        }
+      }
+
       // Handle eraser - restore level and clear trails
       if (stateData.eraserUsed) {
         this.renderer.restoreLevel();
@@ -672,6 +679,14 @@ export class TronGame implements Screen {
           }
           // Clear after drawing to prevent replay
           this.receivedState.borderSegments = undefined;
+        }
+
+        // Clear areas from bullet impacts
+        if (this.receivedState.clearedAreas) {
+          for (const { x, y, radius } of this.receivedState.clearedAreas) {
+            this.renderer.clearArea(x, y, radius);
+          }
+          this.receivedState.clearedAreas = undefined;
         }
 
         // Handle eraser - restore level and clear trails

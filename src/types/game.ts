@@ -28,6 +28,24 @@ export interface TrailSegment {
   y: number;  // Screen pixel
 }
 
+// Projectile in flight (bullets from Glock, etc.)
+export interface Projectile {
+  id: number;
+  x: number;           // Fixed-point ×1000
+  y: number;           // Fixed-point ×1000
+  direction: number;   // Angle in degrees
+  ownerSlot: SlotIndex;
+  speed: number;       // Speed in fixed-point (pixels × 1000)
+}
+
+// Explosion animation
+export interface Explosion {
+  id: number;
+  x: number;           // Screen pixel
+  y: number;           // Screen pixel
+  frame: number;       // 0-38 (39 frames)
+}
+
 // Player state during gameplay (serializable for network)
 export interface TronPlayerState {
   slotIndex: SlotIndex;
@@ -51,6 +69,8 @@ export interface TronRoundState {
   roundWinner: SlotIndex | 'draw' | null;
   portals: TeleportPortal[];   // Active teleport portals
   items: GameItem[];           // Spawned items in world
+  projectiles: Projectile[];   // Bullets in flight
+  explosions: Explosion[];     // Active explosion animations
 }
 
 // Match state (scores, ready status)
@@ -86,6 +106,8 @@ export interface TronGameStateData {
   eraserUsed?: boolean;
   // Ridiculous death happened - show it in these players' sidebar slots
   ridiculousDeathSlots?: SlotIndex[];
+  // Cleared pixel areas (from bullet impacts) - renderer should clear these from trail canvas
+  clearedAreas?: { x: number; y: number; radius: number }[];
 }
 
 // Input includes action key for ready signal
@@ -201,7 +223,7 @@ export const AUTOMATIC_ITEMS: ItemDefinition[] = [
 // Weapon items (square) - manual activation with action button
 export const WEAPON_ITEMS: ItemDefinition[] = [
   // Shot-based weapons (use ammo)
-  // { name: 'Glock', sprite: 'glock', category: 'weapon', ammo: 20, useSound: 'glock' },
+  { name: 'Glock', sprite: 'glock', category: 'weapon', ammo: 20, useSound: 'glock' },
   // { name: 'Rifle', sprite: 'rifle', category: 'weapon', ammo: 200, useSound: 'rifle' },
   // { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1, useSound: 'bomb' },
   { name: 'Lock Borders', sprite: 'lock_borders', category: 'weapon', ammo: 1 },  // Sound handled via loop

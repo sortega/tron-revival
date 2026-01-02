@@ -11,6 +11,8 @@ import type {
   TeleportPortal,
   GameItem,
   SoundEvent,
+  Projectile,
+  Explosion,
 } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import {
@@ -120,6 +122,22 @@ export class TronGameState {
   // Eraser was used this frame
   private frameEraserUsed: boolean = false;
 
+  // Cleared areas this frame (from bullet impacts)
+  private frameClearedAreas: { x: number; y: number; radius: number }[] = [];
+
+  // Projectile system
+  private projectiles: Projectile[] = [];
+  private explosions: Explosion[] = [];
+  private nextProjectileId = 0;
+  private nextExplosionId = 0;
+
+  // Projectile constants
+  private readonly BULLET_BASE_SPEED = 5000;  // 5 pixels/frame in fixed-point (at speed factor 1)
+  private readonly BULLET_KILL_RADIUS = 6;    // Kill players within 6 pixels
+  private readonly BULLET_CLEAR_RADIUS = 5;   // Clear 10x10 area (±5)
+  private readonly BULLET_ITEM_DAMAGE_RADIUS = 16; // Damage items within 16 pixels
+  private readonly EXPLOSION_FRAMES = 39;     // 39 animation frames
+
   // Player configs for restarting rounds
   private playerConfigs: GamePlayer[];
 
@@ -195,6 +213,8 @@ export class TronGameState {
     this.itemLauncher.reset();
     this.borderLocks.clear();
     this.frameBorderSegments.length = 0;
+    this.projectiles = [];
+    this.explosions = [];
 
     const playerCount = this.playerConfigs.length;
 
@@ -447,8 +467,13 @@ export class TronGameState {
           const wasPressed = this.prevActionState.get(slotIndex) || false;
           const weaponSprite = player.equippedWeapon.sprite; // Save before useWeapon() clears it
           if (input.action && !wasPressed && player.useWeapon()) {
+            // Special handling for glock - creates projectile
+            if (weaponSprite === 'glock') {
+              const playerSpeedFactor = speedFactors.get(player.slotIndex) ?? 1;
+              this.createProjectile(player, playerSpeedFactor);
+              this.queueSound('glock');
+            } else if (weaponSprite === 'lock_borders') {
             // Special handling for lock_borders - starts border animation
-            if (weaponSprite === 'lock_borders') {
               // Only start alarm if this is the first active border lock
               const wasEmpty = this.borderLocks.size === 0;
               this.borderLocks.set(slotIndex, {
@@ -490,6 +515,12 @@ export class TronGameState {
 
     // Animate border lock if active
     this.animateBorderLock();
+
+    // Update projectiles
+    this.tickProjectiles();
+
+    // Update explosions
+    this.tickExplosions();
 
     // Check win condition
     this.checkRoundEnd();
@@ -557,6 +588,203 @@ export class TronGameState {
     if (this.borderLocks.size === 0 && completedLocks.length > 0) {
       this.queueStopLoop('border-lock');
     }
+  }
+
+  // Create a projectile from a player's position
+  private createProjectile(player: TronPlayer, speedFactor: number): void {
+    const dirRad = (player.direction * Math.PI) / 180;
+    // Start just outside kill radius (6 pixels) + 1 for safety = 7 pixels
+    const startOffset = 7000; // 7 pixels ahead in fixed-point
+    // Bullet speed scales with player speed factor (minimum 0.5x to prevent too slow bullets)
+    const bulletSpeed = this.BULLET_BASE_SPEED * Math.max(0.5, speedFactor);
+    this.projectiles.push({
+      id: this.nextProjectileId++,
+      x: player.x + Math.cos(dirRad) * startOffset,
+      y: player.y + Math.sin(dirRad) * startOffset,
+      direction: player.direction,
+      ownerSlot: player.slotIndex,
+      speed: bulletSpeed,
+    });
+  }
+
+  // Move projectiles and check collisions
+  private tickProjectiles(): void {
+    const toRemove: number[] = [];
+
+    for (const proj of this.projectiles) {
+      // Store previous position for line collision check
+      const prevX = Math.floor(proj.x / 1000);
+      const prevY = Math.floor(proj.y / 1000);
+
+      // Move bullet using its stored speed
+      const dirRad = (proj.direction * Math.PI) / 180;
+      proj.x += Math.cos(dirRad) * proj.speed;
+      proj.y += Math.sin(dirRad) * proj.speed;
+
+      // Wrap around screen
+      if (proj.x >= PLAY_WIDTH * 1000) proj.x -= PLAY_WIDTH * 1000;
+      if (proj.x < 0) proj.x += PLAY_WIDTH * 1000;
+      if (proj.y >= PLAY_HEIGHT * 1000) proj.y -= PLAY_HEIGHT * 1000;
+      if (proj.y < 0) proj.y += PLAY_HEIGHT * 1000;
+
+      const newX = Math.floor(proj.x / 1000);
+      const newY = Math.floor(proj.y / 1000);
+
+      // Check all pixels along the path using Bresenham's line algorithm
+      const impactPoint = this.checkLineCollision(prevX, prevY, newX, newY);
+      if (impactPoint) {
+        this.projectileImpact(impactPoint.x, impactPoint.y);
+        toRemove.push(proj.id);
+        continue;
+      }
+
+      // Check collision with players (shield does NOT protect!)
+      let hitPlayer = false;
+      for (const player of this.players) {
+        if (!player.alive) continue;
+        const px = player.getScreenX();
+        const py = player.getScreenY();
+        // Check distance to the line segment, not just endpoints
+        const dist = this.pointToLineDistance(px, py, prevX, prevY, newX, newY);
+        if (dist < this.BULLET_KILL_RADIUS) {
+          this.projectileImpact(px, py);
+          toRemove.push(proj.id);
+          hitPlayer = true;
+          break;
+        }
+      }
+      if (hitPlayer) continue;
+
+      // Check collision with items
+      let hitItem = false;
+      for (const item of this.items) {
+        if (!item.active) continue;
+        // Check distance to the line segment
+        const dist = this.pointToLineDistance(item.x, item.y, prevX, prevY, newX, newY);
+        if (dist < ITEM_COLLISION_RADIUS) {
+          this.projectileImpact(item.x, item.y);
+          toRemove.push(proj.id);
+          hitItem = true;
+          break;
+        }
+      }
+      if (hitItem) continue;
+    }
+
+    // Remove impacted projectiles
+    this.projectiles = this.projectiles.filter(p => !toRemove.includes(p.id));
+  }
+
+  // Check all pixels along a line for collision (Bresenham's algorithm)
+  private checkLineCollision(x0: number, y0: number, x1: number, y1: number): { x: number; y: number } | null {
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+
+    let x = x0;
+    let y = y0;
+
+    while (true) {
+      // Check this pixel (with wrap-around)
+      const wx = ((x % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH;
+      const wy = ((y % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT;
+
+      if (this.pixelOwners.has(`${wx},${wy}`)) {
+        return { x: wx, y: wy };
+      }
+
+      if (x === x1 && y === y1) break;
+
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+    }
+
+    return null;
+  }
+
+  // Calculate distance from point to line segment
+  private pointToLineDistance(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+
+    if (lenSq === 0) {
+      // Line segment is a point
+      return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+    }
+
+    // Project point onto line, clamped to segment
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+
+    const closestX = x1 + t * dx;
+    const closestY = y1 + t * dy;
+
+    return Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
+  }
+
+  // Handle projectile impact - explosion, clear area, kill nearby players
+  private projectileImpact(x: number, y: number): void {
+    // Create explosion animation
+    this.explosions.push({
+      id: this.nextExplosionId++,
+      x,
+      y,
+      frame: 0,
+    });
+
+    // Clear 10x10 pixel area (with wrap-around)
+    for (let dx = -this.BULLET_CLEAR_RADIUS; dx < this.BULLET_CLEAR_RADIUS; dx++) {
+      for (let dy = -this.BULLET_CLEAR_RADIUS; dy < this.BULLET_CLEAR_RADIUS; dy++) {
+        const cx = ((x + dx) % PLAY_WIDTH + PLAY_WIDTH) % PLAY_WIDTH;
+        const cy = ((y + dy) % PLAY_HEIGHT + PLAY_HEIGHT) % PLAY_HEIGHT;
+        this.pixelOwners.delete(`${cx},${cy}`);
+      }
+    }
+
+    // Track cleared area for renderer
+    this.frameClearedAreas.push({ x, y, radius: this.BULLET_CLEAR_RADIUS });
+
+    // Kill players within 6 pixels (NO SHIELD CHECK - explicit requirement!)
+    for (const player of this.players) {
+      if (!player.alive) continue;
+      const px = player.getScreenX();
+      const py = player.getScreenY();
+      const dist = Math.sqrt((px - x) ** 2 + (py - y) ** 2);
+      if (dist < this.BULLET_KILL_RADIUS) {
+        player.kill();
+        this.queueSound('laughs');
+      }
+    }
+
+    // Destroy unpicked items within 16 pixels
+    for (const item of this.items) {
+      if (!item.active) continue;
+      const dist = Math.sqrt((item.x - x) ** 2 + (item.y - y) ** 2);
+      if (dist < this.BULLET_ITEM_DAMAGE_RADIUS) {
+        item.active = false;
+      }
+    }
+
+    this.queueSound('bomb');
+  }
+
+  // Advance explosion animations
+  private tickExplosions(): void {
+    for (const exp of this.explosions) {
+      exp.frame++;
+    }
+    // Remove finished explosions
+    this.explosions = this.explosions.filter(e => e.frame < this.EXPLOSION_FRAMES);
   }
 
   private tickWaitingReady(inputs: Map<SlotIndex, TronInput>): void {
@@ -908,6 +1136,8 @@ export class TronGameState {
       roundWinner: this.roundWinner,
       portals: this.portals,
       items: this.items,
+      projectiles: this.projectiles,
+      explosions: this.explosions,
     };
 
     const matchState: TronMatchState = {
@@ -942,6 +1172,10 @@ export class TronGameState {
     const ridiculousDeathSlots = this.frameRidiculousDeaths.length > 0 ? [...this.frameRidiculousDeaths] : undefined;
     this.frameRidiculousDeaths = [];
 
+    // Capture and clear bullet impact areas
+    const clearedAreas = this.frameClearedAreas.length > 0 ? [...this.frameClearedAreas] : undefined;
+    this.frameClearedAreas = [];
+
     return {
       round: roundState,
       match: matchState,
@@ -950,6 +1184,7 @@ export class TronGameState {
       soundEvents,
       eraserUsed,
       ridiculousDeathSlots,
+      clearedAreas,
     };
   }
 

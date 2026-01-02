@@ -1,7 +1,7 @@
 // TronRenderer - Canvas rendering for the Tron game
 
 import type { SlotIndex } from '../types/lobby';
-import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState } from '../types/game';
+import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
 import { SpriteAtlas } from '../sprites';
@@ -138,6 +138,16 @@ export class TronRenderer {
       }
     }
 
+    // Draw projectiles
+    for (const proj of round.projectiles) {
+      this.drawProjectile(proj);
+    }
+
+    // Draw explosions
+    for (const exp of round.explosions) {
+      this.drawExplosion(exp);
+    }
+
     // Draw player heads
     for (const playerState of round.players) {
       if (playerState.alive) {
@@ -214,6 +224,18 @@ export class TronRenderer {
     // Restore level canvas from stored image
     if (this.currentLevelImage) {
       this.levelCtx.drawImage(this.currentLevelImage, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    }
+  }
+
+  // Clear a circular area from trail canvas (for bullet impacts)
+  clearArea(x: number, y: number, radius: number): void {
+    // Clear from trail canvas (with wrap-around)
+    for (let dx = -radius; dx < radius; dx++) {
+      for (let dy = -radius; dy < radius; dy++) {
+        const cx = ((x + dx) % PLAY_WIDTH + PLAY_WIDTH) % PLAY_WIDTH;
+        const cy = ((y + dy) % PLAY_HEIGHT + PLAY_HEIGHT) % PLAY_HEIGHT;
+        this.trailCtx.clearRect(cx, cy, 1, 1);
+      }
     }
   }
 
@@ -308,6 +330,40 @@ export class TronRenderer {
       item.y,
       PLAY_WIDTH,
       PLAY_HEIGHT
+    );
+  }
+
+  // Draw a projectile (bullet)
+  private drawProjectile(proj: Projectile): void {
+    if (!this.spriteAtlas?.isLoaded()) return;
+
+    const x = Math.floor(proj.x / 1000);
+    const y = Math.floor(proj.y / 1000);
+
+    // Convert direction to radians (sprite points right at 0°)
+    const rotation = (proj.direction * Math.PI) / 180;
+
+    this.spriteAtlas.drawWrapped(this.ctx, 'bullet', x, y, PLAY_WIDTH, PLAY_HEIGHT, {
+      rotation,
+    });
+  }
+
+  // Draw an explosion animation
+  private drawExplosion(exp: Explosion): void {
+    if (!this.spriteAtlas?.isLoaded()) return;
+
+    const frameNum = String(exp.frame + 1).padStart(2, '0');
+    const frameName = `explossion_${frameNum}`;
+
+    // Draw at 20% scale like the original game
+    this.spriteAtlas.drawWrapped(
+      this.ctx,
+      frameName,
+      exp.x,
+      exp.y,
+      PLAY_WIDTH,
+      PLAY_HEIGHT,
+      { scale: 0.2 }
     );
   }
 
