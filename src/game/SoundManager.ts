@@ -1,7 +1,7 @@
 // SoundManager - Handles game audio
 
 // Sounds used for item pickup
-export const PICKUP_SOUNDS = ['item_pickup', 'shield', 'turbo', 'slow', 'reset'] as const;
+export const PICKUP_SOUNDS = ['item_pickup', 'shield', 'turbo', 'slow', 'reset', 'teleport'] as const;
 export type PickupSound = typeof PICKUP_SOUNDS[number];
 
 // Sounds used when weapons are fired

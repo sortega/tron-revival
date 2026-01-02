@@ -1,6 +1,7 @@
 // TronRenderer - Canvas rendering for the Tron game
 
 import type { SlotIndex } from '../types/lobby';
+import { FFA_COLORS, TEAM_COLORS } from '../types/lobby';
 import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
@@ -33,6 +34,13 @@ export class TronRenderer {
 
   // Ridiculous death display - slots that died ridiculously this round
   private ridiculousDeathSlots: Set<SlotIndex> = new Set();
+
+  // Color blindness effect state
+  private colorBlindnessFrames: number = 0;  // Remaining frames (used for color cycling and sprite position)
+  private readonly COLOR_BLINDNESS_DURATION = 280;  // Must match TronGameState
+
+  // Trail data storage for color blindness redrawing
+  private trailData: Map<SlotIndex, TrailSegment[]> = new Map();
 
   // Resize handler (stored for cleanup)
   private readonly resizeHandler: () => void;
@@ -123,6 +131,24 @@ export class TronRenderer {
     // Draw level background
     this.ctx.drawImage(this.levelCanvas, 0, 0);
 
+    // Handle color blindness color cycling for trails
+    if (this.colorBlindnessFrames > 0) {
+      // Calculate elapsed frames and color index
+      const elapsed = this.COLOR_BLINDNESS_DURATION - this.colorBlindnessFrames;
+      const colors = this.getColorBlindnessColors();
+      const colorIndex = Math.floor(elapsed / 2) % colors.length;  // Change every 2 frames
+      const currentColor = colors[colorIndex]!;
+
+      // Redraw trails with cycling color
+      this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+      this.trailCtx.fillStyle = currentColor;
+      for (const segments of this.trailData.values()) {
+        for (const seg of segments) {
+          this.trailCtx.fillRect(seg.x, seg.y, 1, 1);
+        }
+      }
+    }
+
     // Draw trails from off-screen canvas
     this.ctx.drawImage(this.trailCanvas, 0, 0);
 
@@ -159,6 +185,20 @@ export class TronRenderer {
       }
     }
 
+    // Draw color blindness crossing sprites
+    if (this.colorBlindnessFrames > 0 && this.spriteAtlas?.isLoaded()) {
+      const elapsed = this.COLOR_BLINDNESS_DURATION - this.colorBlindnessFrames;
+      const progress = elapsed * 3;  // Speed of crossing (3 pixels per frame)
+
+      // Top sprite: left to right at y=100
+      const topX = progress - 100;  // Start off-screen left
+      this.spriteAtlas.draw(this.ctx, 'color_blind_to_left', topX, 100);
+
+      // Bottom sprite: right to left at y=PLAY_HEIGHT-100
+      const bottomX = PLAY_WIDTH - progress + 100;  // Start off-screen right
+      this.spriteAtlas.draw(this.ctx, 'color_blind_to_right', bottomX, PLAY_HEIGHT - 100);
+    }
+
     // Draw status panel
     this.renderStatusPanel(round.players);
 
@@ -190,6 +230,11 @@ export class TronRenderer {
     const player = this.players.find(p => p.slotIndex === slotIndex);
     if (!player) return;
 
+    // Store for color blindness redrawing
+    const existing = this.trailData.get(slotIndex) || [];
+    existing.push(...segments);
+    this.trailData.set(slotIndex, existing);
+
     this.trailCtx.fillStyle = player.color;
     for (const seg of segments) {
       this.trailCtx.fillRect(seg.x, seg.y, 1, 1);
@@ -209,6 +254,8 @@ export class TronRenderer {
   clearTrails(): void {
     this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     this.ridiculousDeathSlots.clear();
+    this.trailData.clear();
+    this.colorBlindnessFrames = 0;
     // Restore level canvas (removes lock borders modifications)
     if (this.currentLevelImage) {
       this.levelCtx.drawImage(this.currentLevelImage, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
@@ -220,6 +267,7 @@ export class TronRenderer {
   restoreLevel(): void {
     // Clear trails
     this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    this.trailData.clear();
 
     // Restore level canvas from stored image
     if (this.currentLevelImage) {
@@ -242,6 +290,19 @@ export class TronRenderer {
   // Trigger ridiculous death display for a player
   triggerRidiculousDeath(slotIndex: SlotIndex): void {
     this.ridiculousDeathSlots.add(slotIndex);
+  }
+
+  // Update color blindness state from game state
+  updateColorBlindness(frames: number): void {
+    this.colorBlindnessFrames = frames;
+  }
+
+  // Get color blindness color palette (all player colors regardless of game mode)
+  private getColorBlindnessColors(): string[] {
+    return [
+      FFA_COLORS[0], FFA_COLORS[1], FFA_COLORS[2], FFA_COLORS[3],
+      TEAM_COLORS.purple, TEAM_COLORS.brown
+    ];
   }
 
   // Load a level background and return obstacle pixels with their colors

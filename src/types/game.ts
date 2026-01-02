@@ -114,6 +114,8 @@ export interface TronGameStateData {
   ridiculousDeathSlots?: SlotIndex[];
   // Cleared pixel areas (from bullet impacts) - renderer should clear these from trail canvas
   clearedAreas?: { x: number; y: number; radius: number }[];
+  // Color blindness effect remaining frames (for trail color cycling and sprite animation)
+  colorBlindnessFrames?: number;
 }
 
 // Input includes action key for ready signal
@@ -219,7 +221,7 @@ export const AUTOMATIC_ITEMS: ItemDefinition[] = [
   { name: 'Crossing', sprite: 'crossing', category: 'automatic', duration: 2100, pickupSound: 'shield' },    // 30s - cross own trail
   { name: 'Shield', sprite: 'shield', category: 'automatic', duration: 2100, pickupSound: 'shield' },        // 30s - invincible
   { name: 'Eraser', sprite: 'eraser', category: 'automatic', duration: 0, pickupSound: 'reset' },            // Instant
-  // { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0 },                               // Instant
+  { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0, pickupSound: 'teleport' },         // Instant
   // { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0 },                       // Instant
   { name: 'Control Reversal', sprite: 'reverse', category: 'automatic', duration: 700, pickupSound: 'item_pickup' }, // 10s - self-debuff!
   { name: 'Slow', sprite: 'automatic_slow', category: 'automatic', duration: 1400, pickupSound: 'slow' },    // 20s

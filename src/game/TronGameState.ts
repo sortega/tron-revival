@@ -152,6 +152,11 @@ export class TronGameState {
   private readonly TRACER_KILL_RADIUS = 1;      // Original 1px touch-kill
   private readonly TRACER_CLEAR_RADIUS = 1;     // 3x3 area on death
 
+  // Color blindness effect state (triggered by Swap item)
+  private colorBlindnessRemainingFrames: number = 0;
+  private readonly COLOR_BLINDNESS_DURATION = 280;   // 4 seconds at 70fps
+  private readonly COLOR_BLINDNESS_PROBABILITY = 0.1; // 10% chance
+
   // Player configs for restarting rounds
   private playerConfigs: GamePlayer[];
 
@@ -243,6 +248,7 @@ export class TronGameState {
     this.projectiles = [];
     this.explosions = [];
     this.rifleBurstState.clear();
+    this.colorBlindnessRemainingFrames = 0;
 
     const playerCount = this.playerConfigs.length;
 
@@ -585,6 +591,11 @@ export class TronGameState {
 
     // Update explosions
     this.tickExplosions();
+
+    // Tick color blindness effect
+    if (this.colorBlindnessRemainingFrames > 0) {
+      this.colorBlindnessRemainingFrames--;
+    }
 
     // Check win condition
     this.checkRoundEnd();
@@ -1258,9 +1269,12 @@ export class TronGameState {
     if (!def) return;
 
     if (item.category === 'automatic') {
-      // Special handling for eraser - instant effect
+      // Special handling for instant effects
       if (item.sprite === 'eraser') {
         this.activateEraser();
+      } else if (item.sprite === 'random_item') {
+        // Swap item uses random_item sprite
+        this.activateSwap();
       } else {
         player.activateEffect(item.sprite, def.duration || 0);
       }
@@ -1289,6 +1303,59 @@ export class TronGameState {
 
     // Signal renderer to clear trails and restore level
     this.frameEraserUsed = true;
+  }
+
+  // Swap (Cambiazo): randomly permute positions of all alive players
+  private activateSwap(): void {
+    const alivePlayers = this.players.filter(p => p.alive);
+    if (alivePlayers.length < 2) return;
+
+    // 10% chance to trigger color blindness effect
+    const hasColorBlindness = Math.random() < this.COLOR_BLINDNESS_PROBABILITY;
+    if (hasColorBlindness) {
+      this.colorBlindnessRemainingFrames = this.COLOR_BLINDNESS_DURATION;
+    }
+
+    // Save all positions
+    const positions = alivePlayers.map(p => ({ x: p.x, y: p.y, direction: p.direction }));
+
+    // Generate random permutation (Fisher-Yates shuffle)
+    // When color blindness is active, "no swap" is also an option (include identity permutation)
+    let permutation = positions.map((_, i) => i);
+
+    if (hasColorBlindness) {
+      // With color blindness, there's a 1/(n+1) chance of no swap at all
+      // by potentially keeping the identity permutation
+      if (Math.random() < 1 / (alivePlayers.length + 1)) {
+        return; // No swap, just the visual effect
+      }
+    }
+
+    // Shuffle until we get a derangement (no one stays in place) for a proper swap
+    // This ensures every player moves to a different position
+    let attempts = 0;
+    do {
+      // Fisher-Yates shuffle
+      for (let i = permutation.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [permutation[i], permutation[j]] = [permutation[j]!, permutation[i]!];
+      }
+      attempts++;
+    } while (this.hasFixedPoint(permutation) && attempts < 100);
+
+    // Apply permutation: player i gets position from permutation[i]
+    for (let i = 0; i < alivePlayers.length; i++) {
+      const player = alivePlayers[i]!;
+      const newPos = positions[permutation[i]!]!;
+      player.x = newPos.x;
+      player.y = newPos.y;
+      player.direction = newPos.direction;
+    }
+  }
+
+  // Check if permutation has any fixed points (element at its original position)
+  private hasFixedPoint(perm: number[]): boolean {
+    return perm.some((val, idx) => val === idx);
   }
 
   private checkRoundEnd(): void {
@@ -1409,6 +1476,7 @@ export class TronGameState {
       eraserUsed,
       ridiculousDeathSlots,
       clearedAreas,
+      colorBlindnessFrames: this.colorBlindnessRemainingFrames > 0 ? this.colorBlindnessRemainingFrames : undefined,
     };
   }
 
