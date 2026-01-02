@@ -339,12 +339,9 @@ export class TronRenderer {
     const y = Math.floor(proj.y / 1000);
 
     if (proj.type === 'tracer') {
-      // Tracer: single white pixel with faint glow
+      // Tracer: single white pixel
       this.ctx.fillStyle = '#fff';
-      this.ctx.shadowColor = '#fff';
-      this.ctx.shadowBlur = 3;
       this.ctx.fillRect(x, y, 1, 1);
-      this.ctx.shadowBlur = 0;
     } else {
       // Bullet: use sprite with rotation
       if (!this.spriteAtlas?.isLoaded()) return;
