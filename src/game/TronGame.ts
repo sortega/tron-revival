@@ -33,6 +33,9 @@ export class TronGame implements Screen {
   // Guest accumulates ridiculous death events between frames
   private pendingRidiculousDeaths: Set<SlotIndex> = new Set();
 
+  // Guest accumulates cleared areas between frames to avoid losing any
+  private pendingClearedAreas: { x: number; y: number; radius: number }[] = [];
+
   // Last time we processed a frame (for consistent timing)
   private lastFrameTime: number = 0;
   private readonly TARGET_FRAME_TIME = 1000 / 70; // 70fps
@@ -533,6 +536,11 @@ export class TronGame implements Screen {
               this.pendingRidiculousDeaths.add(slot);
             }
           }
+
+          // Accumulate cleared areas to avoid losing any between frames
+          if (state.clearedAreas) {
+            this.pendingClearedAreas.push(...state.clearedAreas);
+          }
         },
         onHostDisconnected: () => {
           getSoundManager().stopAllLoops();  // Stop any lingering sound loops
@@ -670,11 +678,11 @@ export class TronGame implements Screen {
         // Update local game state from network
         this.gameState.updateFromState(this.receivedState);
 
-        // Stop all sound loops on phase transitions to round_end or countdown
+        // Stop all sound loops on phase transitions to waiting_ready or countdown
         // This ensures loops don't persist due to missed network messages
         const currentPhase = this.receivedState.round.phase;
         if (this.previousPhase !== currentPhase) {
-          if (currentPhase === 'round_end' || currentPhase === 'countdown') {
+          if (currentPhase === 'waiting_ready' || currentPhase === 'countdown') {
             getSoundManager().stopAllLoops();
           }
           this.previousPhase = currentPhase;
@@ -698,12 +706,12 @@ export class TronGame implements Screen {
           this.receivedState.borderSegments = undefined;
         }
 
-        // Clear areas from bullet impacts
-        if (this.receivedState.clearedAreas) {
-          for (const { x, y, radius } of this.receivedState.clearedAreas) {
+        // Clear areas from bullet impacts (from accumulated pending areas)
+        if (this.pendingClearedAreas.length > 0) {
+          for (const { x, y, radius } of this.pendingClearedAreas) {
             this.renderer.clearArea(x, y, radius);
           }
-          this.receivedState.clearedAreas = undefined;
+          this.pendingClearedAreas = [];
         }
 
         // Handle eraser - restore level and clear trails

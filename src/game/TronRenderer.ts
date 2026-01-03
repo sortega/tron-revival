@@ -212,11 +212,8 @@ export class TronRenderer {
       case 'countdown':
         this.drawCountdownOverlay(round.countdown);
         break;
-      case 'round_end':
-        this.drawRoundEndOverlay(round.roundWinner, match);
-        break;
       case 'waiting_ready':
-        this.drawWaitingReadyOverlay(match);
+        this.drawWaitingReadyOverlay(match, round.roundWinner);
         break;
     }
 
@@ -594,49 +591,7 @@ export class TronRenderer {
     this.ctx.shadowBlur = 0;
   }
 
-  private drawRoundEndOverlay(winner: SlotIndex | 'draw' | null, match: TronMatchState): void {
-    // Semi-transparent overlay
-    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
-
-    let titleText: string;
-    let titleColor: string;
-
-    if (winner === 'draw') {
-      titleText = 'DRAW!';
-      titleColor = '#ff0';
-    } else if (winner !== null) {
-      const winningPlayer = this.players.find(p => p.slotIndex === winner);
-      if (match.gameMode === 'team') {
-        const teamName = winner % 2 === 0 ? 'PURPLE' : 'BROWN';
-        titleText = `TEAM ${teamName} WINS!`;
-        titleColor = winner % 2 === 0 ? '#a0a' : '#a60';
-      } else {
-        titleText = `${winningPlayer?.nickname || 'Player'} WINS!`;
-        titleColor = winningPlayer?.color || '#fff';
-      }
-    } else {
-      titleText = 'ROUND OVER';
-      titleColor = '#fff';
-    }
-
-    // Title
-    this.ctx.fillStyle = titleColor;
-    this.ctx.font = 'bold 48px monospace';
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'middle';
-    this.ctx.shadowColor = titleColor;
-    this.ctx.shadowBlur = 15;
-    this.ctx.fillText(titleText, PLAY_WIDTH / 2, CANVAS_HEIGHT / 2 - 40);
-    this.ctx.shadowBlur = 0;
-
-    // Instructions
-    this.ctx.fillStyle = '#888';
-    this.ctx.font = '20px monospace';
-    this.ctx.fillText('Press ACTION when ready', PLAY_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
-  }
-
-  private drawWaitingReadyOverlay(match: TronMatchState): void {
+  private drawWaitingReadyOverlay(match: TronMatchState, roundWinner: SlotIndex | 'draw' | null): void {
     // Lighter overlay
     this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
@@ -649,12 +604,12 @@ export class TronRenderer {
     const title = match.currentRound > 1 ? `ROUND ${match.currentRound}` : 'GET READY';
     this.ctx.fillText(title, PLAY_WIDTH / 2, CANVAS_HEIGHT / 2 - 100);
 
-    // Column positions
-    const winsX = PLAY_WIDTH / 2 - 160;
-    const mrX = PLAY_WIDTH / 2 - 120;
-    const nicknameX = PLAY_WIDTH / 2 - 90;
-    const statusX = PLAY_WIDTH / 2 + 80;
-    const maxNicknameWidth = 150; // Max width before truncation
+    // Column positions - more room for nicknames
+    const winsX = PLAY_WIDTH / 2 - 200;
+    const mrX = PLAY_WIDTH / 2 - 160;
+    const nicknameX = PLAY_WIDTH / 2 - 120;
+    const statusX = PLAY_WIDTH / 2 + 140;
+    const maxNicknameWidth = 240; // More width for nicknames
 
     // Headers
     this.ctx.fillStyle = '#888';
@@ -670,6 +625,15 @@ export class TronRenderer {
     // Player scores and ready status
     const startY = CANVAS_HEIGHT / 2 - 30;
 
+    // Determine winner for emoji display (in team mode, winning team members get trophy)
+    const isWinner = (slotIndex: SlotIndex): boolean => {
+      if (roundWinner === null || roundWinner === 'draw') return false;
+      if (match.gameMode === 'team') {
+        return slotIndex % 2 === roundWinner % 2;
+      }
+      return slotIndex === roundWinner;
+    };
+
     // Sort players by score (descending) for display
     const sortedPlayers = [...this.players].sort((a, b) => {
       const scoreA = match.scores[a.slotIndex] || 0;
@@ -682,6 +646,7 @@ export class TronRenderer {
       const score = match.scores[player.slotIndex] || 0;
       const mr = match.ridiculousDeath?.[player.slotIndex] || 0;
       const y = startY + i * 35;
+      const won = isWinner(player.slotIndex);
 
       // Wins (score)
       this.ctx.fillStyle = '#ff0';
@@ -693,15 +658,18 @@ export class TronRenderer {
       this.ctx.fillStyle = mr > 0 ? '#f44' : '#666';
       this.ctx.fillText(String(mr), mrX, y);
 
-      // Nickname (truncated with ellipsis if too long)
+      // Nickname with win/lose emoji (truncated with ellipsis if too long)
       this.ctx.fillStyle = player.color;
       this.ctx.font = '20px monospace';
       this.ctx.textAlign = 'left';
-      let nickname = player.nickname;
-      while (this.ctx.measureText(nickname).width > maxNicknameWidth && nickname.length > 3) {
+
+      // Add emoji prefix if there was a round result
+      const emoji = roundWinner !== null ? (won ? '🏆 ' : '💀 ') : '';
+      let nickname = emoji + player.nickname;
+      while (this.ctx.measureText(nickname).width > maxNicknameWidth && nickname.length > emoji.length + 3) {
         nickname = nickname.slice(0, -1);
       }
-      if (nickname !== player.nickname) {
+      if (nickname !== emoji + player.nickname) {
         nickname = nickname.slice(0, -2) + '…';
       }
       this.ctx.fillText(nickname, nicknameX, y);

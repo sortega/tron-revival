@@ -76,7 +76,7 @@ export interface TronPlayerState {
   activeEffects: ActiveEffect[];
 }
 
-export type RoundPhase = 'countdown' | 'playing' | 'round_end' | 'waiting_ready';
+export type RoundPhase = 'countdown' | 'playing' | 'waiting_ready';
 
 // Full round state (broadcast by host)
 export interface TronRoundState {

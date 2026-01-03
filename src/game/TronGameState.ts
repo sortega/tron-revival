@@ -108,9 +108,6 @@ export class TronGameState {
   // Track previous action state for one-shot ready detection
   private prevActionState: Map<SlotIndex, boolean> = new Map();
 
-  // Timeout for round end transition (stored for cleanup)
-  private roundEndTimeout: ReturnType<typeof setTimeout> | null = null;
-
   // Border lock animations (multiple players can have active locks)
   private borderLocks: Map<SlotIndex, {
     color: string;
@@ -260,12 +257,6 @@ export class TronGameState {
 
   // Initialize/reset for a new round
   initRound(): void {
-    // Clear any pending round-end timeout
-    if (this.roundEndTimeout) {
-      clearTimeout(this.roundEndTimeout);
-      this.roundEndTimeout = null;
-    }
-
     this.phase = 'countdown';
     this.countdown = COUNTDOWN_SECONDS;
     this.roundWinner = null;
@@ -336,11 +327,6 @@ export class TronGameState {
 
       case 'playing':
         this.tickPlaying(inputs);
-        break;
-
-      case 'round_end':
-        // Process ready signals during round_end (same as waiting_ready)
-        this.tickWaitingReady(inputs);
         break;
 
       case 'waiting_ready':
@@ -1774,7 +1760,7 @@ export class TronGameState {
   }
 
   private endRound(alivePlayers: TronPlayer[]): void {
-    this.phase = 'round_end';
+    this.phase = 'waiting_ready';
 
     // Clear any pending sound events (prevents loop-start events from replaying after round ends)
     this.frameSoundEvents = [];
@@ -1805,16 +1791,6 @@ export class TronGameState {
         }
       }
     }
-
-    // Transition to waiting after a brief delay
-    // Note: Don't clear playersReady here - players can signal ready during round_end
-    // and their status should be preserved. playersReady is cleared in initRound().
-    this.roundEndTimeout = setTimeout(() => {
-      if (this.phase === 'round_end') {
-        this.phase = 'waiting_ready';
-      }
-      this.roundEndTimeout = null;
-    }, 2000);
   }
 
   // Serialize for network transmission
