@@ -634,11 +634,15 @@ export class TronRenderer {
       return slotIndex === roundWinner;
     };
 
-    // Sort players by score (descending) for display
+    // Sort players by score (descending), then by ridiculous deaths (ascending) to break ties
     const sortedPlayers = [...this.players].sort((a, b) => {
       const scoreA = match.scores[a.slotIndex] || 0;
       const scoreB = match.scores[b.slotIndex] || 0;
-      return scoreB - scoreA;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      // Fewer ridiculous deaths is better
+      const mrA = match.ridiculousDeath?.[a.slotIndex] || 0;
+      const mrB = match.ridiculousDeath?.[b.slotIndex] || 0;
+      return mrA - mrB;
     });
 
     sortedPlayers.forEach((player, i) => {
