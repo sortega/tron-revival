@@ -346,10 +346,6 @@ export class TronGameState {
   }
 
   private tickPlaying(inputs: Map<SlotIndex, TronInput>): void {
-    // Animate portals
-    for (const portal of this.portals) {
-      portal.animFrame = (portal.animFrame + 1) % PORTAL_FRAME_COUNT;
-    }
 
     // Decrement teleport cooldowns
     for (const [slotIndex, cooldown] of this.teleportCooldowns) {
@@ -621,19 +617,8 @@ export class TronGameState {
     // Animate border lock if active
     this.animateBorderLock();
 
-    // Update projectiles
-    this.tickProjectiles();
-
-    // Update explosions
-    this.tickExplosions();
-
-    // Tick color blindness effect
-    if (this.colorBlindnessRemainingFrames > 0) {
-      this.colorBlindnessRemainingFrames--;
-    }
-
-    // Tick bodyguards (movement, collisions)
-    this.tickBodyguards();
+    // Update visual effects (projectiles, explosions, bodyguards, portals, color blindness)
+    this.tickVisualEffects();
 
     // Check win condition
     this.checkRoundEnd();
@@ -896,30 +881,33 @@ export class TronGameState {
       const skipOwner = proj.ownerCooldown !== undefined && proj.ownerCooldown > 0;
 
       // Check collision with players (shield does NOT protect!)
-      // Bomb uses direct impact radius (like bullets), not the kill radius
-      const killRadius = proj.type === 'bullet' ? this.BULLET_KILL_RADIUS :
-                        proj.type === 'bomb' ? this.BULLET_KILL_RADIUS : this.TRACER_KILL_RADIUS;
+      // Skip player collisions during waiting_ready phase (round is over, let bullets fly visually)
       let hitPlayer = false;
-      for (const player of this.players) {
-        if (!player.alive) continue;
-        // Skip owner during cooldown period
-        if (skipOwner && player.slotIndex === proj.ownerSlot) continue;
-        const px = player.getScreenX();
-        const py = player.getScreenY();
-        // Check distance to the line segment, not just endpoints
-        const dist = this.pointToLineDistance(px, py, prevX, prevY, newX, newY);
-        if (dist < killRadius) {
-          if (proj.type === 'bullet') {
-            this.projectileImpact(px, py, proj.ownerSlot);
-          } else if (proj.type === 'bomb') {
-            this.bombImpact(px, py, proj.ownerSlot);
-          } else {
-            this.tracerExpire(px, py);
-            this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot);
+      if (this.phase !== 'waiting_ready') {
+        // Bomb uses direct impact radius (like bullets), not the kill radius
+        const killRadius = proj.type === 'bullet' ? this.BULLET_KILL_RADIUS :
+                          proj.type === 'bomb' ? this.BULLET_KILL_RADIUS : this.TRACER_KILL_RADIUS;
+        for (const player of this.players) {
+          if (!player.alive) continue;
+          // Skip owner during cooldown period
+          if (skipOwner && player.slotIndex === proj.ownerSlot) continue;
+          const px = player.getScreenX();
+          const py = player.getScreenY();
+          // Check distance to the line segment, not just endpoints
+          const dist = this.pointToLineDistance(px, py, prevX, prevY, newX, newY);
+          if (dist < killRadius) {
+            if (proj.type === 'bullet') {
+              this.projectileImpact(px, py, proj.ownerSlot);
+            } else if (proj.type === 'bomb') {
+              this.bombImpact(px, py, proj.ownerSlot);
+            } else {
+              this.tracerExpire(px, py);
+              this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot);
+            }
+            toRemove.push(proj.id);
+            hitPlayer = true;
+            break;
           }
-          toRemove.push(proj.id);
-          hitPlayer = true;
-          break;
         }
       }
       if (hitPlayer) continue;
@@ -1229,7 +1217,28 @@ export class TronGameState {
     this.explosions = this.explosions.filter(e => e.frame < this.EXPLOSION_FRAMES);
   }
 
+  // Tick visual effects that continue during waiting_ready phase
+  private tickVisualEffects(): void {
+    // Animate portals
+    for (const portal of this.portals) {
+      portal.animFrame = (portal.animFrame + 1) % PORTAL_FRAME_COUNT;
+    }
+
+    // Tick color blindness effect countdown
+    if (this.colorBlindnessRemainingFrames > 0) {
+      this.colorBlindnessRemainingFrames--;
+    }
+
+    // Update projectiles, explosions, and bodyguards
+    this.tickProjectiles();
+    this.tickExplosions();
+    this.tickBodyguards();
+  }
+
   private tickWaitingReady(inputs: Map<SlotIndex, TronInput>): void {
+    // Continue ticking visual elements (projectiles keep flying, explosions animate)
+    this.tickVisualEffects();
+
     // Check for action key presses (one-shot: only on rising edge)
     for (const [slotIndex, input] of inputs) {
       const wasPressed = this.prevActionState.get(slotIndex) || false;
@@ -1714,7 +1723,10 @@ export class TronGameState {
       projectilesToRemove.push(...this.checkBodyguardProjectileCollision(bg));
 
       // Check collision with enemy players (kill them)
-      this.checkBodyguardPlayerCollision(bg);
+      // Skip during waiting_ready phase (round is over)
+      if (this.phase !== 'waiting_ready') {
+        this.checkBodyguardPlayerCollision(bg);
+      }
     }
 
     // Remove projectiles destroyed by bodyguards
@@ -1762,10 +1774,8 @@ export class TronGameState {
   private endRound(alivePlayers: TronPlayer[]): void {
     this.phase = 'waiting_ready';
 
-    // Clear any pending sound events (prevents loop-start events from replaying after round ends)
-    this.frameSoundEvents = [];
-
-    // Stop all sound loops at end of round
+    // Stop all sound loops at end of round (weapons stop firing)
+    // But don't clear sound events - let final explosions/impacts play
     getSoundManager().stopAllLoops();
 
     // Clear border lock state
