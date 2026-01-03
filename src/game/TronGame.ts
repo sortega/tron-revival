@@ -659,6 +659,9 @@ export class TronGame implements Screen {
       // Update color blindness state
       this.renderer.updateColorBlindness(stateData.colorBlindnessFrames ?? 0);
 
+      // Update white flash state
+      this.renderer.updateWhiteFlash(stateData.whiteFlashFrames ?? 0);
+
       // Play sounds locally
       this.playSoundEvents(stateData.soundEvents);
 
@@ -729,6 +732,9 @@ export class TronGame implements Screen {
 
         // Update color blindness state
         this.renderer.updateColorBlindness(this.receivedState.colorBlindnessFrames ?? 0);
+
+        // Update white flash state
+        this.renderer.updateWhiteFlash(this.receivedState.whiteFlashFrames ?? 0);
 
         // Play sounds from received state (clear after playing to prevent replay)
         if (this.receivedState.soundEvents && this.receivedState.soundEvents.length > 0) {
