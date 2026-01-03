@@ -164,7 +164,7 @@ export class NetworkLobby implements Screen {
               statusEl.textContent = 'Connecting...';
               statusEl.style.color = '#ff0';
               document.getElementById('lobbyContent')!.style.display = 'grid';
-              this.renderConnectingUI();
+              this.updateUI();  // Render panels in connecting state
             }
           } else {
             statusEl.textContent = 'Disconnected';
@@ -243,8 +243,7 @@ export class NetworkLobby implements Screen {
   }
 
   private updateUI(): void {
-    if (!this.lobbyState) return;
-
+    // Render all panels - they handle missing lobbyState gracefully
     this.renderSettingsPanel();
     this.renderPlayersPanel();
     this.renderChatPanel();
@@ -252,12 +251,68 @@ export class NetworkLobby implements Screen {
 
   private renderSettingsPanel(): void {
     const panel = document.getElementById('settingsPanel');
-    if (!panel || !this.lobbyState) return;
+    if (!panel) return;
 
     const isHost = this.connection.isHostMode();
-    const roomId = this.lobbyState.roomId;
-    const levelMode = this.lobbyState.levelMode;
+    const isConnecting = !this.lobbyState;
+    const roomId = this.lobbyState?.roomId || this.options.roomId || '';
+    const levelMode = this.lobbyState?.levelMode || 'cycle';
     const link = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+
+    // Guest connecting state (no lobby data yet)
+    if (isConnecting && !isHost) {
+      panel.innerHTML = `
+        <h3 style="color: #0ff; margin-bottom: 1rem;">Info</h3>
+
+        <div style="margin-bottom: 1rem;">
+          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Game Mode:</label>
+          <div style="display: flex; gap: 0.5rem;">
+            <button disabled style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">FFA</button>
+            <button disabled style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">TEAMS</button>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Level:</label>
+          <select disabled style="width: 100%; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333; cursor: not-allowed;">
+            <option>Loading...</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Your Nickname:</label>
+          <div style="display: flex; gap: 0.5rem;">
+            <input id="nicknameInput" type="text" value="${this.myNickname}" disabled style="flex: 1; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333; box-sizing: border-box;" />
+            <button disabled style="padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333; font-size: 1rem;">🎲</button>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Room Code:</label>
+          <div style="background: #000; padding: 0.5rem; border: 1px solid #333; color: #0f0; font-family: monospace; text-align: center; letter-spacing: 0.1em;">${roomId}</div>
+          <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+            <button id="copyCodeBtn" style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #002; color: #08f; border: 1px solid #08f;">📋 CODE</button>
+            <button id="copyLinkBtn" style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #002; color: #08f; border: 1px solid #08f;">🔗 LINK</button>
+          </div>
+        </div>
+
+        <div style="background: #110; padding: 1rem; border: 1px solid #440; border-radius: 4px; color: #ff0; text-align: center; margin-bottom: 1rem;">
+          Connecting to room...
+        </div>
+
+        <button id="disconnectBtn" style="width: 100%; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #200; color: #f44; border: 1px solid #f44;">DISCONNECT</button>
+      `;
+
+      this.setupCopyButtons(roomId, link);
+      document.getElementById('disconnectBtn')?.addEventListener('click', () => {
+        this.connection.disconnect();
+        this.screenManager.showMainMenu();
+      });
+      return;
+    }
+
+    // Need lobby state for host and connected guest views
+    if (!this.lobbyState) return;
 
     if (isHost) {
       panel.innerHTML = `
@@ -620,9 +675,37 @@ export class NetworkLobby implements Screen {
     }
   }
 
+  // Helper to setup copy buttons (used in settings panel)
+  private setupCopyButtons(roomId: string, link: string): void {
+    document.getElementById('copyCodeBtn')?.addEventListener('click', () => {
+      navigator.clipboard.writeText(roomId).then(() => {
+        const btn = document.getElementById('copyCodeBtn');
+        if (btn) { btn.textContent = '✓ COPIED'; setTimeout(() => { btn.textContent = '📋 CODE'; }, 2000); }
+      });
+    });
+
+    document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
+      navigator.clipboard.writeText(link).then(() => {
+        const btn = document.getElementById('copyLinkBtn');
+        if (btn) { btn.textContent = '✓ COPIED'; setTimeout(() => { btn.textContent = '🔗 LINK'; }, 2000); }
+      });
+    });
+  }
+
   private renderPlayersPanel(): void {
     const panel = document.getElementById('playersPanel');
-    if (!panel || !this.lobbyState) return;
+    if (!panel) return;
+
+    // Connecting state - show placeholder
+    if (!this.lobbyState) {
+      panel.innerHTML = `
+        <h3 style="color: #0ff; margin-bottom: 1rem;">Players</h3>
+        <div style="color: #666; text-align: center; padding: 2rem;">
+          Waiting for lobby data...
+        </div>
+      `;
+      return;
+    }
 
     const isHost = this.connection.isHostMode();
     const mySlotIndex = this.connection.getMySlotIndex();
@@ -775,7 +858,22 @@ export class NetworkLobby implements Screen {
 
   private renderChatPanel(): void {
     const panel = document.getElementById('chatPanel');
-    if (!panel || !this.lobbyState) return;
+    if (!panel) return;
+
+    // Connecting state - show placeholder
+    if (!this.lobbyState) {
+      panel.innerHTML = `
+        <h3 style="color: #0ff; margin-bottom: 0.5rem;">Chat</h3>
+        <div style="flex: 1; overflow-y: auto; background: #000; padding: 0.5rem; border: 1px solid #333; border-radius: 4px; margin-bottom: 0.5rem; min-height: 200px;">
+          <div style="color: #666; font-style: italic;">Connecting...</div>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <input disabled type="text" placeholder="Type a message..." style="flex: 1; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333;" />
+          <button disabled style="padding: 0.5rem 1rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">SEND</button>
+        </div>
+      `;
+      return;
+    }
 
     const mode = this.lobbyState.gameMode;
     const messages = this.lobbyState.chatMessages;
@@ -899,96 +997,6 @@ export class NetworkLobby implements Screen {
     const openSlot = findFirstOpenSlot(this.lobbyState);
     if (openSlot !== null) {
       this.connection.joinSlot(openSlot, this.myNickname);
-    }
-  }
-
-  // Render UI while waiting for lobby data (guest only)
-  private renderConnectingUI(): void {
-    const roomId = this.options.roomId || '';
-    const link = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
-
-    // Settings panel - show room code and disconnect button
-    const settingsPanel = document.getElementById('settingsPanel');
-    if (settingsPanel) {
-      settingsPanel.innerHTML = `
-        <h3 style="color: #0ff; margin-bottom: 1rem;">Info</h3>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Game Mode:</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <button disabled style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">FFA</button>
-            <button disabled style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">TEAMS</button>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Your Nickname:</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <input id="nicknameInput" type="text" value="${this.myNickname}" disabled style="flex: 1; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333; box-sizing: border-box;" />
-            <button disabled style="padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333; font-size: 1rem;">🎲</button>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Room Code:</label>
-          <div style="background: #000; padding: 0.5rem; border: 1px solid #333; color: #0f0; font-family: monospace; text-align: center; letter-spacing: 0.1em;">${roomId}</div>
-          <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-            <button id="copyCodeBtn" style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #002; color: #08f; border: 1px solid #08f;">📋 CODE</button>
-            <button id="copyLinkBtn" style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #002; color: #08f; border: 1px solid #08f;">🔗 LINK</button>
-          </div>
-        </div>
-
-        <div style="background: #110; padding: 1rem; border: 1px solid #440; border-radius: 4px; color: #ff0; text-align: center; margin-bottom: 1rem;">
-          Connecting to room...
-        </div>
-
-        <button id="disconnectBtn" style="width: 100%; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #200; color: #f44; border: 1px solid #f44;">DISCONNECT</button>
-      `;
-
-      document.getElementById('copyCodeBtn')?.addEventListener('click', () => {
-        navigator.clipboard.writeText(roomId).then(() => {
-          const btn = document.getElementById('copyCodeBtn');
-          if (btn) { btn.textContent = '✓ COPIED'; setTimeout(() => { btn.textContent = '📋 CODE'; }, 2000); }
-        });
-      });
-
-      document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
-        navigator.clipboard.writeText(link).then(() => {
-          const btn = document.getElementById('copyLinkBtn');
-          if (btn) { btn.textContent = '✓ COPIED'; setTimeout(() => { btn.textContent = '🔗 LINK'; }, 2000); }
-        });
-      });
-
-      document.getElementById('disconnectBtn')?.addEventListener('click', () => {
-        this.connection.disconnect();
-        this.screenManager.showMainMenu();
-      });
-    }
-
-    // Players panel - show empty slots
-    const playersPanel = document.getElementById('playersPanel');
-    if (playersPanel) {
-      playersPanel.innerHTML = `
-        <h3 style="color: #0ff; margin-bottom: 1rem;">Players</h3>
-        <div style="color: #666; text-align: center; padding: 2rem;">
-          Waiting for lobby data...
-        </div>
-      `;
-    }
-
-    // Chat panel - show empty
-    const chatPanel = document.getElementById('chatPanel');
-    if (chatPanel) {
-      chatPanel.innerHTML = `
-        <h3 style="color: #0ff; margin-bottom: 0.5rem;">Chat</h3>
-        <div style="flex: 1; overflow-y: auto; background: #000; padding: 0.5rem; border: 1px solid #333; border-radius: 4px; margin-bottom: 0.5rem; min-height: 200px;">
-          <div style="color: #666; font-style: italic;">Connecting...</div>
-        </div>
-        <div style="display: flex; gap: 0.5rem;">
-          <input disabled type="text" placeholder="Type a message..." style="flex: 1; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333;" />
-          <button disabled style="padding: 0.5rem 1rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">SEND</button>
-        </div>
-      `;
     }
   }
 
