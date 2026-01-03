@@ -155,9 +155,16 @@ export class TronGameState {
   // Uzi weapon constants
   private readonly UZI_TRACERS_PER_FRAME = 20;  // Spray 20 bullets per frame
   private readonly UZI_SPREAD_DEGREES = 30;     // ±30° random deviation
-  private readonly UZI_MIN_SPEED = 5000;       // 5 pixels/frame in fixed-point
-  private readonly UZI_MAX_SPEED = 25000;       // 25 pixels/frame in fixed-point
-  private readonly UZI_TRACER_LIFESPAN = 2;     // 1 frame lifespan (immediate spray effect)
+  private readonly UZI_MIN_SPEED = 10000;       // 10 pixels/frame in fixed-point
+  private readonly UZI_MAX_SPEED = 50000;       // 50 pixels/frame in fixed-point
+  private readonly UZI_TRACER_LIFESPAN = 1;     // 1 frame lifespan (immediate spray effect)
+
+  // Shotgun weapon constants
+  private readonly SHOTGUN_PELLETS = 30;        // 30 pellets per shot
+  private readonly SHOTGUN_SPREAD_DEGREES = 5;  // ±5° random deviation
+  private readonly SHOTGUN_MIN_SPEED = 10000;   // 10 pixels/frame in fixed-point
+  private readonly SHOTGUN_MAX_SPEED = 30000;   // 30 pixels/frame in fixed-point
+  private readonly SHOTGUN_PELLET_LIFESPAN = 10; // 10 frames lifespan
 
   // Color blindness effect state (triggered by Swap item)
   private colorBlindnessRemainingFrames: number = 0;
@@ -546,6 +553,10 @@ export class TronGameState {
               const playerSpeedFactor = speedFactors.get(player.slotIndex) ?? 1;
               this.createProjectile(player, playerSpeedFactor);
               this.queueSound('glock');
+            } else if (weaponSprite === 'shotgun') {
+              // Shotgun: fires 30 pellets in a spread
+              this.createShotgunPellets(player);
+              this.queueSound('shotgun');
             } else if (weaponSprite === 'lock_borders') {
             // Special handling for lock_borders - starts border animation
               // Only start alarm if this is the first active border lock
@@ -736,6 +747,33 @@ export class TronGameState {
     }
   }
 
+  // Create Shotgun pellets (30 pellets with spread on single shot)
+  private createShotgunPellets(player: TronPlayer): void {
+    const startOffset = 3000; // 3 pixels ahead in fixed-point
+
+    for (let i = 0; i < this.SHOTGUN_PELLETS; i++) {
+      // Random direction within ±5° of player heading
+      const spreadAngle = (Math.random() * 2 - 1) * this.SHOTGUN_SPREAD_DEGREES;
+      const direction = player.direction + spreadAngle;
+      const dirRad = (direction * Math.PI) / 180;
+
+      // Random speed between 10-30 pixels/frame
+      const speed = this.SHOTGUN_MIN_SPEED + Math.random() * (this.SHOTGUN_MAX_SPEED - this.SHOTGUN_MIN_SPEED);
+
+      this.projectiles.push({
+        id: this.nextProjectileId++,
+        x: player.x + Math.cos(dirRad) * startOffset,
+        y: player.y + Math.sin(dirRad) * startOffset,
+        direction: direction,
+        ownerSlot: player.slotIndex,
+        speed: speed,
+        type: 'tracer',
+        remainingFrames: this.SHOTGUN_PELLET_LIFESPAN,
+        ownerCooldown: this.PROJECTILE_OWNER_COOLDOWN,
+      });
+    }
+  }
+
   // Move projectiles and check collisions
   private tickProjectiles(): void {
     const toRemove: number[] = [];
@@ -863,27 +901,24 @@ export class TronGameState {
       }
       if (hitItem) continue;
 
-      // Check collision with other projectiles
-      for (const other of this.projectiles) {
-        if (other.id === proj.id) continue;
-        if (toRemove.includes(other.id)) continue;
-        const otherX = Math.floor(other.x / 1000);
-        const otherY = Math.floor(other.y / 1000);
-        const dist = Math.sqrt((newX - otherX) ** 2 + (newY - otherY) ** 2);
-        if (dist < 3) {  // Small collision radius for projectiles
-          // Both projectiles are destroyed
-          const midX = Math.floor((newX + otherX) / 2);
-          const midY = Math.floor((newY + otherY) / 2);
-          // If either is a bullet, create explosion (pass first bullet's owner for self-kill check)
-          if (proj.type === 'bullet' || other.type === 'bullet') {
-            const bulletOwner = proj.type === 'bullet' ? proj.ownerSlot : other.ownerSlot;
-            this.projectileImpact(midX, midY, bulletOwner);
-          } else {
-            this.tracerExpire(midX, midY);
+      // Check collision with other projectiles (only bullets collide)
+      // Tracers don't collide with each other (allows shotgun/uzi spread)
+      if (proj.type === 'bullet') {
+        for (const other of this.projectiles) {
+          if (other.id === proj.id) continue;
+          if (toRemove.includes(other.id)) continue;
+          const otherX = Math.floor(other.x / 1000);
+          const otherY = Math.floor(other.y / 1000);
+          const dist = Math.sqrt((newX - otherX) ** 2 + (newY - otherY) ** 2);
+          if (dist < 3) {  // Small collision radius for projectiles
+            // Both projectiles are destroyed
+            const midX = Math.floor((newX + otherX) / 2);
+            const midY = Math.floor((newY + otherY) / 2);
+            this.projectileImpact(midX, midY, proj.ownerSlot);
+            toRemove.push(proj.id);
+            toRemove.push(other.id);
+            break;
           }
-          toRemove.push(proj.id);
-          toRemove.push(other.id);
-          break;
         }
       }
     }
