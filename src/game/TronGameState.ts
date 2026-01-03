@@ -155,9 +155,9 @@ export class TronGameState {
   // Uzi weapon constants
   private readonly UZI_TRACERS_PER_FRAME = 20;  // Spray 20 bullets per frame
   private readonly UZI_SPREAD_DEGREES = 30;     // ±30° random deviation
-  private readonly UZI_MIN_SPEED = 10000;       // 10 pixels/frame in fixed-point
-  private readonly UZI_MAX_SPEED = 50000;       // 50 pixels/frame in fixed-point
-  private readonly UZI_TRACER_LIFESPAN = 1;     // 1 frame lifespan (immediate spray effect)
+  private readonly UZI_MIN_SPEED = 5000;        // 5 pixels/frame in fixed-point
+  private readonly UZI_MAX_SPEED = 25000;       // 25 pixels/frame in fixed-point
+  private readonly UZI_TRACER_LIFESPAN = 2;     // 2 frames to be visible for at least one render
 
   // Shotgun weapon constants
   private readonly SHOTGUN_PELLETS = 30;        // 30 pellets per shot
@@ -165,6 +165,16 @@ export class TronGameState {
   private readonly SHOTGUN_MIN_SPEED = 10000;   // 10 pixels/frame in fixed-point
   private readonly SHOTGUN_MAX_SPEED = 30000;   // 30 pixels/frame in fixed-point
   private readonly SHOTGUN_PELLET_LIFESPAN = 10; // 10 frames lifespan
+
+  // Bomb weapon constants
+  private readonly BOMB_SPEED = 2000;             // 2 pixels/frame in fixed-point
+  private readonly BOMB_CLEAR_RADIUS = 60;        // 120x120 area (±60)
+  private readonly BOMB_KILL_RADIUS = 50;         // Kills players within 50px
+  private readonly BOMB_ITEM_DAMAGE_RADIUS = 70;  // Destroys items within 70px
+  private readonly BOMB_EXPLOSION_SCALE = 2;    // Large bomb explosion
+  private readonly BOMB_HP = 100;                 // Starting HP
+  private readonly GLOCK_DAMAGE = 50;             // Glock bullet damage to bomb
+  private readonly TRACER_DAMAGE = 10;            // Tracer bullet damage to bomb
 
   // Color blindness effect state (triggered by Swap item)
   private colorBlindnessRemainingFrames: number = 0;
@@ -557,6 +567,10 @@ export class TronGameState {
               // Shotgun: fires 30 pellets in a spread
               this.createShotgunPellets(player);
               this.queueSound('shotgun');
+            } else if (weaponSprite === 'bomb') {
+              // Bomb: fires a single heavy missile
+              this.createBombProjectile(player);
+              this.queueSound('bomb');
             } else if (weaponSprite === 'lock_borders') {
             // Special handling for lock_borders - starts border animation
               // Only start alarm if this is the first active border lock
@@ -774,6 +788,24 @@ export class TronGameState {
     }
   }
 
+  // Create a bomb projectile
+  private createBombProjectile(player: TronPlayer): void {
+    const startOffset = 3000; // 3 pixels ahead in fixed-point
+    const dirRad = (player.direction * Math.PI) / 180;
+
+    this.projectiles.push({
+      id: this.nextProjectileId++,
+      x: player.x + Math.cos(dirRad) * startOffset,
+      y: player.y + Math.sin(dirRad) * startOffset,
+      direction: player.direction,
+      ownerSlot: player.slotIndex,
+      speed: this.BOMB_SPEED,
+      type: 'bomb',
+      ownerCooldown: this.PROJECTILE_OWNER_COOLDOWN,
+      hp: this.BOMB_HP,
+    });
+  }
+
   // Move projectiles and check collisions
   private tickProjectiles(): void {
     const toRemove: number[] = [];
@@ -826,6 +858,8 @@ export class TronGameState {
       if (impactPoint) {
         if (proj.type === 'bullet') {
           this.projectileImpact(impactPoint.x, impactPoint.y, proj.ownerSlot);
+        } else if (proj.type === 'bomb') {
+          this.bombImpact(impactPoint.x, impactPoint.y, proj.ownerSlot);
         } else {
           // Clear path up to impact point, then expire
           this.clearPixelPath(prevX, prevY, impactPoint.x, impactPoint.y);
@@ -857,7 +891,9 @@ export class TronGameState {
       const skipOwner = proj.ownerCooldown !== undefined && proj.ownerCooldown > 0;
 
       // Check collision with players (shield does NOT protect!)
-      const killRadius = proj.type === 'bullet' ? this.BULLET_KILL_RADIUS : this.TRACER_KILL_RADIUS;
+      // Bomb uses direct impact radius (like bullets), not the kill radius
+      const killRadius = proj.type === 'bullet' ? this.BULLET_KILL_RADIUS :
+                        proj.type === 'bomb' ? this.BULLET_KILL_RADIUS : this.TRACER_KILL_RADIUS;
       let hitPlayer = false;
       for (const player of this.players) {
         if (!player.alive) continue;
@@ -870,6 +906,8 @@ export class TronGameState {
         if (dist < killRadius) {
           if (proj.type === 'bullet') {
             this.projectileImpact(px, py, proj.ownerSlot);
+          } else if (proj.type === 'bomb') {
+            this.bombImpact(px, py, proj.ownerSlot);
           } else {
             this.tracerExpire(px, py);
             this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot);
@@ -888,22 +926,36 @@ export class TronGameState {
         // Check distance to the line segment
         const dist = this.pointToLineDistance(item.x, item.y, prevX, prevY, newX, newY);
         if (dist < ITEM_COLLISION_RADIUS) {
-          if (proj.type === 'bullet') {
-            this.projectileImpact(item.x, item.y, proj.ownerSlot);
+          if (proj.type === 'bomb') {
+            // Bomb explodes on item contact
+            this.bombImpact(item.x, item.y, proj.ownerSlot);
+            toRemove.push(proj.id);
+            hitItem = true;
+            break;
           } else {
-            this.tracerExpire(item.x, item.y);
-            item.active = false;  // Tracer destroys the item it hits
+            // Bullets and tracers damage item HP
+            const damage = proj.type === 'bullet' ? this.GLOCK_DAMAGE : this.TRACER_DAMAGE;
+            item.hp -= damage;
+            if (item.hp <= 0) {
+              item.active = false;
+            }
+            // Projectile is consumed (no explosion for item hits)
+            if (proj.type === 'tracer') {
+              this.tracerExpire(item.x, item.y);
+            }
+            toRemove.push(proj.id);
+            hitItem = true;
+            break;
           }
-          toRemove.push(proj.id);
-          hitItem = true;
-          break;
         }
       }
       if (hitItem) continue;
 
-      // Check collision with other projectiles (only bullets collide)
-      // Tracers don't collide with each other (allows shotgun/uzi spread)
-      if (proj.type === 'bullet') {
+      // Check collision with other projectiles
+      // - Bullets collide with bullets (mutual destruction + explosion)
+      // - Bullets and tracers can damage bombs (HP system)
+      // - Tracers don't collide with each other (allows shotgun/uzi spread)
+      if (proj.type === 'bullet' || proj.type === 'tracer') {
         for (const other of this.projectiles) {
           if (other.id === proj.id) continue;
           if (toRemove.includes(other.id)) continue;
@@ -911,13 +963,26 @@ export class TronGameState {
           const otherY = Math.floor(other.y / 1000);
           const dist = Math.sqrt((newX - otherX) ** 2 + (newY - otherY) ** 2);
           if (dist < 3) {  // Small collision radius for projectiles
-            // Both projectiles are destroyed
-            const midX = Math.floor((newX + otherX) / 2);
-            const midY = Math.floor((newY + otherY) / 2);
-            this.projectileImpact(midX, midY, proj.ownerSlot);
-            toRemove.push(proj.id);
-            toRemove.push(other.id);
-            break;
+            if (other.type === 'bomb' && other.hp !== undefined) {
+              // Bullet/tracer damages bomb HP
+              const damage = proj.type === 'bullet' ? this.GLOCK_DAMAGE : this.TRACER_DAMAGE;
+              other.hp -= damage;
+              toRemove.push(proj.id);  // Bullet/tracer is consumed
+              // If bomb HP <= 0, destroy it (no explosion)
+              if (other.hp <= 0) {
+                toRemove.push(other.id);
+              }
+              break;
+            } else if (proj.type === 'bullet' && other.type === 'bullet') {
+              // Two bullets collide - mutual destruction + explosion
+              const midX = Math.floor((newX + otherX) / 2);
+              const midY = Math.floor((newY + otherY) / 2);
+              this.projectileImpact(midX, midY, proj.ownerSlot);
+              toRemove.push(proj.id);
+              toRemove.push(other.id);
+              break;
+            }
+            // Tracers don't collide with each other or with bullets
           }
         }
       }
@@ -1080,6 +1145,60 @@ export class TronGameState {
 
     // TODO: Original game may have used a different explosion sound for Glock bullets
     // (the one we have is EXPLOSIO.WAV which might be for bombs only)
+    this.queueSound('explosion');
+  }
+
+  // Handle bomb impact - large explosion, clear area, kill nearby players
+  private bombImpact(x: number, y: number, ownerSlot?: SlotIndex): void {
+    // Create large explosion animation (150% scale)
+    this.explosions.push({
+      id: this.nextExplosionId++,
+      x,
+      y,
+      frame: 0,
+      scale: this.BOMB_EXPLOSION_SCALE,
+    });
+
+    // Clear 120x120 pixel area (with wrap-around)
+    for (let dx = -this.BOMB_CLEAR_RADIUS; dx < this.BOMB_CLEAR_RADIUS; dx++) {
+      for (let dy = -this.BOMB_CLEAR_RADIUS; dy < this.BOMB_CLEAR_RADIUS; dy++) {
+        const cx = ((x + dx) % PLAY_WIDTH + PLAY_WIDTH) % PLAY_WIDTH;
+        const cy = ((y + dy) % PLAY_HEIGHT + PLAY_HEIGHT) % PLAY_HEIGHT;
+        this.pixelOwners.delete(`${cx},${cy}`);
+      }
+    }
+
+    // Track cleared area for renderer
+    this.frameClearedAreas.push({ x, y, radius: this.BOMB_CLEAR_RADIUS });
+
+    // Kill players within 50 pixels (with wraparound distance check)
+    for (const player of this.players) {
+      if (!player.alive) continue;
+      const px = player.getScreenX();
+      const py = player.getScreenY();
+      // Wraparound distance check (original game behavior)
+      const dx = Math.abs(px - x);
+      const dy = Math.abs(py - y);
+      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
+      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
+      if (wrapDx < this.BOMB_KILL_RADIUS && wrapDy < this.BOMB_KILL_RADIUS) {
+        const isSelfKill = ownerSlot !== undefined && player.slotIndex === ownerSlot;
+        this.killPlayerWithSound(player, isSelfKill);
+      }
+    }
+
+    // Destroy items within 70 pixels (with wraparound)
+    for (const item of this.items) {
+      if (!item.active) continue;
+      const dx = Math.abs(item.x - x);
+      const dy = Math.abs(item.y - y);
+      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
+      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
+      if (wrapDx < this.BOMB_ITEM_DAMAGE_RADIUS && wrapDy < this.BOMB_ITEM_DAMAGE_RADIUS) {
+        item.active = false;
+      }
+    }
+
     this.queueSound('explosion');
   }
 

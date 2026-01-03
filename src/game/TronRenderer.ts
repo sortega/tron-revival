@@ -394,7 +394,7 @@ export class TronRenderer {
     );
   }
 
-  // Draw a projectile (bullet or tracer)
+  // Draw a projectile (bullet, tracer, or bomb)
   private drawProjectile(proj: Projectile): void {
     const x = Math.floor(proj.x / 1000);
     const y = Math.floor(proj.y / 1000);
@@ -403,6 +403,20 @@ export class TronRenderer {
       // Tracer: single white pixel
       this.ctx.fillStyle = '#fff';
       this.ctx.fillRect(x, y, 1, 1);
+    } else if (proj.type === 'bomb') {
+      // Bomb: use directional sprites (bomb_0, bomb_30, bomb_60, bomb_90)
+      if (!this.spriteAtlas?.isLoaded()) return;
+      // Snap direction to nearest 30° increment (0, 30, 60, 90)
+      // Then use the sprite for that angle
+      const normalizedDir = ((proj.direction % 360) + 360) % 360;
+      const snappedAngle = Math.round(normalizedDir / 30) * 30;
+      // Map to available sprites (0, 30, 60, 90 then repeat with rotation)
+      const baseAngle = snappedAngle % 120;
+      const rotation = (Math.floor(snappedAngle / 120) * 120 * Math.PI) / 180;
+      const spriteName = `bomb_${baseAngle}`;
+      this.spriteAtlas.drawWrapped(this.ctx, spriteName, x, y, PLAY_WIDTH, PLAY_HEIGHT, {
+        rotation,
+      });
     } else {
       // Bullet: use sprite with rotation
       if (!this.spriteAtlas?.isLoaded()) return;
@@ -420,7 +434,7 @@ export class TronRenderer {
     const frameNum = String(exp.frame + 1).padStart(2, '0');
     const frameName = `explossion_${frameNum}`;
 
-    // Draw at 20% scale like the original game
+    const scale = exp.scale ?? 0.2;
     this.spriteAtlas.drawWrapped(
       this.ctx,
       frameName,
@@ -428,7 +442,7 @@ export class TronRenderer {
       exp.y,
       PLAY_WIDTH,
       PLAY_HEIGHT,
-      { scale: 0.2 }
+      { scale }
     );
   }
 

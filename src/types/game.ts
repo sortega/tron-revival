@@ -28,10 +28,10 @@ export interface TrailSegment {
   y: number;  // Screen pixel
 }
 
-// Projectile type: 'bullet' = Glock (explodes on impact), 'tracer' = Rifle (clears trail, has lifespan)
-export type ProjectileType = 'bullet' | 'tracer';
+// Projectile type: 'bullet' = Glock (explodes on impact), 'tracer' = Rifle (clears trail, has lifespan), 'bomb' = heavy missile
+export type ProjectileType = 'bullet' | 'tracer' | 'bomb';
 
-// Projectile in flight (bullets from Glock, tracers from Rifle)
+// Projectile in flight (bullets from Glock, tracers from Rifle, bombs)
 export interface Projectile {
   id: number;
   x: number;           // Fixed-point ×1000
@@ -42,6 +42,7 @@ export interface Projectile {
   type: ProjectileType;          // Determines behavior on collision
   remainingFrames?: number;      // Lifespan for tracer bullets (undefined = infinite)
   ownerCooldown?: number;        // Frames until owner collision is checked (prevents instant self-kill)
+  hp?: number;                   // Bomb HP (starts at 100, destroyed when reaches 0)
 }
 
 // Explosion animation
@@ -50,6 +51,7 @@ export interface Explosion {
   x: number;           // Screen pixel
   y: number;           // Screen pixel
   frame: number;       // 0-38 (39 frames)
+  scale?: number;      // Render scale (default 0.2, bomb uses 0.3)
 }
 
 // Player state during gameplay (serializable for network)
@@ -201,6 +203,7 @@ export interface GameItem {
   y: number;
   active: boolean;
   mystery?: boolean;      // Uses random_item sprite with triangular collision
+  hp: number;             // Item HP (destroyed when reaches 0)
 }
 
 // Player's equipped weapon (square items)
@@ -233,7 +236,7 @@ export const WEAPON_ITEMS: ItemDefinition[] = [
   // Shot-based weapons (use ammo)
   { name: 'Glock', sprite: 'glock', category: 'weapon', ammo: 20, useSound: 'glock' },
   { name: 'Rifle', sprite: 'rifle', category: 'weapon', ammo: 200, useSound: 'rifle' },
-  // { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1, useSound: 'bomb' },
+  { name: 'Bomb', sprite: 'bomb', category: 'weapon', ammo: 1, useSound: 'bomb' },
   { name: 'Lock Borders', sprite: 'lock_borders', category: 'weapon', ammo: 1 },  // Sound handled via loop
   { name: 'Shotgun', sprite: 'shotgun', category: 'weapon', ammo: 20, useSound: 'shotgun' },
   // Time-based weapons (use duration)

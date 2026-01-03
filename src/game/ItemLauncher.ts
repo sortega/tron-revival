@@ -7,6 +7,7 @@ import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
 const INITIAL_ITEM_COUNT = 6;
 const MIN_SPAWN_INTERVAL = 200;  // frames
 const MAX_SPAWN_INTERVAL = 800;  // frames
+const ITEM_HP = 40;              // Items can be shot down
 
 export class ItemLauncher {
   private nextItemId = 0;
@@ -89,6 +90,7 @@ export class ItemLauncher {
       x: position.x,
       y: position.y,
       active: true,
+      hp: ITEM_HP,
       ...(mystery && { mystery }),
     };
   }
