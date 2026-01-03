@@ -226,9 +226,8 @@ export class LobbyConnection {
         this.setStatus('connected');
       }
 
-      // Update URL
-      const newUrl = `${window.location.pathname}?room=${roomId}`;
-      window.history.pushState({}, '', newUrl);
+      // Clear room code from URL to avoid rejoining dead rooms on refresh
+      window.history.replaceState({}, '', window.location.pathname);
 
     } catch (err) {
       console.error('[LobbyConnection] Failed to join room:', err);
