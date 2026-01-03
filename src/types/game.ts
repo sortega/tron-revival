@@ -151,7 +151,7 @@ export interface TeleportPortal {
 }
 
 // Portal constants
-export const PORTAL_RADIUS = 12;  // Collision radius (inner part of 40x40 sprite)
+export const PORTAL_RADIUS = 14;  // Collision radius (matches 40x40 sprite visual radius)
 export const PORTAL_OUTER_RADIUS = 18;  // Where player appears after teleport
 export const PORTAL_FRAME_COUNT = 30;  // Animation frames (portal_01 to portal_30)
 
