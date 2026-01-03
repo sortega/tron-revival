@@ -2592,7 +2592,7 @@
         "y": 0.5
       }
     },
-    "uzi_sidebar": {
+    "turbo_sidebar": {
       "frame": {
         "x": 641,
         "y": 631,
@@ -2616,10 +2616,10 @@
         "y": 0.5
       }
     },
-    "turbo_sidebar": {
+    "uzi_sidebar": {
       "frame": {
-        "x": 157,
-        "y": 952,
+        "x": 641,
+        "y": 673,
         "w": 40,
         "h": 40
       },
