@@ -128,6 +128,8 @@ export interface TronGameStateData {
   clearedAreas?: { x: number; y: number; radius: number }[];
   // Color blindness effect remaining frames (for trail color cycling and sprite animation)
   colorBlindnessFrames?: number;
+  // White flash effect remaining frames (bomb-on-bomb collision)
+  whiteFlashFrames?: number;
 }
 
 // Input includes action key for ready signal

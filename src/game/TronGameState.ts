@@ -179,6 +179,11 @@ export class TronGameState {
   private readonly COLOR_BLINDNESS_DURATION = 280;   // 4 seconds at 70fps
   private readonly COLOR_BLINDNESS_PROBABILITY = 0.1; // 10% chance
 
+  // White flash effect state (triggered by bomb-on-bomb collision)
+  // 400ms solid white (28 frames) + 4 seconds fade (280 frames) = 308 frames total
+  private whiteFlashRemainingFrames: number = 0;
+  private readonly WHITE_FLASH_DURATION = 308;
+
   // Bodyguard constants
   private readonly BODYGUARD_ORBIT_RADIUS = 30;      // 30 pixels from player
   private readonly BODYGUARD_ORBIT_PERIOD = 140;     // 2 seconds at 70fps
@@ -274,6 +279,7 @@ export class TronGameState {
     this.explosions = [];
     this.rifleBurstState.clear();
     this.colorBlindnessRemainingFrames = 0;
+    this.whiteFlashRemainingFrames = 0;
     this.bodyguards = [];
     this.nextBodyguardId = 0;
     this.bodyguardBaseAngle = 0;
@@ -844,7 +850,10 @@ export class TronGameState {
       // Check all pixels along the path using Bresenham's line algorithm
       // Use UNWRAPPED coordinates so Bresenham follows the actual path
       // MUST check collision BEFORE clearing pixels for tracers!
-      const impactPoint = this.checkLineCollision(prevX, prevY, unwrappedX, unwrappedY);
+      // Bombs use thick line collision (6px half-width) to match their sprite size
+      const impactPoint = proj.type === 'bomb'
+        ? this.checkThickLineCollision(prevX, prevY, unwrappedX, unwrappedY, 6)
+        : this.checkLineCollision(prevX, prevY, unwrappedX, unwrappedY);
       if (impactPoint) {
         if (proj.type === 'bullet') {
           this.projectileImpact(impactPoint.x, impactPoint.y, proj.ownerSlot);
@@ -947,6 +956,7 @@ export class TronGameState {
       // Check collision with other projectiles
       // - Bullets collide with bullets (mutual destruction + explosion)
       // - Bullets and tracers can damage bombs (HP system)
+      // - Bombs collide with bombs (mega explosion with doubled radii + white flash)
       // - Tracers don't collide with each other (allows shotgun/uzi spread)
       if (proj.type === 'bullet' || proj.type === 'tracer') {
         for (const other of this.projectiles) {
@@ -976,6 +986,27 @@ export class TronGameState {
               break;
             }
             // Tracers don't collide with each other or with bullets
+          }
+        }
+      }
+
+      // Check bomb-on-bomb collision using oriented bounding boxes (bomb sprite is ~12x18 pixels)
+      if (proj.type === 'bomb') {
+        for (const other of this.projectiles) {
+          if (other.id === proj.id) continue;
+          if (other.type !== 'bomb') continue;
+          if (toRemove.includes(other.id)) continue;
+          const otherX = Math.floor(other.x / 1000);
+          const otherY = Math.floor(other.y / 1000);
+          // Check OBB collision between two rotated bombs
+          if (this.checkBombOBBCollision(newX, newY, proj.direction, otherX, otherY, other.direction)) {
+            // Two bombs collide - mega explosion at midpoint
+            const midX = Math.floor((newX + otherX) / 2);
+            const midY = Math.floor((newY + otherY) / 2);
+            this.megaBombImpact(midX, midY);
+            toRemove.push(proj.id);
+            toRemove.push(other.id);
+            break;
           }
         }
       }
@@ -1072,6 +1103,45 @@ export class TronGameState {
     return null;
   }
 
+  // Check collision along a thick line (for bombs which have width)
+  // Returns the first collision point or null
+  private checkThickLineCollision(
+    x0: number, y0: number, x1: number, y1: number, halfWidth: number
+  ): { x: number; y: number } | null {
+    // Check the center line first
+    const centerHit = this.checkLineCollision(x0, y0, x1, y1);
+    if (centerHit) return centerHit;
+
+    // Get perpendicular direction
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len === 0) return null;
+
+    // Perpendicular unit vector
+    const perpX = -dy / len;
+    const perpY = dx / len;
+
+    // Check offset lines on both sides of center
+    for (let offset = 1; offset <= halfWidth; offset++) {
+      // Left side
+      const leftHit = this.checkLineCollision(
+        Math.round(x0 + perpX * offset), Math.round(y0 + perpY * offset),
+        Math.round(x1 + perpX * offset), Math.round(y1 + perpY * offset)
+      );
+      if (leftHit) return leftHit;
+
+      // Right side
+      const rightHit = this.checkLineCollision(
+        Math.round(x0 - perpX * offset), Math.round(y0 - perpY * offset),
+        Math.round(x1 - perpX * offset), Math.round(y1 - perpY * offset)
+      );
+      if (rightHit) return rightHit;
+    }
+
+    return null;
+  }
+
   // Calculate distance from point to line segment
   private pointToLineDistance(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
     const dx = x2 - x1;
@@ -1091,6 +1161,73 @@ export class TronGameState {
     const closestY = y1 + t * dy;
 
     return Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
+  }
+
+  // Check collision between two oriented bomb bounding boxes using Separating Axis Theorem
+  // Bomb dimensions: ~12x18 pixels (half-width 6, half-height 9)
+  private checkBombOBBCollision(
+    x1: number, y1: number, dir1: number,
+    x2: number, y2: number, dir2: number
+  ): boolean {
+    const HALF_WIDTH = 6;
+    const HALF_HEIGHT = 9;
+
+    // Convert directions to radians
+    const rad1 = (dir1 * Math.PI) / 180;
+    const rad2 = (dir2 * Math.PI) / 180;
+
+    // Get the 4 axes to test (2 from each box's orientation)
+    const axes = [
+      { x: Math.cos(rad1), y: Math.sin(rad1) },           // Box1 length axis
+      { x: -Math.sin(rad1), y: Math.cos(rad1) },          // Box1 width axis
+      { x: Math.cos(rad2), y: Math.sin(rad2) },           // Box2 length axis
+      { x: -Math.sin(rad2), y: Math.cos(rad2) },          // Box2 width axis
+    ];
+
+    // Get corners of each box relative to their centers
+    const getCorners = (cx: number, cy: number, rad: number) => {
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      // Rotate the half-extents
+      const dx1 = HALF_HEIGHT * cos;
+      const dy1 = HALF_HEIGHT * sin;
+      const dx2 = HALF_WIDTH * -sin;
+      const dy2 = HALF_WIDTH * cos;
+      return [
+        { x: cx + dx1 + dx2, y: cy + dy1 + dy2 },
+        { x: cx + dx1 - dx2, y: cy + dy1 - dy2 },
+        { x: cx - dx1 - dx2, y: cy - dy1 - dy2 },
+        { x: cx - dx1 + dx2, y: cy - dy1 + dy2 },
+      ];
+    };
+
+    const corners1 = getCorners(x1, y1, rad1);
+    const corners2 = getCorners(x2, y2, rad2);
+
+    // Project corners onto axis and get min/max
+    const project = (corners: { x: number; y: number }[], axis: { x: number; y: number }) => {
+      let min = Infinity;
+      let max = -Infinity;
+      for (const c of corners) {
+        const p = c.x * axis.x + c.y * axis.y;
+        min = Math.min(min, p);
+        max = Math.max(max, p);
+      }
+      return { min, max };
+    };
+
+    // Check for separation on each axis
+    for (const axis of axes) {
+      const proj1 = project(corners1, axis);
+      const proj2 = project(corners2, axis);
+      // If projections don't overlap, boxes are separated
+      if (proj1.max < proj2.min || proj2.max < proj1.min) {
+        return false;
+      }
+    }
+
+    // No separating axis found - boxes collide
+    return true;
   }
 
   // Handle projectile impact - explosion, clear area, kill nearby players
@@ -1208,6 +1345,79 @@ export class TronGameState {
     this.queueSound('explosion');
   }
 
+  // Handle mega bomb impact (bomb-on-bomb collision) - doubled radii and white flash
+  private megaBombImpact(x: number, y: number): void {
+    const clearRadius = this.BOMB_CLEAR_RADIUS * 2;
+    const killRadius = this.BOMB_KILL_RADIUS * 2;
+    const itemDamageRadius = this.BOMB_ITEM_DAMAGE_RADIUS * 2;
+    const explosionScale = this.BOMB_EXPLOSION_SCALE * 2;  // Doubled to match area
+
+    // Create mega explosion animation
+    this.explosions.push({
+      id: this.nextExplosionId++,
+      x,
+      y,
+      frame: 0,
+      scale: explosionScale,
+    });
+
+    // Clear doubled area (with wrap-around)
+    for (let dx = -clearRadius; dx < clearRadius; dx++) {
+      for (let dy = -clearRadius; dy < clearRadius; dy++) {
+        const cx = ((x + dx) % PLAY_WIDTH + PLAY_WIDTH) % PLAY_WIDTH;
+        const cy = ((y + dy) % PLAY_HEIGHT + PLAY_HEIGHT) % PLAY_HEIGHT;
+        this.pixelOwners.delete(`${cx},${cy}`);
+      }
+    }
+
+    // Track cleared area for renderer
+    this.frameClearedAreas.push({ x, y, radius: clearRadius });
+
+    // Kill players within doubled radius (with wraparound distance check)
+    for (const player of this.players) {
+      if (!player.alive) continue;
+      const px = player.getScreenX();
+      const py = player.getScreenY();
+      const dx = Math.abs(px - x);
+      const dy = Math.abs(py - y);
+      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
+      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
+      if (wrapDx < killRadius && wrapDy < killRadius) {
+        this.killPlayerWithSound(player, false);
+      }
+    }
+
+    // Destroy items within doubled radius (with wraparound)
+    for (const item of this.items) {
+      if (!item.active) continue;
+      const dx = Math.abs(item.x - x);
+      const dy = Math.abs(item.y - y);
+      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
+      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
+      if (wrapDx < itemDamageRadius && wrapDy < itemDamageRadius) {
+        item.active = false;
+      }
+    }
+
+    // Destroy bodyguards within doubled radius
+    for (const bg of this.bodyguards) {
+      const bgX = bg.x / 1000;
+      const bgY = bg.y / 1000;
+      const dx = Math.abs(bgX - x);
+      const dy = Math.abs(bgY - y);
+      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
+      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
+      if (wrapDx < killRadius && wrapDy < killRadius) {
+        bg.id = -1; // Mark for removal
+      }
+    }
+
+    // Trigger white flash effect
+    this.whiteFlashRemainingFrames = this.WHITE_FLASH_DURATION;
+
+    this.queueSound('explosion');
+  }
+
   // Advance explosion animations
   private tickExplosions(): void {
     for (const exp of this.explosions) {
@@ -1227,6 +1437,11 @@ export class TronGameState {
     // Tick color blindness effect countdown
     if (this.colorBlindnessRemainingFrames > 0) {
       this.colorBlindnessRemainingFrames--;
+    }
+
+    // Tick white flash effect countdown
+    if (this.whiteFlashRemainingFrames > 0) {
+      this.whiteFlashRemainingFrames--;
     }
 
     // Update projectiles, explosions, and bodyguards
@@ -1863,6 +2078,7 @@ export class TronGameState {
       ridiculousDeathSlots,
       clearedAreas,
       colorBlindnessFrames: this.colorBlindnessRemainingFrames > 0 ? this.colorBlindnessRemainingFrames : undefined,
+      whiteFlashFrames: this.whiteFlashRemainingFrames > 0 ? this.whiteFlashRemainingFrames : undefined,
     };
   }
 

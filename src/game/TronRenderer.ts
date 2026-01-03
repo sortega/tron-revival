@@ -39,6 +39,11 @@ export class TronRenderer {
   private colorBlindnessFrames: number = 0;  // Remaining frames (used for color cycling and sprite position)
   private readonly COLOR_BLINDNESS_DURATION = 280;  // Must match TronGameState
 
+  // White flash effect state (bomb-on-bomb collision)
+  // 400ms solid white (28 frames) + 4 seconds fade (280 frames) = 308 frames total
+  private whiteFlashFrames: number = 0;
+  private readonly WHITE_FLASH_FADE = 280;  // Frames in fade phase (after solid)
+
   // Trail data storage for color blindness redrawing
   private trailData: Map<SlotIndex, TrailSegment[]> = new Map();
 
@@ -217,6 +222,20 @@ export class TronRenderer {
         break;
     }
 
+    // Draw white flash overlay (bomb-on-bomb collision)
+    if (this.whiteFlashFrames > 0) {
+      let alpha: number;
+      if (this.whiteFlashFrames > this.WHITE_FLASH_FADE) {
+        // Solid phase (first 400ms)
+        alpha = 1.0;
+      } else {
+        // Fade phase (remaining 4 seconds)
+        alpha = this.whiteFlashFrames / this.WHITE_FLASH_FADE;
+      }
+      this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+      this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    }
+
     // Draw FPS counter (debug)
     if (fps !== undefined) {
       this.ctx.fillStyle = fps < 60 ? '#f44' : fps < 68 ? '#ff0' : '#0f0';
@@ -258,6 +277,7 @@ export class TronRenderer {
     this.ridiculousDeathSlots.clear();
     this.trailData.clear();
     this.colorBlindnessFrames = 0;
+    this.whiteFlashFrames = 0;
     // Restore level canvas (removes lock borders modifications)
     if (this.currentLevelImage) {
       this.levelCtx.drawImage(this.currentLevelImage, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
@@ -297,6 +317,11 @@ export class TronRenderer {
   // Update color blindness state from game state
   updateColorBlindness(frames: number): void {
     this.colorBlindnessFrames = frames;
+  }
+
+  // Update white flash state from game state
+  updateWhiteFlash(frames: number): void {
+    this.whiteFlashFrames = frames;
   }
 
   // Get color blindness color palette (all player colors regardless of game mode)
