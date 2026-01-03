@@ -54,6 +54,15 @@ export interface Explosion {
   scale?: number;      // Render scale (default 0.2, bomb uses 0.3)
 }
 
+// Bodyguard - orbiting protective entity
+export interface Bodyguard {
+  id: number;
+  ownerSlot: SlotIndex;
+  x: number;           // Fixed-point ×1000
+  y: number;           // Fixed-point ×1000
+  phaseOffset: number; // Phase offset in degrees (for multiple bodyguards)
+}
+
 // Player state during gameplay (serializable for network)
 export interface TronPlayerState {
   slotIndex: SlotIndex;
@@ -79,6 +88,7 @@ export interface TronRoundState {
   items: GameItem[];           // Spawned items in world
   projectiles: Projectile[];   // Bullets in flight
   explosions: Explosion[];     // Active explosion animations
+  bodyguards: Bodyguard[];     // Active bodyguards
 }
 
 // Match state (scores, ready status)
@@ -225,7 +235,7 @@ export const AUTOMATIC_ITEMS: ItemDefinition[] = [
   { name: 'Shield', sprite: 'shield', category: 'automatic', duration: 2100, pickupSound: 'shield' },        // 30s - invincible
   { name: 'Eraser', sprite: 'eraser', category: 'automatic', duration: 0, pickupSound: 'reset' },            // Instant
   { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0, pickupSound: 'teleport' },         // Instant
-  // { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0 },                       // Instant
+  { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0, pickupSound: 'item_pickup' }, // Spawns orbiting protector
   { name: 'Control Reversal', sprite: 'reverse', category: 'automatic', duration: 700, pickupSound: 'item_pickup' }, // 10s - self-debuff!
   { name: 'Slow', sprite: 'automatic_slow', category: 'automatic', duration: 1400, pickupSound: 'slow' },    // 20s
   { name: 'Turbo', sprite: 'automatic_turbo', category: 'automatic', duration: 1400, pickupSound: 'turbo' }, // 20s

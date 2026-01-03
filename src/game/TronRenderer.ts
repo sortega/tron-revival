@@ -2,7 +2,7 @@
 
 import type { SlotIndex } from '../types/lobby';
 import { FFA_COLORS, TEAM_COLORS } from '../types/lobby';
-import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion } from '../types/game';
+import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
 import { SpriteAtlas } from '../sprites';
@@ -172,6 +172,11 @@ export class TronRenderer {
     // Draw explosions
     for (const exp of round.explosions) {
       this.drawExplosion(exp);
+    }
+
+    // Draw bodyguards
+    for (const bg of round.bodyguards) {
+      this.drawBodyguard(bg);
     }
 
     // Draw player heads
@@ -443,6 +448,23 @@ export class TronRenderer {
       PLAY_WIDTH,
       PLAY_HEIGHT,
       { scale }
+    );
+  }
+
+  // Draw a bodyguard orbiting entity
+  private drawBodyguard(bg: Bodyguard): void {
+    if (!this.spriteAtlas?.isLoaded()) return;
+
+    const x = Math.floor(bg.x / 1000);
+    const y = Math.floor(bg.y / 1000);
+
+    this.spriteAtlas.drawWrapped(
+      this.ctx,
+      'bodyguard',
+      x,
+      y,
+      PLAY_WIDTH,
+      PLAY_HEIGHT
     );
   }
 

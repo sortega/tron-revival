@@ -13,6 +13,7 @@ import type {
   SoundEvent,
   Projectile,
   Explosion,
+  Bodyguard,
 } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import {
@@ -181,6 +182,18 @@ export class TronGameState {
   private readonly COLOR_BLINDNESS_DURATION = 280;   // 4 seconds at 70fps
   private readonly COLOR_BLINDNESS_PROBABILITY = 0.1; // 10% chance
 
+  // Bodyguard constants
+  private readonly BODYGUARD_ORBIT_RADIUS = 30;      // 30 pixels from player
+  private readonly BODYGUARD_ORBIT_PERIOD = 140;     // 2 seconds at 70fps
+  private readonly BODYGUARD_KILL_RADIUS = 5;        // Kill players within 5px
+  private readonly BODYGUARD_INTERCEPT_RADIUS = 50;  // Rush to projectiles within 50px of player
+  private readonly BODYGUARD_SPEED = 8000;           // ~8 pixels/frame (fast)
+
+  // Bodyguard state
+  private bodyguards: Bodyguard[] = [];
+  private nextBodyguardId = 0;
+  private bodyguardBaseAngle: number = 0;  // Shared rotation angle for synchronized orbits
+
   // Player configs for restarting rounds
   private playerConfigs: GamePlayer[];
 
@@ -270,6 +283,9 @@ export class TronGameState {
     this.explosions = [];
     this.rifleBurstState.clear();
     this.colorBlindnessRemainingFrames = 0;
+    this.bodyguards = [];
+    this.nextBodyguardId = 0;
+    this.bodyguardBaseAngle = 0;
 
     const playerCount = this.playerConfigs.length;
 
@@ -629,6 +645,9 @@ export class TronGameState {
     if (this.colorBlindnessRemainingFrames > 0) {
       this.colorBlindnessRemainingFrames--;
     }
+
+    // Tick bodyguards (movement, collisions)
+    this.tickBodyguards();
 
     // Check win condition
     this.checkRoundEnd();
@@ -1199,6 +1218,19 @@ export class TronGameState {
       }
     }
 
+    // Destroy bodyguards within bomb radius (only way to destroy them)
+    for (const bg of this.bodyguards) {
+      const bgX = bg.x / 1000;
+      const bgY = bg.y / 1000;
+      const dx = Math.abs(bgX - x);
+      const dy = Math.abs(bgY - y);
+      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
+      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
+      if (wrapDx < this.BOMB_KILL_RADIUS && wrapDy < this.BOMB_KILL_RADIUS) {
+        bg.id = -1; // Mark for removal
+      }
+    }
+
     this.queueSound('explosion');
   }
 
@@ -1464,6 +1496,8 @@ export class TronGameState {
       } else if (item.sprite === 'random_item') {
         // Swap item uses random_item sprite
         this.activateSwap();
+      } else if (item.sprite === 'bodyguard_item') {
+        this.activateBodyguard(player);
       } else {
         player.activateEffect(item.sprite, def.duration || 0);
       }
@@ -1547,6 +1581,179 @@ export class TronGameState {
     return perm.some((val, idx) => val === idx);
   }
 
+  // Spawn a bodyguard for the player
+  private activateBodyguard(player: TronPlayer): void {
+    // Spawn new bodyguard at player's current position
+    this.bodyguards.push({
+      id: this.nextBodyguardId++,
+      ownerSlot: player.slotIndex,
+      x: player.x,
+      y: player.y,
+      phaseOffset: 0, // Will be redistributed below
+    });
+
+    // Redistribute phase offsets for all bodyguards of this player
+    const playerBodyguards = this.bodyguards.filter(b => b.ownerSlot === player.slotIndex);
+    const count = playerBodyguards.length;
+    playerBodyguards.forEach((bg, i) => {
+      bg.phaseOffset = (360 / count) * i;
+    });
+  }
+
+  // Calculate wrapped distance (shortest path in toroidal space)
+  private wrappedDistance(x1: number, y1: number, x2: number, y2: number): number {
+    const dx = Math.abs(x2 - x1);
+    const dy = Math.abs(y2 - y1);
+    const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
+    const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
+    return Math.sqrt(wrapDx * wrapDx + wrapDy * wrapDy);
+  }
+
+  // Move bodyguard toward target position (shortest path in wrapped space)
+  private moveBodyguardToward(bg: Bodyguard, targetX: number, targetY: number): void {
+    const bgX = bg.x / 1000;
+    const bgY = bg.y / 1000;
+
+    // Calculate shortest direction in wrapped space
+    let dx = targetX - bgX;
+    let dy = targetY - bgY;
+    if (Math.abs(dx) > PLAY_WIDTH / 2) dx = dx > 0 ? dx - PLAY_WIDTH : dx + PLAY_WIDTH;
+    if (Math.abs(dy) > PLAY_HEIGHT / 2) dy = dy > 0 ? dy - PLAY_HEIGHT : dy + PLAY_HEIGHT;
+
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) return; // Close enough
+
+    // Move at bodyguard speed
+    const speed = Math.min(dist, this.BODYGUARD_SPEED / 1000);
+    bg.x += (dx / dist) * speed * 1000;
+    bg.y += (dy / dist) * speed * 1000;
+
+    // Wrap position
+    if (bg.x >= PLAY_WIDTH * 1000) bg.x -= PLAY_WIDTH * 1000;
+    if (bg.x < 0) bg.x += PLAY_WIDTH * 1000;
+    if (bg.y >= PLAY_HEIGHT * 1000) bg.y -= PLAY_HEIGHT * 1000;
+    if (bg.y < 0) bg.y += PLAY_HEIGHT * 1000;
+  }
+
+  // Check bodyguard collision with enemy projectiles (destroy them, bodyguard survives)
+  // Returns IDs of projectiles to remove
+  private checkBodyguardProjectileCollision(bg: Bodyguard): number[] {
+    const bgX = bg.x / 1000;
+    const bgY = bg.y / 1000;
+    const toRemove: number[] = [];
+
+    for (const proj of this.projectiles) {
+      if (proj.ownerSlot === bg.ownerSlot) continue; // Don't block own projectiles
+      const projX = proj.x / 1000;
+      const projY = proj.y / 1000;
+      const dist = this.wrappedDistance(bgX, bgY, projX, projY);
+      if (dist < this.BODYGUARD_KILL_RADIUS) {
+        // Destroy projectile (bodyguard survives, except bombs still explode)
+        if (proj.type === 'bomb') {
+          // Bomb explodes on bodyguard contact
+          this.bombImpact(Math.floor(projX), Math.floor(projY), proj.ownerSlot);
+        }
+        toRemove.push(proj.id);
+      }
+    }
+    return toRemove;
+  }
+
+  // Check bodyguard collision with enemy players (kill them)
+  private checkBodyguardPlayerCollision(bg: Bodyguard): void {
+    const bgX = bg.x / 1000;
+    const bgY = bg.y / 1000;
+
+    for (const player of this.players) {
+      if (!player.alive) continue;
+      if (player.slotIndex === bg.ownerSlot) continue; // Don't kill owner
+      const px = player.getScreenX();
+      const py = player.getScreenY();
+      const dist = this.wrappedDistance(bgX, bgY, px, py);
+      if (dist < this.BODYGUARD_KILL_RADIUS) {
+        this.killPlayerWithSound(player, false);
+      }
+    }
+  }
+
+  // Tick all bodyguards - movement, collisions
+  private tickBodyguards(): void {
+    // Advance shared base angle (all bodyguards orbit in sync)
+    this.bodyguardBaseAngle = (this.bodyguardBaseAngle + 360 / this.BODYGUARD_ORBIT_PERIOD) % 360;
+
+    const projectilesToRemove: number[] = [];
+
+    for (const bg of this.bodyguards) {
+      const owner = this.players.find(p => p.slotIndex === bg.ownerSlot);
+      if (!owner || !owner.alive) {
+        // Remove bodyguard if owner is dead
+        bg.id = -1; // Mark for removal
+        continue;
+      }
+
+      const ownerX = owner.x / 1000;
+      const ownerY = owner.y / 1000;
+
+      // Find closest enemy projectile within intercept radius
+      let targetX: number;
+      let targetY: number;
+      let closestDist = this.BODYGUARD_INTERCEPT_RADIUS;
+      let hasTarget = false;
+
+      for (const proj of this.projectiles) {
+        if (proj.ownerSlot === bg.ownerSlot) continue; // Skip own projectiles
+        const projX = proj.x / 1000;
+        const projY = proj.y / 1000;
+        const dist = this.wrappedDistance(ownerX, ownerY, projX, projY);
+        if (dist < closestDist) {
+          closestDist = dist;
+          targetX = projX;
+          targetY = projY;
+          hasTarget = true;
+        }
+      }
+
+      if (!hasTarget) {
+        // No threat - orbit player using base angle + phase offset
+        const orbitAngle = this.bodyguardBaseAngle + bg.phaseOffset;
+        const rad = (orbitAngle * Math.PI) / 180;
+        targetX = ownerX + Math.cos(rad) * this.BODYGUARD_ORBIT_RADIUS;
+        targetY = ownerY + Math.sin(rad) * this.BODYGUARD_ORBIT_RADIUS;
+      }
+
+      // Move toward target (shortest path in wrapped space)
+      this.moveBodyguardToward(bg, targetX!, targetY!);
+
+      // Check collision with enemy projectiles (destroy them)
+      projectilesToRemove.push(...this.checkBodyguardProjectileCollision(bg));
+
+      // Check collision with enemy players (kill them)
+      this.checkBodyguardPlayerCollision(bg);
+    }
+
+    // Remove projectiles destroyed by bodyguards
+    if (projectilesToRemove.length > 0) {
+      this.projectiles = this.projectiles.filter(p => !projectilesToRemove.includes(p.id));
+    }
+
+    // Remove dead bodyguards and redistribute phases for remaining
+    const removedOwners = new Set<SlotIndex>();
+    for (const bg of this.bodyguards) {
+      if (bg.id < 0) removedOwners.add(bg.ownerSlot);
+    }
+    this.bodyguards = this.bodyguards.filter(bg => bg.id >= 0);
+
+    // Redistribute phases for owners who lost a bodyguard
+    for (const ownerSlot of removedOwners) {
+      const remaining = this.bodyguards.filter(b => b.ownerSlot === ownerSlot);
+      if (remaining.length > 0) {
+        remaining.forEach((bg, i) => {
+          bg.phaseOffset = (360 / remaining.length) * i;
+        });
+      }
+    }
+  }
+
   private checkRoundEnd(): void {
     const alivePlayers = this.players.filter(p => p.alive);
 
@@ -1621,6 +1828,7 @@ export class TronGameState {
       items: this.items,
       projectiles: this.projectiles,
       explosions: this.explosions,
+      bodyguards: this.bodyguards,
     };
 
     const matchState: TronMatchState = {
