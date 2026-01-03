@@ -120,7 +120,7 @@
         "y": 0.5
       }
     },
-    "explossion_01": {
+    "explosion_01": {
       "frame": {
         "x": 53,
         "y": 855,
@@ -192,7 +192,7 @@
         "y": 0.5
       }
     },
-    "explossion_02": {
+    "explosion_02": {
       "frame": {
         "x": 151,
         "y": 855,
@@ -432,7 +432,7 @@
         "y": 0.5
       }
     },
-    "explossion_03": {
+    "explosion_03": {
       "frame": {
         "x": 53,
         "y": 1,
@@ -456,7 +456,7 @@
         "y": 0.5
       }
     },
-    "explossion_04": {
+    "explosion_04": {
       "frame": {
         "x": 53,
         "y": 98,
@@ -480,7 +480,7 @@
         "y": 0.5
       }
     },
-    "explossion_05": {
+    "explosion_05": {
       "frame": {
         "x": 53,
         "y": 195,
@@ -504,7 +504,7 @@
         "y": 0.5
       }
     },
-    "explossion_06": {
+    "explosion_06": {
       "frame": {
         "x": 53,
         "y": 292,
@@ -528,7 +528,7 @@
         "y": 0.5
       }
     },
-    "explossion_07": {
+    "explosion_07": {
       "frame": {
         "x": 53,
         "y": 389,
@@ -552,7 +552,7 @@
         "y": 0.5
       }
     },
-    "explossion_08": {
+    "explosion_08": {
       "frame": {
         "x": 53,
         "y": 486,
@@ -576,7 +576,7 @@
         "y": 0.5
       }
     },
-    "explossion_09": {
+    "explosion_09": {
       "frame": {
         "x": 151,
         "y": 1,
@@ -600,7 +600,7 @@
         "y": 0.5
       }
     },
-    "explossion_10": {
+    "explosion_10": {
       "frame": {
         "x": 151,
         "y": 98,
@@ -624,7 +624,7 @@
         "y": 0.5
       }
     },
-    "explossion_11": {
+    "explosion_11": {
       "frame": {
         "x": 151,
         "y": 195,
@@ -648,7 +648,7 @@
         "y": 0.5
       }
     },
-    "explossion_12": {
+    "explosion_12": {
       "frame": {
         "x": 151,
         "y": 292,
@@ -672,7 +672,7 @@
         "y": 0.5
       }
     },
-    "explossion_13": {
+    "explosion_13": {
       "frame": {
         "x": 151,
         "y": 389,
@@ -696,7 +696,7 @@
         "y": 0.5
       }
     },
-    "explossion_14": {
+    "explosion_14": {
       "frame": {
         "x": 151,
         "y": 486,
@@ -720,7 +720,7 @@
         "y": 0.5
       }
     },
-    "explossion_15": {
+    "explosion_15": {
       "frame": {
         "x": 203,
         "y": 583,
@@ -744,7 +744,7 @@
         "y": 0.5
       }
     },
-    "explossion_16": {
+    "explosion_16": {
       "frame": {
         "x": 203,
         "y": 680,
@@ -888,7 +888,7 @@
         "y": 0.5
       }
     },
-    "explossion_17": {
+    "explosion_17": {
       "frame": {
         "x": 249,
         "y": 851,
@@ -984,7 +984,7 @@
         "y": 0.5
       }
     },
-    "explossion_18": {
+    "explosion_18": {
       "frame": {
         "x": 347,
         "y": 851,
@@ -1056,7 +1056,7 @@
         "y": 0.5
       }
     },
-    "explossion_19": {
+    "explosion_19": {
       "frame": {
         "x": 491,
         "y": 1,
@@ -1176,7 +1176,7 @@
         "y": 0.5
       }
     },
-    "explossion_20": {
+    "explosion_20": {
       "frame": {
         "x": 329,
         "y": 1,
@@ -1440,7 +1440,7 @@
         "y": 0.5
       }
     },
-    "explossion_21": {
+    "explosion_21": {
       "frame": {
         "x": 329,
         "y": 98,
@@ -1560,7 +1560,7 @@
         "y": 0.5
       }
     },
-    "explossion_22": {
+    "explosion_22": {
       "frame": {
         "x": 249,
         "y": 253,
@@ -1632,7 +1632,7 @@
         "y": 0.5
       }
     },
-    "explossion_23": {
+    "explosion_23": {
       "frame": {
         "x": 249,
         "y": 350,
@@ -1656,7 +1656,7 @@
         "y": 0.5
       }
     },
-    "explossion_24": {
+    "explosion_24": {
       "frame": {
         "x": 249,
         "y": 447,
@@ -1752,7 +1752,7 @@
         "y": 0.5
       }
     },
-    "explossion_25": {
+    "explosion_25": {
       "frame": {
         "x": 301,
         "y": 566,
@@ -1776,7 +1776,7 @@
         "y": 0.5
       }
     },
-    "explossion_26": {
+    "explosion_26": {
       "frame": {
         "x": 301,
         "y": 663,
@@ -1848,7 +1848,7 @@
         "y": 0.5
       }
     },
-    "explossion_27": {
+    "explosion_27": {
       "frame": {
         "x": 347,
         "y": 237,
@@ -1944,7 +1944,7 @@
         "y": 0.5
       }
     },
-    "explossion_28": {
+    "explosion_28": {
       "frame": {
         "x": 487,
         "y": 98,
@@ -1968,7 +1968,7 @@
         "y": 0.5
       }
     },
-    "explossion_29": {
+    "explosion_29": {
       "frame": {
         "x": 347,
         "y": 334,
@@ -1992,7 +1992,7 @@
         "y": 0.5
       }
     },
-    "explossion_30": {
+    "explosion_30": {
       "frame": {
         "x": 347,
         "y": 431,
@@ -2016,7 +2016,7 @@
         "y": 0.5
       }
     },
-    "explossion_31": {
+    "explosion_31": {
       "frame": {
         "x": 399,
         "y": 528,
@@ -2040,7 +2040,7 @@
         "y": 0.5
       }
     },
-    "explossion_32": {
+    "explosion_32": {
       "frame": {
         "x": 399,
         "y": 625,
@@ -2064,7 +2064,7 @@
         "y": 0.5
       }
     },
-    "explossion_33": {
+    "explosion_33": {
       "frame": {
         "x": 413,
         "y": 722,
@@ -2088,7 +2088,7 @@
         "y": 0.5
       }
     },
-    "explossion_34": {
+    "explosion_34": {
       "frame": {
         "x": 511,
         "y": 722,
@@ -2112,7 +2112,7 @@
         "y": 0.5
       }
     },
-    "explossion_35": {
+    "explosion_35": {
       "frame": {
         "x": 445,
         "y": 819,
@@ -2136,7 +2136,7 @@
         "y": 0.5
       }
     },
-    "explossion_36": {
+    "explosion_36": {
       "frame": {
         "x": 491,
         "y": 916,
@@ -2160,7 +2160,7 @@
         "y": 0.5
       }
     },
-    "explossion_37": {
+    "explosion_37": {
       "frame": {
         "x": 543,
         "y": 819,
@@ -2184,7 +2184,7 @@
         "y": 0.5
       }
     },
-    "explossion_38": {
+    "explosion_38": {
       "frame": {
         "x": 589,
         "y": 916,
@@ -2208,7 +2208,7 @@
         "y": 0.5
       }
     },
-    "explossion_39": {
+    "explosion_39": {
       "frame": {
         "x": 687,
         "y": 819,
@@ -2592,7 +2592,7 @@
         "y": 0.5
       }
     },
-    "uzi_sidebar": {
+    "turbo_sidebar": {
       "frame": {
         "x": 641,
         "y": 631,
@@ -2616,10 +2616,10 @@
         "y": 0.5
       }
     },
-    "turbo_sidebar": {
+    "uzi_sidebar": {
       "frame": {
-        "x": 157,
-        "y": 952,
+        "x": 641,
+        "y": 673,
         "w": 40,
         "h": 40
       },
