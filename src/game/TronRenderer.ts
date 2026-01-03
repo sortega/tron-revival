@@ -437,7 +437,7 @@ export class TronRenderer {
     if (!this.spriteAtlas?.isLoaded()) return;
 
     const frameNum = String(exp.frame + 1).padStart(2, '0');
-    const frameName = `explossion_${frameNum}`;
+    const frameName = `explosion_${frameNum}`;
 
     const scale = exp.scale ?? 0.2;
     this.spriteAtlas.drawWrapped(
