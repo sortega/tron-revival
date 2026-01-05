@@ -261,8 +261,9 @@ export class MainMenu implements Screen {
       }
     }
 
-    // Otherwise treat it as a room ID (must be non-empty, lowercase for case-insensitivity)
-    return input.length > 0 ? input.toLowerCase() : null;
+    // Normalize: lowercase, replace spaces with hyphens, collapse multiple hyphens
+    const normalized = input.toLowerCase().replace(/\s+/g, '-').replace(/-+/g, '-');
+    return normalized.length > 0 ? normalized : null;
   }
 
   cleanup(): void {
