@@ -49,6 +49,16 @@ export class TronGame implements Screen {
   private showFps: boolean = localStorage.getItem('showFps') === 'true';
   private fpsKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
+  // Network stats tracking
+  private bytesSent: { time: number; bytes: number }[] = [];
+  private bytesReceived: { time: number; bytes: number }[] = [];
+  private currentLagMs: number = 0;
+  private lagSamples: number[] = [];  // Rolling window of lag samples
+  private latestPingTimestamp: number = 0;  // Host stores latest guest ping for echo
+
+  // Double-tap detection for mobile FPS toggle
+  private lastTapTime: number = 0;
+
   // Track loaded level to detect changes
   private loadedLevelIndex: number = -1;
 
@@ -182,6 +192,21 @@ export class TronGame implements Screen {
       }
     };
     document.addEventListener('keydown', this.fpsKeyHandler);
+
+    // Double-tap on game canvas to toggle FPS on mobile
+    if (isTouch) {
+      const gameCanvas = document.getElementById('gameCanvas');
+      gameCanvas?.addEventListener('touchend', (e) => {
+        const now = Date.now();
+        if (now - this.lastTapTime < 300) {
+          // Double tap detected
+          this.showFps = !this.showFps;
+          localStorage.setItem('showFps', this.showFps ? 'true' : 'false');
+          e.preventDefault();
+        }
+        this.lastTapTime = now;
+      });
+    }
 
     // Start game loop
     this.lastFrameTime = performance.now();
@@ -514,7 +539,12 @@ export class TronGame implements Screen {
       // Host receives input from guests
       this.connection.setCallbacks({
         onPlayerInput: (slotIndex, input) => {
-          this.playerInputs.set(slotIndex, input as TronInput);
+          const tronInput = input as TronInput;
+          this.playerInputs.set(slotIndex, tronInput);
+          // Store latest ping timestamp for RTT echo
+          if (tronInput.pingTimestamp) {
+            this.latestPingTimestamp = tronInput.pingTimestamp;
+          }
         },
       });
     } else {
@@ -522,6 +552,31 @@ export class TronGame implements Screen {
       this.connection.setCallbacks({
         onTronState: (state) => {
           this.receivedState = state;
+
+          // Track network stats for debug display
+          const now = performance.now();
+
+          // Estimate bytes received for bitrate
+          const jsonSize = JSON.stringify(state).length;
+          this.bytesReceived.push({ time: now, bytes: jsonSize });
+          // Keep only last 2 seconds of data
+          const cutoff = now - 2000;
+          this.bytesReceived = this.bytesReceived.filter(s => s.time >= cutoff);
+
+          // Calculate lag using RTT (round-trip time) - immune to clock skew
+          if (state.pongTimestamp) {
+            // RTT = now - when we sent the ping; one-way lag ≈ RTT / 2
+            const rtt = Date.now() - state.pongTimestamp;
+            const lagMs = Math.max(0, Math.round(rtt / 2));
+            // Keep rolling window of 20 samples
+            this.lagSamples.push(lagMs);
+            if (this.lagSamples.length > 20) {
+              this.lagSamples.shift();
+            }
+            // Use median for stability (less affected by outliers)
+            const sorted = [...this.lagSamples].sort((a, b) => a - b);
+            this.currentLagMs = sorted[Math.floor(sorted.length / 2)] ?? 0;
+          }
 
           // Accumulate trail segments to avoid losing any between frames
           for (const { slotIndex, segments } of state.newTrailSegments) {
@@ -668,13 +723,15 @@ export class TronGame implements Screen {
       // Broadcast state to guests
       this.broadcastState(stateData);
 
-      // Render
-      this.renderer.render(stateData.round, stateData.match, this.showFps ? this.currentFps : undefined);
+      // Render (host sends stats for display)
+      const networkStats = this.showFps ? this.getNetworkStats() : undefined;
+      this.renderer.render(stateData.round, stateData.match, this.showFps ? this.currentFps : undefined, networkStats);
     } else {
       // Guest: Send input to host and render received state
 
-      // Send input to host
-      this.connection.sendInput(myInput);
+      // Send input to host with ping timestamp for RTT measurement
+      const inputWithPing: TronInput = { ...myInput, pingTimestamp: Date.now() };
+      this.connection.sendInput(inputWithPing);
 
       // If we have received state, update and render
       if (this.receivedState) {
@@ -742,8 +799,9 @@ export class TronGame implements Screen {
           this.receivedState.soundEvents = [];
         }
 
-        // Render
-        this.renderer.render(this.receivedState.round, this.receivedState.match, this.showFps ? this.currentFps : undefined);
+        // Render (guest receives stats for display)
+        const networkStats = this.showFps ? this.getNetworkStats() : undefined;
+        this.renderer.render(this.receivedState.round, this.receivedState.match, this.showFps ? this.currentFps : undefined, networkStats);
       } else {
         // Render initial state while waiting for first update
         const stateData = this.gameState.serialize();
@@ -758,7 +816,53 @@ export class TronGame implements Screen {
     }
   }
 
+  private getNetworkStats(): { lagMs: number; bytesIn: number; bytesOut: number } {
+    const now = performance.now();
+    const windowMs = 2000;  // 2 second window
+
+    // Calculate bytes per second for outgoing (host)
+    let bytesOut = 0;
+    const sentCutoff = now - windowMs;
+    for (const sample of this.bytesSent) {
+      if (sample.time >= sentCutoff) {
+        bytesOut += sample.bytes;
+      }
+    }
+    bytesOut = Math.round((bytesOut * 1000) / windowMs);  // Convert to bytes/sec
+
+    // Calculate bytes per second for incoming (guest)
+    let bytesIn = 0;
+    const recvCutoff = now - windowMs;
+    for (const sample of this.bytesReceived) {
+      if (sample.time >= recvCutoff) {
+        bytesIn += sample.bytes;
+      }
+    }
+    bytesIn = Math.round((bytesIn * 1000) / windowMs);  // Convert to bytes/sec
+
+    return {
+      lagMs: this.currentLagMs,
+      bytesIn,
+      bytesOut,
+    };
+  }
+
   private broadcastState(state: TronGameStateData): void {
+    // Add timestamp for lag estimation (fallback, affected by clock skew)
+    state.sentAt = Date.now();
+    // Echo guest's ping timestamp for RTT calculation
+    if (this.latestPingTimestamp) {
+      state.pongTimestamp = this.latestPingTimestamp;
+    }
+
+    // Estimate bytes for bitrate tracking
+    const jsonSize = JSON.stringify(state).length;
+    const now = performance.now();
+    this.bytesSent.push({ time: now, bytes: jsonSize });
+    // Keep only last 2 seconds of data
+    const cutoff = now - 2000;
+    this.bytesSent = this.bytesSent.filter(s => s.time >= cutoff);
+
     // Broadcast full Tron state to all guests
     this.connection.broadcastTronState(state);
   }

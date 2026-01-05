@@ -8,6 +8,13 @@ import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
 import { SpriteAtlas } from '../sprites';
 import { SPRITE_HASH } from './spriteHash';
 
+// Network stats for debug overlay
+export interface NetworkStats {
+  lagMs: number;
+  bytesIn: number;   // bytes/sec incoming
+  bytesOut: number;  // bytes/sec outgoing
+}
+
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
 const STATUS_WIDTH = 50;
@@ -128,7 +135,7 @@ export class TronRenderer {
   }
 
   // Main render function
-  render(round: TronRoundState, match: TronMatchState, fps?: number): void {
+  render(round: TronRoundState, match: TronMatchState, fps?: number, networkStats?: NetworkStats): void {
     // Clear the play area
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
@@ -236,13 +243,32 @@ export class TronRenderer {
       this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
 
-    // Draw FPS counter (debug)
+    // Draw debug overlay (FPS + network stats)
     if (fps !== undefined) {
-      this.ctx.fillStyle = fps < 60 ? '#f44' : fps < 68 ? '#ff0' : '#0f0';
       this.ctx.font = '12px monospace';
       this.ctx.textAlign = 'left';
       this.ctx.textBaseline = 'top';
+
+      // FPS with color coding
+      this.ctx.fillStyle = fps < 60 ? '#f44' : fps < 68 ? '#ff0' : '#0f0';
       this.ctx.fillText(`${fps} FPS`, 4, 4);
+
+      // Network stats (if available)
+      if (networkStats) {
+        const y = 18;
+        // Format bitrates as KB/s
+        const kbIn = (networkStats.bytesIn / 1024).toFixed(1);
+        const kbOut = (networkStats.bytesOut / 1024).toFixed(1);
+
+        // Lag with color coding (green < 50ms, yellow < 100ms, red >= 100ms)
+        const lagColor = networkStats.lagMs < 50 ? '#0f0' : networkStats.lagMs < 100 ? '#ff0' : '#f44';
+        this.ctx.fillStyle = lagColor;
+        this.ctx.fillText(`Lag: ${networkStats.lagMs}ms`, 4, y);
+
+        // Bitrate (cyan for data rates)
+        this.ctx.fillStyle = '#0ff';
+        this.ctx.fillText(`In: ${kbIn} KB/s  Out: ${kbOut} KB/s`, 4, y + 14);
+      }
     }
   }
 

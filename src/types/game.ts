@@ -130,6 +130,10 @@ export interface TronGameStateData {
   colorBlindnessFrames?: number;
   // White flash effect remaining frames (bomb-on-bomb collision)
   whiteFlashFrames?: number;
+  // Timestamp when state was sent (for lag estimation)
+  sentAt?: number;
+  // Echo of guest's pingTimestamp for RTT measurement
+  pongTimestamp?: number;
 }
 
 // Input includes action key for ready signal
@@ -137,6 +141,7 @@ export interface TronInput {
   left: boolean;
   right: boolean;
   action: boolean;  // Ready signal / special action
+  pingTimestamp?: number;  // For RTT measurement (guest's Date.now() when sending)
 }
 
 // === Teleport Portal Types ===
