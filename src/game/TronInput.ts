@@ -29,8 +29,11 @@ export function isIOS(): boolean {
 }
 
 export class TronInputHandler {
-  private keys: TronInputState = { left: false, right: false, action: false };
+  private steer: number = 0;   // -1 (full left) to 1 (full right)
+  private action: boolean = false;
   private keyMap: KeyMap;
+  private leftKeyDown: boolean = false;
+  private rightKeyDown: boolean = false;
 
   // Touch controls
   private joystick: nipplejs.JoystickManager | null = null;
@@ -58,25 +61,28 @@ export class TronInputHandler {
       lockX: true, // Only horizontal movement for left/right
     });
 
-    // Handle joystick direction
+    // Handle joystick direction - proportional steering based on X position
     this.joystick.on('move', (_evt, data) => {
-      if (data.direction) {
-        // Horizontal direction only (lockX is set)
-        const angle = data.angle.degree;
-        // Left: 135-225, Right: -45 to 45 (or 315-360, 0-45)
-        if (angle > 90 && angle < 270) {
-          this.keys.left = true;
-          this.keys.right = false;
-        } else {
-          this.keys.left = false;
-          this.keys.right = true;
-        }
-      }
+      // data.distance is 0-50 (half the joystick size), data.angle.degree is direction
+      const distance = data.distance ?? 0;
+      const angle = data.angle?.degree ?? 0;
+
+      // Calculate normalized X component (-1 to 1)
+      // angle 0 = right, 90 = up, 180 = left, 270 = down
+      const radians = (angle * Math.PI) / 180;
+      const xComponent = Math.cos(radians);  // -1 (left) to 1 (right)
+
+      // Scale by distance (0-45 -> 0-1)
+      const normalizedDistance = Math.min(distance / 45, 1);
+      const linearSteer = xComponent * normalizedDistance;
+
+      // Apply power curve for finer control near center (exponent > 1 = softer center)
+      // steer = sign(x) * |x|^2.5
+      this.steer = Math.sign(linearSteer) * Math.pow(Math.abs(linearSteer), 2.5);
     });
 
     this.joystick.on('end', () => {
-      this.keys.left = false;
-      this.keys.right = false;
+      this.steer = 0;
     });
 
     // Handle action button
@@ -87,7 +93,7 @@ export class TronInputHandler {
 
   private handleActionStart = (e: TouchEvent): void => {
     e.preventDefault();
-    this.keys.action = true;
+    this.action = true;
     if (this.actionButton) {
       this.actionButton.style.transform = 'scale(0.9)';
       this.actionButton.style.opacity = '1';
@@ -95,7 +101,7 @@ export class TronInputHandler {
   };
 
   private handleActionEnd = (): void => {
-    this.keys.action = false;
+    this.action = false;
     if (this.actionButton) {
       this.actionButton.style.transform = 'scale(1)';
       this.actionButton.style.opacity = '0.7';
@@ -106,17 +112,20 @@ export class TronInputHandler {
     let handled = false;
 
     if (e.code === this.keyMap.left) {
-      this.keys.left = true;
+      this.leftKeyDown = true;
       handled = true;
     }
     if (e.code === this.keyMap.right) {
-      this.keys.right = true;
+      this.rightKeyDown = true;
       handled = true;
     }
     if (e.code === this.keyMap.action) {
-      this.keys.action = true;
+      this.action = true;
       handled = true;
     }
+
+    // Update steer from keyboard state
+    this.updateSteerFromKeys();
 
     // Prevent default for game keys to avoid scrolling etc.
     if (handled) {
@@ -126,19 +135,36 @@ export class TronInputHandler {
 
   private handleKeyUp = (e: KeyboardEvent): void => {
     if (e.code === this.keyMap.left) {
-      this.keys.left = false;
+      this.leftKeyDown = false;
     }
     if (e.code === this.keyMap.right) {
-      this.keys.right = false;
+      this.rightKeyDown = false;
     }
     if (e.code === this.keyMap.action) {
-      this.keys.action = false;
+      this.action = false;
     }
+
+    // Update steer from keyboard state
+    this.updateSteerFromKeys();
   };
+
+  private updateSteerFromKeys(): void {
+    // Keyboard gives full steering: -1, 0, or 1
+    if (this.leftKeyDown && !this.rightKeyDown) {
+      this.steer = -1;
+    } else if (this.rightKeyDown && !this.leftKeyDown) {
+      this.steer = 1;
+    } else {
+      this.steer = 0;
+    }
+  }
 
   // Get current input state
   getInput(): TronInputState {
-    return { ...this.keys };
+    return {
+      steer: this.steer,
+      action: this.action,
+    };
   }
 
   // Clean up event listeners

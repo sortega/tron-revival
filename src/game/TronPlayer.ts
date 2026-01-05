@@ -98,13 +98,8 @@ export class TronPlayer {
     this.prevScreenX = this.getScreenX();
     this.prevScreenY = this.getScreenY();
 
-    // Turn
-    if (input.left) {
-      this.direction = (this.direction - TURN_SPEED + 360) % 360;
-    }
-    if (input.right) {
-      this.direction = (this.direction + TURN_SPEED) % 360;
-    }
+    // Turn - proportional steering: steer * TURN_SPEED gives degrees per frame
+    this.direction = (this.direction + input.steer * TURN_SPEED + 360) % 360;
 
     // Move forward
     const rad = (this.direction * Math.PI) / 180;

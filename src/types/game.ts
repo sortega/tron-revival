@@ -138,8 +138,7 @@ export interface TronGameStateData {
 
 // Input includes action key for ready signal
 export interface TronInput {
-  left: boolean;
-  right: boolean;
+  steer: number;    // Proportional steering: -1 (full left) to 1 (full right), 0 = straight
   action: boolean;  // Ready signal / special action
   pingTimestamp?: number;  // For RTT measurement (guest's Date.now() when sending)
 }

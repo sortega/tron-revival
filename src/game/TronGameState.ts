@@ -408,11 +408,11 @@ export class TronGameState {
         const playerMoves = movesPerPlayer.get(player.slotIndex) ?? 1;
         if (step >= playerMoves) continue; // This player doesn't move this step
 
-        let input = inputs.get(player.slotIndex) || { left: false, right: false, action: false };
+        let input = inputs.get(player.slotIndex) || { steer: 0, action: false };
 
-        // Control Reversal effect swaps left/right
+        // Control Reversal effect inverts steering
         if (player.hasEffect('reverse')) {
-          input = { left: input.right, right: input.left, action: input.action };
+          input = { ...input, steer: -input.steer };
         }
 
         const newSegments = player.update(input);
