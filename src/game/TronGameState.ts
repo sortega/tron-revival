@@ -90,6 +90,8 @@ export class TronGameState {
   private nextPortalId = 0;
   private readonly PORTAL_MIN_DISTANCE = 100;       // Minimum distance between portal endpoints
   private readonly PORTAL_MIN_PLAYER_DISTANCE = 80; // Minimum distance from player start positions
+  private readonly PORTAL_ANIM_SPEED = 3;           // Advance portal frame every N ticks (slower = higher)
+  private portalAnimTick = 0;
 
   // Items
   items: GameItem[] = [];
@@ -1429,9 +1431,13 @@ export class TronGameState {
 
   // Tick visual effects that continue during waiting_ready phase
   private tickVisualEffects(): void {
-    // Animate portals
-    for (const portal of this.portals) {
-      portal.animFrame = (portal.animFrame + 1) % PORTAL_FRAME_COUNT;
+    // Animate portals (slower rotation)
+    this.portalAnimTick++;
+    if (this.portalAnimTick >= this.PORTAL_ANIM_SPEED) {
+      this.portalAnimTick = 0;
+      for (const portal of this.portals) {
+        portal.animFrame = (portal.animFrame + 1) % PORTAL_FRAME_COUNT;
+      }
     }
 
     // Tick color blindness effect countdown
