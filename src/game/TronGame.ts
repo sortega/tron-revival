@@ -9,6 +9,7 @@ import { TronGameState } from './TronGameState';
 import { TronRenderer } from './TronRenderer';
 import { TronInputHandler, isTouchDevice, isIOS } from './TronInput';
 import { getSoundManager, type SoundName } from './SoundManager';
+import { serializeState } from '../network/serialization';
 
 export class TronGame implements Screen {
   private container: HTMLElement;
@@ -855,16 +856,18 @@ export class TronGame implements Screen {
       state.pongTimestamp = this.latestPingTimestamp;
     }
 
-    // Estimate bytes for bitrate tracking
-    const jsonSize = JSON.stringify(state).length;
+    // Serialize to MessagePack binary format
+    const packed = serializeState(state);
+
+    // Track actual binary size for bitrate display
     const now = performance.now();
-    this.bytesSent.push({ time: now, bytes: jsonSize });
+    this.bytesSent.push({ time: now, bytes: packed.length });
     // Keep only last 2 seconds of data
     const cutoff = now - 2000;
     this.bytesSent = this.bytesSent.filter(s => s.time >= cutoff);
 
-    // Broadcast full Tron state to all guests
-    this.connection.broadcastTronState(state);
+    // Broadcast pre-serialized binary state to all guests
+    this.connection.broadcastBinaryState(packed);
   }
 
   private playSoundEvents(events: SoundEvent[]): void {

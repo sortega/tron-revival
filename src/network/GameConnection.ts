@@ -34,12 +34,11 @@ export class GameConnection {
   private setupCallbacks(): void {
     this.connection.setCallbacks({
       onGameState: (state: GameStateMessage) => {
-        // Check if this is actually a Tron state message wrapped in positions
-        // When we call broadcastGameState(tronState as any), it wraps it in positions
+        // Check if this is Tron state (from binary channel) or legacy positions array
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const anyPositions = state.positions as any;
         if (anyPositions?.round && anyPositions?.match) {
-          // This is a Tron state wrapped in positions
+          // Tron state from binary MessagePack channel
           this.callbacks.onTronState?.(anyPositions as TronGameStateData);
         } else if (Array.isArray(state.positions)) {
           // Legacy placeholder game format - positions is actually an array
@@ -75,12 +74,9 @@ export class GameConnection {
     this.connection.broadcastGameState(positions);
   }
 
-  // Tron-specific: broadcast full game state
-  broadcastTronState(state: TronGameStateData): void {
-    // We reuse the game state channel but send the Tron format
-    // The receiver will detect the format and call the appropriate callback
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.connection.broadcastGameState(state as any);
+  // Broadcast pre-serialized binary state (MessagePack-encoded TronGameStateData)
+  broadcastBinaryState(data: Uint8Array): void {
+    this.connection.broadcastBinaryState(data);
   }
 
   sendInput(input: GameInput | TronInput): void {

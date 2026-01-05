@@ -23,6 +23,7 @@ import type {
   PlayerInputMessage,
   PlayerPosition,
 } from './protocol';
+import { deserializeState } from './serialization';
 
 const APP_ID = 'teratron-lobby';
 
@@ -88,6 +89,7 @@ export class LobbyConnection {
   private sendLobbyMsg: ((msg: HostToGuestMessage | GuestToHostMessage, target?: string) => void) | null = null;
   private sendGameState: ((msg: GameStateMessage, target?: string) => void) | null = null;
   private sendGameInput: ((msg: PlayerInputMessage, target?: string) => void) | null = null;
+  private sendBinaryState: ((data: Uint8Array, target?: string) => void) | null = null;
 
   // Host-only state
   private lobbyState: LobbyState | null = null;
@@ -193,6 +195,16 @@ export class LobbyConnection {
         this.callbacks.onPlayerInput?.(peerId, msg.input);
       });
 
+      // Set up binary state channel (MessagePack-encoded game state)
+      const [sendBinary, getBinary] = this.room.makeAction<Uint8Array>('binaryState');
+      this.sendBinaryState = (data, target) => sendBinary(data, target);
+
+      getBinary((data: Uint8Array, _peerId: string) => {
+        const state = deserializeState(data);
+        // Wrap in positions for GameConnection's detection logic
+        this.callbacks.onGameState?.({ positions: state } as unknown as GameStateMessage);
+      });
+
       // Handle peer events
       this.room.onPeerJoin((peerId) => {
         console.log('[LobbyConnection] Peer joined:', peerId, 'isHost:', this.isHost);
@@ -251,6 +263,7 @@ export class LobbyConnection {
       this.sendLobbyMsg = null;
       this.sendGameState = null;
       this.sendGameInput = null;
+      this.sendBinaryState = null;
       this.setStatus('disconnected');
 
       // Clear URL
@@ -339,6 +352,11 @@ export class LobbyConnection {
       positions,
       timestamp: Date.now(),
     });
+  }
+
+  broadcastBinaryState(data: Uint8Array): void {
+    if (!this.isHost || !this.sendBinaryState) return;
+    this.sendBinaryState(data);
   }
 
   sendInput(input: GameInput): void {
