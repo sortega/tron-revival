@@ -4,7 +4,8 @@ import type { SlotIndex } from '../types/lobby';
 import { FFA_COLORS, TEAM_COLORS } from '../types/lobby';
 import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard } from '../types/game';
 import type { GamePlayer } from '../types/game';
-import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
+import { PLAY_WIDTH, PLAY_HEIGHT } from './constants';
+import { PixelGrid, forEachLinePixel } from './PixelGrid';
 import { SpriteAtlas } from '../sprites';
 import { SPRITE_HASH } from './spriteHash';
 
@@ -51,8 +52,9 @@ export class TronRenderer {
   private whiteFlashFrames: number = 0;
   private readonly WHITE_FLASH_FADE = 280;  // Frames in fade phase (after solid)
 
-  // Trail data storage for color blindness redrawing
-  private trailData: Map<SlotIndex, TrailSegment[]> = new Map();
+  // Scratch canvas used to tint the trails during the color blindness effect
+  private readonly tintCanvas: HTMLCanvasElement;
+  private readonly tintCtx: CanvasRenderingContext2D;
 
   // Resize handler (stored for cleanup)
   private readonly resizeHandler: () => void;
@@ -111,6 +113,11 @@ export class TronRenderer {
     this.trailCtx = this.trailCanvas.getContext('2d')!;
     this.trailCtx.imageSmoothingEnabled = false;
 
+    this.tintCanvas = document.createElement('canvas');
+    this.tintCanvas.width = PLAY_WIDTH;
+    this.tintCanvas.height = PLAY_HEIGHT;
+    this.tintCtx = this.tintCanvas.getContext('2d')!;
+
     // Create off-screen level canvas
     this.levelCanvas = document.createElement('canvas');
     this.levelCanvas.width = PLAY_WIDTH;
@@ -143,26 +150,20 @@ export class TronRenderer {
     // Draw level background
     this.ctx.drawImage(this.levelCanvas, 0, 0);
 
-    // Handle color blindness color cycling for trails
+    // Draw trails. During color blindness every trail is tinted with one cycling colour
     if (this.colorBlindnessFrames > 0) {
-      // Calculate elapsed frames and color index
       const elapsed = this.COLOR_BLINDNESS_DURATION - this.colorBlindnessFrames;
       const colors = this.getColorBlindnessColors();
       const colorIndex = Math.floor(elapsed / 2) % colors.length;  // Change every 2 frames
-      const currentColor = colors[colorIndex]!;
-
-      // Redraw trails with cycling color
-      this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-      this.trailCtx.fillStyle = currentColor;
-      for (const segments of this.trailData.values()) {
-        for (const seg of segments) {
-          this.trailCtx.fillRect(seg.x, seg.y, 1, 1);
-        }
-      }
+      this.tintCtx.globalCompositeOperation = 'copy';
+      this.tintCtx.drawImage(this.trailCanvas, 0, 0);
+      this.tintCtx.globalCompositeOperation = 'source-in';
+      this.tintCtx.fillStyle = colors[colorIndex]!;
+      this.tintCtx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+      this.ctx.drawImage(this.tintCanvas, 0, 0);
+    } else {
+      this.ctx.drawImage(this.trailCanvas, 0, 0);
     }
-
-    // Draw trails from off-screen canvas
-    this.ctx.drawImage(this.trailCanvas, 0, 0);
 
     // Draw teleport portals
     for (const portal of round.portals) {
@@ -277,11 +278,6 @@ export class TronRenderer {
     const player = this.players.find(p => p.slotIndex === slotIndex);
     if (!player) return;
 
-    // Store for color blindness redrawing
-    const existing = this.trailData.get(slotIndex) || [];
-    existing.push(...segments);
-    this.trailData.set(slotIndex, existing);
-
     this.trailCtx.fillStyle = player.color;
     for (const seg of segments) {
       this.trailCtx.fillRect(seg.x, seg.y, 1, 1);
@@ -301,13 +297,10 @@ export class TronRenderer {
   clearTrails(): void {
     this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     this.ridiculousDeathSlots.clear();
-    this.trailData.clear();
     this.colorBlindnessFrames = 0;
     this.whiteFlashFrames = 0;
     // Restore level canvas (removes lock borders modifications)
-    if (this.currentLevelImage) {
-      this.levelCtx.drawImage(this.currentLevelImage, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    }
+    this.drawLevelImage();
   }
 
   // Restore level to original state (for eraser)
@@ -315,24 +308,32 @@ export class TronRenderer {
   restoreLevel(): void {
     // Clear trails
     this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    this.trailData.clear();
 
     // Restore level canvas from stored image
-    if (this.currentLevelImage) {
-      this.levelCtx.drawImage(this.currentLevelImage, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    this.drawLevelImage();
+  }
+
+  // Clear a rectangle (top-left x,y; wraps around edges) from trails and level
+  clearRect(x: number, y: number, w: number, h: number): void {
+    const x0 = ((x % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH;
+    const y0 = ((y % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT;
+    // Split into up to 4 rectangles when crossing the edges
+    const xs: [number, number][] = x0 + w > PLAY_WIDTH ? [[x0, PLAY_WIDTH - x0], [0, x0 + w - PLAY_WIDTH]] : [[x0, w]];
+    const ys: [number, number][] = y0 + h > PLAY_HEIGHT ? [[y0, PLAY_HEIGHT - y0], [0, y0 + h - PLAY_HEIGHT]] : [[y0, h]];
+    for (const [rx, rw] of xs) {
+      for (const [ry, rh] of ys) {
+        this.trailCtx.clearRect(rx, ry, rw, rh);
+        this.levelCtx.clearRect(rx, ry, rw, rh);
+      }
     }
   }
 
-  // Clear a circular area from trail canvas (for bullet impacts)
-  clearArea(x: number, y: number, radius: number): void {
-    // Clear from trail canvas (with wrap-around)
-    for (let dx = -radius; dx < radius; dx++) {
-      for (let dy = -radius; dy < radius; dy++) {
-        const cx = ((x + dx) % PLAY_WIDTH + PLAY_WIDTH) % PLAY_WIDTH;
-        const cy = ((y + dy) % PLAY_HEIGHT + PLAY_HEIGHT) % PLAY_HEIGHT;
-        this.trailCtx.clearRect(cx, cy, 1, 1);
-      }
-    }
+  // Clear the pixels along a line (tracer path; wraps around edges)
+  clearLine(x0: number, y0: number, x1: number, y1: number): void {
+    forEachLinePixel(x0, y0, x1, y1, (x, y) => {
+      this.trailCtx.clearRect(x, y, 1, 1);
+      this.levelCtx.clearRect(x, y, 1, 1);
+    });
   }
 
   // Trigger ridiculous death display for a player
@@ -358,12 +359,8 @@ export class TronRenderer {
     ];
   }
 
-  // Load a level background and return obstacle pixels with their colors
-  // Returns a Promise that resolves with a map of pixel coordinates -> hex color
-  async loadLevel(level: LevelDefinition): Promise<Map<string, string>> {
-    const obstacles = new Map<string, string>();
-
-    // Load the level image
+  // Load a level background and return its obstacle pixels (every non-black pixel)
+  async loadLevel(level: LevelDefinition): Promise<PixelGrid> {
     const img = new Image();
     img.src = level.imagePath;
 
@@ -372,33 +369,19 @@ export class TronRenderer {
       img.onerror = () => reject(new Error(`Failed to load level image: ${level.imagePath}`));
     });
 
-    // Store the image for potential restoration (eraser)
+    // Store the image for restoration (new round, eraser)
     this.currentLevelImage = img;
+    this.drawLevelImage();
 
-    // Draw to level canvas
-    this.levelCtx.drawImage(img, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-
-    // Extract non-black pixels as obstacles with their colors
     const imageData = this.levelCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    const data = imageData.data;
+    return PixelGrid.fromRgba(imageData.data);
+  }
 
-    for (let y = 0; y < PLAY_HEIGHT; y++) {
-      for (let x = 0; x < PLAY_WIDTH; x++) {
-        const idx = (y * PLAY_WIDTH + x) * 4;
-        const r = data[idx] ?? 0;
-        const g = data[idx + 1] ?? 0;
-        const b = data[idx + 2] ?? 0;
-
-        // Non-black pixels are obstacles (only pitch black is passable)
-        if (r !== 0 || g !== 0 || b !== 0) {
-          // Convert to hex color
-          const color = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-          obstacles.set(`${x},${y}`, color);
-        }
-      }
+  private drawLevelImage(): void {
+    this.levelCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    if (this.currentLevelImage) {
+      this.levelCtx.drawImage(this.currentLevelImage, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     }
-
-    return obstacles;
   }
 
   // Draw a teleport portal (both endpoints with wrap-around)

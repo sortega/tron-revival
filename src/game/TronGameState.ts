@@ -14,6 +14,7 @@ import type {
   Projectile,
   Explosion,
   Bodyguard,
+  ClearedRect,
 } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import {
@@ -25,9 +26,11 @@ import {
   WEAPON_ITEMS,
   ITEM_COLLISION_RADIUS,
 } from '../types/game';
-import { TronPlayer, getStartingPosition, PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
+import { TronPlayer, getStartingPosition } from './TronPlayer';
+import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
 import { ItemLauncher } from './ItemLauncher';
-import { getSoundManager } from './SoundManager';
+import { PixelGrid } from './PixelGrid';
+import type { Rng } from './rng';
 
 const COUNTDOWN_SECONDS = 3;
 
@@ -57,6 +60,11 @@ function segmentsIntersect(
   return t > eps && t < 1 - eps && u > eps && u < 1 - eps;
 }
 
+// True if the player's last move was a normal step (no wrap-around / teleport jump)
+function isContiguousMove(p: TronPlayer): boolean {
+  return Math.abs(p.getScreenX() - p.prevScreenX) <= 2 && Math.abs(p.getScreenY() - p.prevScreenY) <= 2;
+}
+
 export class TronGameState {
   // Players
   players: TronPlayer[] = [];
@@ -74,16 +82,20 @@ export class TronGameState {
   gameMode: GameMode;
   levelMode: LevelMode;
 
-  // Trail collision tracking - maps pixel coordinates to their color
-  pixelOwners: Map<string, string> = new Map();
+  // Collision map: trails, level obstacles and locked borders, with their colour
+  readonly pixels = new PixelGrid();
 
   // Ridiculous death tracking (crashing into own color)
   ridiculousDeaths: Map<SlotIndex, number> = new Map();
   // Track ridiculous death events this frame (for sidebar display) - multiple players can have it
   frameRidiculousDeaths: SlotIndex[] = [];
 
-  // Level obstacles with colors (stored separately for eraser restore)
-  private levelObstacles: Map<string, string> = new Map();
+  // Pristine copy of the current level's obstacles. Never modified by gameplay:
+  // weapons damage `pixels`, and round start / Eraser restore from this copy.
+  private levelObstacles = new PixelGrid();
+
+  // Random source (seedable for tests)
+  private readonly rng: Rng;
 
   // Teleport portals
   portals: TeleportPortal[] = [];
@@ -95,7 +107,7 @@ export class TronGameState {
 
   // Items
   items: GameItem[] = [];
-  private itemLauncher = new ItemLauncher();
+  private itemLauncher: ItemLauncher;
 
   // Track teleport cooldowns to prevent instant re-teleport
   private teleportCooldowns: Map<SlotIndex, number> = new Map();
@@ -123,7 +135,11 @@ export class TronGameState {
   private frameEraserUsed: boolean = false;
 
   // Cleared areas this frame (from bullet impacts)
-  private frameClearedAreas: { x: number; y: number; radius: number }[] = [];
+  private frameClearedAreas: ClearedRect[] = [];
+  // Cleared lines this frame (tracer paths), flat [x0, y0, x1, y1, ...]
+  private frameClearedLines: number[] = [];
+  // A new round started this frame (renderer must reset trails)
+  private frameRoundStarted: boolean = false;
 
   // Projectile system
   private projectiles: Projectile[] = [];
@@ -201,7 +217,9 @@ export class TronGameState {
   // Player configs for restarting rounds
   private playerConfigs: GamePlayer[];
 
-  constructor(playerConfigs: GamePlayer[], gameMode: GameMode, levelMode: LevelMode) {
+  constructor(playerConfigs: GamePlayer[], gameMode: GameMode, levelMode: LevelMode, rng: Rng = Math.random) {
+    this.rng = rng;
+    this.itemLauncher = new ItemLauncher(rng);
     this.playerConfigs = playerConfigs;
     this.gameMode = gameMode;
     this.levelMode = levelMode;
@@ -253,13 +271,10 @@ export class TronGameState {
   }
 
   // Set level obstacle pixels with colors (called by TronGame after loading level image)
-  setLevelObstacles(obstacles: Map<string, string>): void {
-    // Store separately for eraser restore
-    this.levelObstacles = new Map(obstacles);
-    // Add to collision map
-    for (const [pixel, color] of obstacles) {
-      this.pixelOwners.set(pixel, color);
-    }
+  setLevelObstacles(obstacles: PixelGrid): void {
+    this.levelObstacles = obstacles;
+    // Levels are loaded during the countdown, before any trail exists
+    this.pixels.copyFrom(obstacles);
   }
 
   // Initialize/reset for a new round
@@ -267,7 +282,8 @@ export class TronGameState {
     this.phase = 'countdown';
     this.countdown = COUNTDOWN_SECONDS;
     this.roundWinner = null;
-    this.pixelOwners.clear();
+    this.pixels.copyFrom(this.levelObstacles);
+    this.frameRoundStarted = true;
     this.frameTrailSegments.clear();
     this.playersReady.clear();
     this.prevActionState.clear();
@@ -344,7 +360,7 @@ export class TronGameState {
   }
 
   private tickCountdown(): void {
-    this.countdown -= 1 / 70; // Assuming 70fps
+    this.countdown -= 1 / TICK_RATE;
 
     if (this.countdown <= 0) {
       this.countdown = 0;
@@ -420,9 +436,9 @@ export class TronGameState {
         const newSegments = player.update(input);
 
         // Check collision immediately after move
-        const collisionPixel = player.checkCollision(this.pixelOwners);
+        const collisionPixel = player.checkCollision(this.pixels);
         if (collisionPixel) {
-          const pixelOwner = this.pixelOwners.get(collisionPixel);
+          const pixelOwner = this.pixels.get(collisionPixel.x, collisionPixel.y);
           const hasShield = player.hasEffect('shield');
           const hasCrossing = player.hasEffect('crossing');
           const isOwnColor = pixelOwner === player.color;
@@ -439,7 +455,7 @@ export class TronGameState {
 
         // Add trail segments to collision map
         for (const seg of newSegments) {
-          this.pixelOwners.set(`${seg.x},${seg.y}`, player.color);
+          this.pixels.set(seg.x, seg.y, player.color);
         }
 
         // Accumulate for network transmission
@@ -457,6 +473,10 @@ export class TronGameState {
         for (let j = i + 1; j < alivePlayers.length; j++) {
           const p2 = alivePlayers[j];
           if (!p2 || p2.prevScreenX < 0) continue;
+
+          // A move that wrapped around an edge (or teleported) is not a straight
+          // segment across the arena - skip it to avoid phantom crossings
+          if (!isContiguousMove(p1) || !isContiguousMove(p2)) continue;
 
           // Check if movement segments intersect
           if (segmentsIntersect(
@@ -652,10 +672,10 @@ export class TronGameState {
         const x = z + i * 150;
         if (x < PLAY_WIDTH) {
           // Top edge (y=0)
-          this.pixelOwners.set(`${x},0`, lock.color);
+          this.pixels.set(x, 0, lock.color);
           segments.push({ x, y: 0 });
           // Bottom edge (y=PLAY_HEIGHT-1)
-          this.pixelOwners.set(`${x},${PLAY_HEIGHT - 1}`, lock.color);
+          this.pixels.set(x, PLAY_HEIGHT - 1, lock.color);
           segments.push({ x, y: PLAY_HEIGHT - 1 });
         }
       }
@@ -665,10 +685,10 @@ export class TronGameState {
         const y = z + i * 150;
         if (y < PLAY_HEIGHT) {
           // Left edge (x=0)
-          this.pixelOwners.set(`0,${y}`, lock.color);
+          this.pixels.set(0, y, lock.color);
           segments.push({ x: 0, y });
           // Right edge (x=PLAY_WIDTH-1)
-          this.pixelOwners.set(`${PLAY_WIDTH - 1},${y}`, lock.color);
+          this.pixels.set(PLAY_WIDTH - 1, y, lock.color);
           segments.push({ x: PLAY_WIDTH - 1, y });
         }
       }
@@ -738,12 +758,12 @@ export class TronGameState {
 
     for (let i = 0; i < this.UZI_TRACERS_PER_FRAME; i++) {
       // Random direction within ±30° of player heading
-      const spreadAngle = (Math.random() * 2 - 1) * this.UZI_SPREAD_DEGREES;
+      const spreadAngle = (this.rng() * 2 - 1) * this.UZI_SPREAD_DEGREES;
       const direction = player.direction + spreadAngle;
       const dirRad = (direction * Math.PI) / 180;
 
       // Random speed between 10-50 pixels/frame
-      const speed = this.UZI_MIN_SPEED + Math.random() * (this.UZI_MAX_SPEED - this.UZI_MIN_SPEED);
+      const speed = this.UZI_MIN_SPEED + this.rng() * (this.UZI_MAX_SPEED - this.UZI_MIN_SPEED);
 
       this.projectiles.push({
         id: this.nextProjectileId++,
@@ -765,12 +785,12 @@ export class TronGameState {
 
     for (let i = 0; i < this.SHOTGUN_PELLETS; i++) {
       // Random direction within ±5° of player heading
-      const spreadAngle = (Math.random() * 2 - 1) * this.SHOTGUN_SPREAD_DEGREES;
+      const spreadAngle = (this.rng() * 2 - 1) * this.SHOTGUN_SPREAD_DEGREES;
       const direction = player.direction + spreadAngle;
       const dirRad = (direction * Math.PI) / 180;
 
       // Random speed between 10-30 pixels/frame
-      const speed = this.SHOTGUN_MIN_SPEED + Math.random() * (this.SHOTGUN_MAX_SPEED - this.SHOTGUN_MIN_SPEED);
+      const speed = this.SHOTGUN_MIN_SPEED + this.rng() * (this.SHOTGUN_MAX_SPEED - this.SHOTGUN_MIN_SPEED);
 
       this.projectiles.push({
         id: this.nextProjectileId++,
@@ -1028,81 +1048,27 @@ export class TronGameState {
 
   // Clear pixels along projectile path (for tracer bullets)
   private clearPixelPath(x0: number, y0: number, x1: number, y1: number): void {
-    // Bresenham's algorithm - clear each pixel along path
-    const dx = Math.abs(x1 - x0);
-    const dy = Math.abs(y1 - y0);
-    const sx = x0 < x1 ? 1 : -1;
-    const sy = y0 < y1 ? 1 : -1;
-    let err = dx - dy;
-
-    let x = x0, y = y0;
-    while (true) {
-      const wx = ((x % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH;
-      const wy = ((y % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT;
-      const key = `${wx},${wy}`;
-      this.pixelOwners.delete(key);
-      this.levelObstacles.delete(key);  // Also clear level obstacles
-      this.frameClearedAreas.push({ x: wx, y: wy, radius: 0 });  // Single pixel
-
-      if (x === x1 && y === y1) break;
-      const e2 = 2 * err;
-      if (e2 > -dy) { err -= dy; x += sx; }
-      if (e2 < dx) { err += dx; y += sy; }
-    }
+    this.pixels.clearLine(x0, y0, x1, y1);
+    this.frameClearedLines.push(x0, y0, x1, y1);
   }
 
   // Tracer bullet expiration (no explosion)
   private tracerExpire(x: number, y: number): void {
-    // Clear 3x3 area
-    for (let dx = -this.TRACER_CLEAR_RADIUS; dx <= this.TRACER_CLEAR_RADIUS; dx++) {
-      for (let dy = -this.TRACER_CLEAR_RADIUS; dy <= this.TRACER_CLEAR_RADIUS; dy++) {
-        const cx = ((x + dx) % PLAY_WIDTH + PLAY_WIDTH) % PLAY_WIDTH;
-        const cy = ((y + dy) % PLAY_HEIGHT + PLAY_HEIGHT) % PLAY_HEIGHT;
-        const key = `${cx},${cy}`;
-        this.pixelOwners.delete(key);
-        this.levelObstacles.delete(key);  // Also clear level obstacles
-      }
-    }
-    this.frameClearedAreas.push({ x, y, radius: this.TRACER_CLEAR_RADIUS });
+    const r = this.TRACER_CLEAR_RADIUS;
+    this.clearSquare(x - r, y - r, 2 * r + 1);
     // No explosion, no bomb sound
+  }
+
+  // Clear a size×size square (top-left corner at x,y; wraps) from the collision map
+  // and report it to the renderer
+  private clearSquare(x: number, y: number, size: number): void {
+    this.pixels.clearRect(x, y, size, size);
+    this.frameClearedAreas.push({ x, y, w: size, h: size });
   }
 
   // Check all pixels along a line for collision (Bresenham's algorithm)
   private checkLineCollision(x0: number, y0: number, x1: number, y1: number): { x: number; y: number } | null {
-    const dx = Math.abs(x1 - x0);
-    const dy = Math.abs(y1 - y0);
-    const sx = x0 < x1 ? 1 : -1;
-    const sy = y0 < y1 ? 1 : -1;
-    let err = dx - dy;
-
-    let x = x0;
-    let y = y0;
-
-    while (true) {
-      // Check this pixel (with wrap-around)
-      const wx = ((x % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH;
-      const wy = ((y % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT;
-      const key = `${wx},${wy}`;
-
-      // Check both player trails AND level obstacles
-      if (this.pixelOwners.has(key) || this.levelObstacles.has(key)) {
-        return { x: wx, y: wy };
-      }
-
-      if (x === x1 && y === y1) break;
-
-      const e2 = 2 * err;
-      if (e2 > -dy) {
-        err -= dy;
-        x += sx;
-      }
-      if (e2 < dx) {
-        err += dx;
-        y += sy;
-      }
-    }
-
-    return null;
+    return this.pixels.firstHitOnLine(x0, y0, x1, y1);
   }
 
   // Check collision along a thick line (for bombs which have width)
@@ -1242,17 +1208,8 @@ export class TronGameState {
       frame: 0,
     });
 
-    // Clear 10x10 pixel area (with wrap-around)
-    for (let dx = -this.BULLET_CLEAR_RADIUS; dx < this.BULLET_CLEAR_RADIUS; dx++) {
-      for (let dy = -this.BULLET_CLEAR_RADIUS; dy < this.BULLET_CLEAR_RADIUS; dy++) {
-        const cx = ((x + dx) % PLAY_WIDTH + PLAY_WIDTH) % PLAY_WIDTH;
-        const cy = ((y + dy) % PLAY_HEIGHT + PLAY_HEIGHT) % PLAY_HEIGHT;
-        this.pixelOwners.delete(`${cx},${cy}`);
-      }
-    }
-
-    // Track cleared area for renderer
-    this.frameClearedAreas.push({ x, y, radius: this.BULLET_CLEAR_RADIUS });
+    // Clear the blast area (wraps around edges)
+    this.clearSquare(x - this.BULLET_CLEAR_RADIUS, y - this.BULLET_CLEAR_RADIUS, 2 * this.BULLET_CLEAR_RADIUS);
 
     // Kill players within 6 pixels (NO SHIELD CHECK - explicit requirement!)
     for (const player of this.players) {
@@ -1291,17 +1248,8 @@ export class TronGameState {
       scale: this.BOMB_EXPLOSION_SCALE,
     });
 
-    // Clear 120x120 pixel area (with wrap-around)
-    for (let dx = -this.BOMB_CLEAR_RADIUS; dx < this.BOMB_CLEAR_RADIUS; dx++) {
-      for (let dy = -this.BOMB_CLEAR_RADIUS; dy < this.BOMB_CLEAR_RADIUS; dy++) {
-        const cx = ((x + dx) % PLAY_WIDTH + PLAY_WIDTH) % PLAY_WIDTH;
-        const cy = ((y + dy) % PLAY_HEIGHT + PLAY_HEIGHT) % PLAY_HEIGHT;
-        this.pixelOwners.delete(`${cx},${cy}`);
-      }
-    }
-
-    // Track cleared area for renderer
-    this.frameClearedAreas.push({ x, y, radius: this.BOMB_CLEAR_RADIUS });
+    // Clear the blast area (wraps around edges)
+    this.clearSquare(x - this.BOMB_CLEAR_RADIUS, y - this.BOMB_CLEAR_RADIUS, 2 * this.BOMB_CLEAR_RADIUS);
 
     // Kill players within 50 pixels (with wraparound distance check)
     for (const player of this.players) {
@@ -1363,17 +1311,8 @@ export class TronGameState {
       scale: explosionScale,
     });
 
-    // Clear doubled area (with wrap-around)
-    for (let dx = -clearRadius; dx < clearRadius; dx++) {
-      for (let dy = -clearRadius; dy < clearRadius; dy++) {
-        const cx = ((x + dx) % PLAY_WIDTH + PLAY_WIDTH) % PLAY_WIDTH;
-        const cy = ((y + dy) % PLAY_HEIGHT + PLAY_HEIGHT) % PLAY_HEIGHT;
-        this.pixelOwners.delete(`${cx},${cy}`);
-      }
-    }
-
-    // Track cleared area for renderer
-    this.frameClearedAreas.push({ x, y, radius: clearRadius });
+    // Clear the blast area (wraps around edges)
+    this.clearSquare(x - clearRadius, y - clearRadius, 2 * clearRadius);
 
     // Kill players within doubled radius (with wraparound distance check)
     for (const player of this.players) {
@@ -1555,12 +1494,12 @@ export class TronGameState {
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       // Random position for first endpoint
-      const x1 = margin + Math.random() * (PLAY_WIDTH - 2 * margin);
-      const y1 = margin + Math.random() * (PLAY_HEIGHT - 2 * margin);
+      const x1 = margin + this.rng() * (PLAY_WIDTH - 2 * margin);
+      const y1 = margin + this.rng() * (PLAY_HEIGHT - 2 * margin);
 
       // Random position for second endpoint
-      const x2 = margin + Math.random() * (PLAY_WIDTH - 2 * margin);
-      const y2 = margin + Math.random() * (PLAY_HEIGHT - 2 * margin);
+      const x2 = margin + this.rng() * (PLAY_WIDTH - 2 * margin);
+      const y2 = margin + this.rng() * (PLAY_HEIGHT - 2 * margin);
 
       // Check distance between endpoints
       const dx = x2 - x1;
@@ -1593,7 +1532,7 @@ export class TronGameState {
         y1: Math.floor(y1),
         x2: Math.floor(x2),
         y2: Math.floor(y2),
-        animFrame: Math.floor(Math.random() * PORTAL_FRAME_COUNT), // Random start frame
+        animFrame: Math.floor(this.rng() * PORTAL_FRAME_COUNT), // Random start frame
       };
     }
 
@@ -1732,7 +1671,7 @@ export class TronGameState {
     }
 
     // Reset collision map to only level obstacles
-    this.pixelOwners = new Map(this.levelObstacles);
+    this.pixels.copyFrom(this.levelObstacles);
 
     // Stop any active border locks
     if (this.borderLocks.size > 0) {
@@ -1750,7 +1689,7 @@ export class TronGameState {
     if (alivePlayers.length < 2) return;
 
     // 10% chance to trigger color blindness effect
-    const hasColorBlindness = Math.random() < this.COLOR_BLINDNESS_PROBABILITY;
+    const hasColorBlindness = this.rng() < this.COLOR_BLINDNESS_PROBABILITY;
     if (hasColorBlindness) {
       this.colorBlindnessRemainingFrames = this.COLOR_BLINDNESS_DURATION;
     }
@@ -1765,7 +1704,7 @@ export class TronGameState {
     if (hasColorBlindness) {
       // With color blindness, there's a 1/(n+1) chance of no swap at all
       // by potentially keeping the identity permutation
-      if (Math.random() < 1 / (alivePlayers.length + 1)) {
+      if (this.rng() < 1 / (alivePlayers.length + 1)) {
         return; // No swap, just the visual effect
       }
     }
@@ -1776,7 +1715,7 @@ export class TronGameState {
     do {
       // Fisher-Yates shuffle
       for (let i = permutation.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = Math.floor(this.rng() * (i + 1));
         [permutation[i], permutation[j]] = [permutation[j]!, permutation[i]!];
       }
       attempts++;
@@ -1995,10 +1934,6 @@ export class TronGameState {
   private endRound(alivePlayers: TronPlayer[]): void {
     this.phase = 'waiting_ready';
 
-    // Stop all sound loops at end of round (weapons stop firing)
-    // But don't clear sound events - let final explosions/impacts play
-    getSoundManager().stopAllLoops();
-
     // Clear border lock state
     this.borderLocks.clear();
 
@@ -2071,8 +2006,12 @@ export class TronGameState {
     this.frameRidiculousDeaths = [];
 
     // Capture and clear bullet impact areas
-    const clearedAreas = this.frameClearedAreas.length > 0 ? [...this.frameClearedAreas] : undefined;
+    const clearedAreas = this.frameClearedAreas.length > 0 ? this.frameClearedAreas : undefined;
     this.frameClearedAreas = [];
+    const clearedLines = this.frameClearedLines.length > 0 ? this.frameClearedLines : undefined;
+    this.frameClearedLines = [];
+    const roundStarted = this.frameRoundStarted || undefined;
+    this.frameRoundStarted = false;
 
     return {
       round: roundState,
@@ -2083,6 +2022,8 @@ export class TronGameState {
       eraserUsed,
       ridiculousDeathSlots,
       clearedAreas,
+      clearedLines,
+      roundStarted,
       colorBlindnessFrames: this.colorBlindnessRemainingFrames > 0 ? this.colorBlindnessRemainingFrames : undefined,
       whiteFlashFrames: this.whiteFlashRemainingFrames > 0 ? this.whiteFlashRemainingFrames : undefined,
     };
@@ -2132,7 +2073,7 @@ export class TronGameState {
       if (player) {
         for (const seg of segments) {
           player.trail.push(seg);
-          this.pixelOwners.set(`${seg.x},${seg.y}`, player.color);
+          this.pixels.set(seg.x, seg.y, player.color);
         }
       }
     }

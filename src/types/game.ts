@@ -28,6 +28,14 @@ export interface TrailSegment {
   y: number;  // Screen pixel
 }
 
+// Rectangle of cleared pixels: top-left corner + size. May extend past the edges (wraps).
+export interface ClearedRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 // Projectile type: 'bullet' = Glock (explodes on impact), 'tracer' = Rifle (clears trail, has lifespan), 'bomb' = heavy missile
 export type ProjectileType = 'bullet' | 'tracer' | 'bomb';
 
@@ -125,7 +133,12 @@ export interface TronGameStateData {
   // Ridiculous death happened - show it in these players' sidebar slots
   ridiculousDeathSlots?: SlotIndex[];
   // Cleared pixel areas (from bullet impacts) - renderer should clear these from trail canvas
-  clearedAreas?: { x: number; y: number; radius: number }[];
+  clearedAreas?: ClearedRect[];
+  // Cleared pixel lines (tracer paths), flat [x0, y0, x1, y1, ...]; coordinates may be
+  // outside the play area and wrap around
+  clearedLines?: number[];
+  // A new round started on this tick - renderer must reset trails and level damage
+  roundStarted?: boolean;
   // Color blindness effect remaining frames (for trail color cycling and sprite animation)
   colorBlindnessFrames?: number;
   // White flash effect remaining frames (bomb-on-bomb collision)

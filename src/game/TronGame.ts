@@ -2,7 +2,7 @@
 
 import type { Screen, ScreenManager } from '../screens/ScreenManager';
 import type { GameConnection } from '../network/GameConnection';
-import type { GameConfig, TronInput, TronGameStateData, TrailSegment, SoundEvent, RoundPhase } from '../types/game';
+import type { GameConfig, TronInput, TronGameStateData, SoundEvent, RoundPhase } from '../types/game';
 import { LEVELS } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
 import { TronGameState } from './TronGameState';
@@ -27,15 +27,6 @@ export class TronGame implements Screen {
 
   // Guest receives state from host
   private receivedState: TronGameStateData | null = null;
-
-  // Guest accumulates trail segments between frames to avoid losing any
-  private pendingTrailSegments: Map<SlotIndex, TrailSegment[]> = new Map();
-
-  // Guest accumulates ridiculous death events between frames
-  private pendingRidiculousDeaths: Set<SlotIndex> = new Set();
-
-  // Guest accumulates cleared areas between frames to avoid losing any
-  private pendingClearedAreas: { x: number; y: number; radius: number }[] = [];
 
   // Last time we processed a frame (for consistent timing)
   private lastFrameTime: number = 0;
@@ -540,7 +531,7 @@ export class TronGame implements Screen {
       // Host receives input from guests
       this.connection.setCallbacks({
         onPlayerInput: (slotIndex, input) => {
-          const tronInput = input as TronInput;
+          const tronInput = input;
           this.playerInputs.set(slotIndex, tronInput);
           // Store latest ping timestamp for RTT echo
           if (tronInput.pingTimestamp) {
@@ -579,24 +570,9 @@ export class TronGame implements Screen {
             this.currentLagMs = sorted[Math.floor(sorted.length / 2)] ?? 0;
           }
 
-          // Accumulate trail segments to avoid losing any between frames
-          for (const { slotIndex, segments } of state.newTrailSegments) {
-            const existing = this.pendingTrailSegments.get(slotIndex) || [];
-            existing.push(...segments);
-            this.pendingTrailSegments.set(slotIndex, existing);
-          }
-
-          // Accumulate ridiculous death events to avoid losing any between frames
-          if (state.ridiculousDeathSlots) {
-            for (const slot of state.ridiculousDeathSlots) {
-              this.pendingRidiculousDeaths.add(slot);
-            }
-          }
-
-          // Accumulate cleared areas to avoid losing any between frames
-          if (state.clearedAreas) {
-            this.pendingClearedAreas.push(...state.clearedAreas);
-          }
+          // Apply one-shot events of every state as it arrives; several states can
+          // arrive between two rendered frames and none of their events may be lost
+          this.applyFrameEvents(state);
         },
         onHostDisconnected: () => {
           getSoundManager().stopAllLoops();  // Stop any lingering sound loops
@@ -681,45 +657,7 @@ export class TronGame implements Screen {
       // Get serialized state
       const stateData = this.gameState.serialize();
 
-      // Add new trail segments to renderer
-      for (const { slotIndex, segments } of stateData.newTrailSegments) {
-        this.renderer.addTrailSegments(slotIndex, segments);
-      }
-
-      // Add border segments to renderer (lock borders effect)
-      if (stateData.borderSegments) {
-        for (const { color, segments } of stateData.borderSegments) {
-          this.renderer.addBorderSegments(color, segments);
-        }
-      }
-
-      // Clear areas from bullet impacts
-      if (stateData.clearedAreas) {
-        for (const { x, y, radius } of stateData.clearedAreas) {
-          this.renderer.clearArea(x, y, radius);
-        }
-      }
-
-      // Handle eraser - restore level and clear trails
-      if (stateData.eraserUsed) {
-        this.renderer.restoreLevel();
-      }
-
-      // Handle ridiculous death events
-      if (stateData.ridiculousDeathSlots) {
-        for (const slot of stateData.ridiculousDeathSlots) {
-          this.renderer.triggerRidiculousDeath(slot);
-        }
-      }
-
-      // Update color blindness state
-      this.renderer.updateColorBlindness(stateData.colorBlindnessFrames ?? 0);
-
-      // Update white flash state
-      this.renderer.updateWhiteFlash(stateData.whiteFlashFrames ?? 0);
-
-      // Play sounds locally
-      this.playSoundEvents(stateData.soundEvents);
+      this.applyFrameEvents(stateData);
 
       // Broadcast state to guests
       this.broadcastState(stateData);
@@ -739,67 +677,6 @@ export class TronGame implements Screen {
         // Update local game state from network
         this.gameState.updateFromState(this.receivedState);
 
-        // Stop all sound loops on phase transitions to waiting_ready or countdown
-        // This ensures loops don't persist due to missed network messages
-        const currentPhase = this.receivedState.round.phase;
-        if (this.previousPhase !== currentPhase) {
-          if (currentPhase === 'waiting_ready' || currentPhase === 'countdown') {
-            getSoundManager().stopAllLoops();
-          }
-          this.previousPhase = currentPhase;
-        }
-
-        // Add all pending trail segments to renderer (accumulated between frames)
-        for (const [slotIndex, segments] of this.pendingTrailSegments) {
-          if (segments.length > 0) {
-            this.renderer.addTrailSegments(slotIndex, segments);
-          }
-        }
-        // Clear pending segments after processing
-        this.pendingTrailSegments.clear();
-
-        // Add border segments to renderer (lock borders effect)
-        if (this.receivedState.borderSegments) {
-          for (const { color, segments } of this.receivedState.borderSegments) {
-            this.renderer.addBorderSegments(color, segments);
-          }
-          // Clear after drawing to prevent replay
-          this.receivedState.borderSegments = undefined;
-        }
-
-        // Clear areas from bullet impacts (from accumulated pending areas)
-        if (this.pendingClearedAreas.length > 0) {
-          for (const { x, y, radius } of this.pendingClearedAreas) {
-            this.renderer.clearArea(x, y, radius);
-          }
-          this.pendingClearedAreas = [];
-        }
-
-        // Handle eraser - restore level and clear trails
-        if (this.receivedState.eraserUsed) {
-          this.renderer.restoreLevel();
-          this.pendingTrailSegments.clear();
-          this.receivedState.eraserUsed = undefined;
-        }
-
-        // Handle ridiculous death events (from accumulated set)
-        for (const slot of this.pendingRidiculousDeaths) {
-          this.renderer.triggerRidiculousDeath(slot);
-        }
-        this.pendingRidiculousDeaths.clear();
-
-        // Update color blindness state
-        this.renderer.updateColorBlindness(this.receivedState.colorBlindnessFrames ?? 0);
-
-        // Update white flash state
-        this.renderer.updateWhiteFlash(this.receivedState.whiteFlashFrames ?? 0);
-
-        // Play sounds from received state (clear after playing to prevent replay)
-        if (this.receivedState.soundEvents && this.receivedState.soundEvents.length > 0) {
-          this.playSoundEvents(this.receivedState.soundEvents);
-          this.receivedState.soundEvents = [];
-        }
-
         // Render (guest receives stats for display)
         const networkStats = this.showFps ? this.getNetworkStats() : undefined;
         this.renderer.render(this.receivedState.round, this.receivedState.match, this.showFps ? this.currentFps : undefined, networkStats);
@@ -810,11 +687,6 @@ export class TronGame implements Screen {
       }
     }
 
-    // Clear trails if round was reset
-    if (this.gameState.phase === 'countdown' && this.gameState.countdown > 2.9) {
-      this.renderer.clearTrails();
-      this.pendingTrailSegments.clear();
-    }
   }
 
   private getNetworkStats(): { lagMs: number; bytesIn: number; bytesOut: number } {
@@ -868,6 +740,60 @@ export class TronGame implements Screen {
 
     // Broadcast pre-serialized binary state to all guests
     this.connection.broadcastBinaryState(packed);
+  }
+
+  // Apply the one-shot events carried by a simulation frame (trail growth, cleared
+  // pixels, sounds...) to the renderer and the sound manager. Must be called exactly
+  // once per simulated frame, in order.
+  private applyFrameEvents(state: TronGameStateData): void {
+    const renderer = this.renderer;
+    if (!renderer) return;
+
+    if (state.roundStarted) {
+      renderer.clearTrails();
+    }
+    // Eraser wipes everything drawn so far; segments in the same frame come after it
+    if (state.eraserUsed) {
+      renderer.restoreLevel();
+    }
+    for (const { slotIndex, segments } of state.newTrailSegments) {
+      renderer.addTrailSegments(slotIndex, segments);
+    }
+    if (state.borderSegments) {
+      for (const { color, segments } of state.borderSegments) {
+        renderer.addBorderSegments(color, segments);
+      }
+    }
+    if (state.clearedLines) {
+      const l = state.clearedLines;
+      for (let i = 0; i + 3 < l.length; i += 4) {
+        renderer.clearLine(l[i]!, l[i + 1]!, l[i + 2]!, l[i + 3]!);
+      }
+    }
+    if (state.clearedAreas) {
+      for (const { x, y, w, h } of state.clearedAreas) {
+        renderer.clearRect(x, y, w, h);
+      }
+    }
+    if (state.ridiculousDeathSlots) {
+      for (const slot of state.ridiculousDeathSlots) {
+        renderer.triggerRidiculousDeath(slot);
+      }
+    }
+    renderer.updateColorBlindness(state.colorBlindnessFrames ?? 0);
+    renderer.updateWhiteFlash(state.whiteFlashFrames ?? 0);
+
+    // Stop sound loops whenever a round ends or restarts, so that a loop cannot
+    // outlive the round that started it
+    const phase = state.round.phase;
+    if (this.previousPhase !== phase) {
+      if (phase === 'waiting_ready' || phase === 'countdown') {
+        getSoundManager().stopAllLoops();
+      }
+      this.previousPhase = phase;
+    }
+
+    this.playSoundEvents(state.soundEvents);
   }
 
   private playSoundEvents(events: SoundEvent[]): void {

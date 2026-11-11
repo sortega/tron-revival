@@ -18,11 +18,8 @@ import {
 import type {
   GuestToHostMessage,
   HostToGuestMessage,
-  GameInput,
-  GameStateMessage,
-  PlayerInputMessage,
-  PlayerPosition,
 } from './protocol';
+import type { TronGameStateData, TronInput } from '../types/game';
 import { deserializeState } from './serialization';
 
 const APP_ID = 'teratron-lobby';
@@ -73,8 +70,8 @@ export interface LobbyConnectionCallbacks {
   onHostDisconnected?: () => void;
   onError?: (error: string) => void;
   // Game phase callbacks
-  onGameState?: (state: GameStateMessage) => void;
-  onPlayerInput?: (peerId: string, input: GameInput) => void;
+  onGameState?: (state: TronGameStateData) => void;
+  onPlayerInput?: (peerId: string, input: TronInput) => void;
 }
 
 export class LobbyConnection {
@@ -87,8 +84,7 @@ export class LobbyConnection {
 
   // Action senders
   private sendLobbyMsg: ((msg: HostToGuestMessage | GuestToHostMessage, target?: string) => void) | null = null;
-  private sendGameState: ((msg: GameStateMessage, target?: string) => void) | null = null;
-  private sendGameInput: ((msg: PlayerInputMessage, target?: string) => void) | null = null;
+  private sendGameInput: ((msg: TronInput, target?: string) => void) | null = null;
   private sendBinaryState: ((data: Uint8Array, target?: string) => void) | null = null;
 
   // Host-only state
@@ -177,22 +173,13 @@ export class LobbyConnection {
         this.handleLobbyMessage(msg, peerId);
       });
 
-      // Set up game state channel
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const [sendState, getState] = this.room.makeAction<any>('gameState');
-      this.sendGameState = (msg, target) => sendState(msg, target);
-
-      getState((msg: GameStateMessage, _peerId: string) => {
-        this.callbacks.onGameState?.(msg);
-      });
-
       // Set up game input channel
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const [sendInput, getInput] = this.room.makeAction<any>('gameInput');
       this.sendGameInput = (msg, target) => sendInput(msg, target);
 
-      getInput((msg: PlayerInputMessage, peerId: string) => {
-        this.callbacks.onPlayerInput?.(peerId, msg.input);
+      getInput((msg: TronInput, peerId: string) => {
+        this.callbacks.onPlayerInput?.(peerId, msg);
       });
 
       // Set up binary state channel (MessagePack-encoded game state)
@@ -200,9 +187,7 @@ export class LobbyConnection {
       this.sendBinaryState = (data, target) => sendBinary(data, target);
 
       getBinary((data: Uint8Array, _peerId: string) => {
-        const state = deserializeState(data);
-        // Wrap in positions for GameConnection's detection logic
-        this.callbacks.onGameState?.({ positions: state } as unknown as GameStateMessage);
+        this.callbacks.onGameState?.(deserializeState(data));
       });
 
       // Handle peer events
@@ -261,7 +246,6 @@ export class LobbyConnection {
       this.lobbyState = null;
       this.mySlotIndex = null;
       this.sendLobbyMsg = null;
-      this.sendGameState = null;
       this.sendGameInput = null;
       this.sendBinaryState = null;
       this.setStatus('disconnected');
@@ -345,26 +329,14 @@ export class LobbyConnection {
 
   // === Game Phase ===
 
-  broadcastGameState(positions: PlayerPosition[]): void {
-    if (!this.isHost || !this.sendGameState) return;
-    this.sendGameState({
-      type: 'game_state',
-      positions,
-      timestamp: Date.now(),
-    });
-  }
-
   broadcastBinaryState(data: Uint8Array): void {
     if (!this.isHost || !this.sendBinaryState) return;
     this.sendBinaryState(data);
   }
 
-  sendInput(input: GameInput): void {
+  sendInput(input: TronInput): void {
     if (this.isHost || !this.sendGameInput) return;
-    this.sendGameInput({
-      type: 'player_input',
-      input,
-    });
+    this.sendGameInput(input);
   }
 
   // === Private: Message Handling ===

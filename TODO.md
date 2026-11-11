@@ -69,21 +69,27 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · **P0** broken / blocks 
 
 ---
 
-## Iteration 1 — Testable simulation + correctness  ⟵ current
+## Iteration 1 — Testable simulation + correctness  ✅
 
 Goal: the game rules run headless and deterministically, with tests guarding them.
 
-- [ ] Add Vitest; `npm test` script
-- [ ] Seedable RNG injected into `TronGameState` / `ItemLauncher` (T4)
-- [ ] Remove audio side effect from the simulation (B11)
-- [ ] Fix level obstacles lost after round 1 (B1) + test
-- [ ] Fix wrap-around false "crossing" kills (B6) + test
-- [ ] Make level damage consistent between sim, eraser and renderer (B7)
-- [ ] Replace `Map<string,string>` collision map with a typed-array `PixelGrid` (T3)
-- [ ] Explicit round-start event instead of the countdown heuristic (B16)
-- [ ] Delete dead code (T5)
-- [ ] `vite.config.ts`: HTTPS certs optional (B18)
-- [ ] Headless smoke test: random inputs for N rounds, invariants hold, no exceptions
+- [x] Add Vitest; `npm test` script
+- [x] Seedable RNG injected into `TronGameState` / `ItemLauncher` (T4)
+- [x] Remove audio side effect from the simulation (B11)
+- [x] Fix level obstacles lost after round 1 (B1) + test
+- [x] Fix wrap-around false "crossing" kills (B6) + test
+- [x] Level damage consistent between sim, eraser and renderer (B7): one collision grid is the
+      truth, all weapons can damage level pixels (and the renderer now shows it), Eraser and a
+      new round restore the pristine level
+- [x] Replace `Map<string,string>` collision map with a typed-array `PixelGrid` (T3)
+- [x] Tracer paths were never cleared on screen (radius-0 areas were a no-op in the renderer);
+      now sent as line segments (`clearedLines`) instead of one entry per pixel
+- [x] Colour-blindness effect no longer resurrects erased trails / permanently recolours them
+- [x] Explicit `roundStarted` event instead of the countdown heuristic (B16)
+- [x] Guest applies events of every received state (B4)
+- [x] Delete dead code: placeholder game, legacy channel/protocol (T5)
+- [x] `vite.config.ts`: HTTPS certs optional (B18)
+- [x] Headless fuzz test: random inputs on real levels, invariants hold, deterministic per seed
 
 ## Iteration 2 — Local mode
 
@@ -116,7 +122,6 @@ Design: update `design/networking.md` (prediction & reconciliation section)
 - [ ] Client-side prediction + reconciliation for the local player (B5)
 - [ ] Provisional (predicted) local trail rendering
 - [ ] Dead reckoning for remote players (extrapolate by measured one-way delay)
-- [ ] Guest processes events from *every* state, not only the latest (B4)
 - [ ] Per-guest ping echo (B10)
 - [ ] Slim the wire format: static player data out of per-tick state, compact projectiles,
       run-length cleared areas (T7)

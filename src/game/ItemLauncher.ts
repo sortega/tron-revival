@@ -2,7 +2,8 @@
 
 import type { GameItem, ItemCategory, ItemDefinition } from '../types/game';
 import { AUTOMATIC_ITEMS, WEAPON_ITEMS, MAX_ITEMS_ON_FIELD, ITEM_SPAWN_MARGIN } from '../types/game';
-import { PLAY_WIDTH, PLAY_HEIGHT } from './TronPlayer';
+import { PLAY_WIDTH, PLAY_HEIGHT } from './constants';
+import type { Rng } from './rng';
 
 const INITIAL_ITEM_COUNT = 6;
 const MIN_SPAWN_INTERVAL = 200;  // frames
@@ -13,6 +14,8 @@ export class ItemLauncher {
   private nextItemId = 0;
   private spawnTimer = 0;
   private nextSpawnInterval = 0;
+
+  constructor(private readonly rng: Rng = Math.random) {}
 
   // Called at round start - spawns initial batch
   spawnInitialItems(
@@ -55,23 +58,23 @@ export class ItemLauncher {
   private resetSpawnTimer(): void {
     this.spawnTimer = 0;
     this.nextSpawnInterval = MIN_SPAWN_INTERVAL +
-      Math.floor(Math.random() * (MAX_SPAWN_INTERVAL - MIN_SPAWN_INTERVAL));
+      Math.floor(this.rng() * (MAX_SPAWN_INTERVAL - MIN_SPAWN_INTERVAL));
   }
 
   private createItem(
     getPlayerPositions: () => { x: number; y: number }[]
   ): GameItem | null {
     // 40% automatic, 60% weapon
-    const roll = Math.random();
+    const roll = this.rng();
     let category: ItemCategory;
     let itemDef: ItemDefinition | undefined;
 
     if (roll < 0.4) {
       category = 'automatic';
-      itemDef = AUTOMATIC_ITEMS[Math.floor(Math.random() * AUTOMATIC_ITEMS.length)];
+      itemDef = AUTOMATIC_ITEMS[Math.floor(this.rng() * AUTOMATIC_ITEMS.length)];
     } else {
       category = 'weapon';
-      itemDef = WEAPON_ITEMS[Math.floor(Math.random() * WEAPON_ITEMS.length)];
+      itemDef = WEAPON_ITEMS[Math.floor(this.rng() * WEAPON_ITEMS.length)];
     }
 
     if (!itemDef) return null;
@@ -81,7 +84,7 @@ export class ItemLauncher {
     if (!position) return null;
 
     // 10% chance to be a mystery item (shows random_item sprite, triangular collision)
-    const mystery = Math.random() < 0.1;
+    const mystery = this.rng() < 0.1;
 
     return {
       id: this.nextItemId++,
@@ -102,8 +105,8 @@ export class ItemLauncher {
     const maxAttempts = 50;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const x = margin + Math.random() * (PLAY_WIDTH - 2 * margin);
-      const y = margin + Math.random() * (PLAY_HEIGHT - 2 * margin);
+      const x = margin + this.rng() * (PLAY_WIDTH - 2 * margin);
+      const y = margin + this.rng() * (PLAY_HEIGHT - 2 * margin);
 
       let tooClose = false;
       for (const pos of playerPositions) {

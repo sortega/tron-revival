@@ -12,7 +12,7 @@ const screenManager = new ScreenManager(app);
 screenManager.setScreenFactories({
   mainMenu: () => new MainMenu(app, screenManager),
   networkLobby: (options) => new NetworkLobby(app, screenManager, options),
-  placeholderGame: (config, connection) => new TronGame(app, screenManager, config, connection),
+  game: (config, connection) => new TronGame(app, screenManager, config, connection),
 });
 
 // Start the app

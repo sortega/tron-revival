@@ -20,7 +20,7 @@ export class ScreenManager {
   // Screen factories (to avoid circular dependencies)
   private mainMenuFactory: (() => Screen) | null = null;
   private networkLobbyFactory: ((options: LobbyOptions) => Screen) | null = null;
-  private placeholderGameFactory: ((config: GameConfig, connection: GameConnection) => Screen) | null = null;
+  private gameFactory: ((config: GameConfig, connection: GameConnection) => Screen) | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -29,11 +29,11 @@ export class ScreenManager {
   setScreenFactories(factories: {
     mainMenu: () => Screen;
     networkLobby: (options: LobbyOptions) => Screen;
-    placeholderGame: (config: GameConfig, connection: GameConnection) => Screen;
+    game: (config: GameConfig, connection: GameConnection) => Screen;
   }): void {
     this.mainMenuFactory = factories.mainMenu;
     this.networkLobbyFactory = factories.networkLobby;
-    this.placeholderGameFactory = factories.placeholderGame;
+    this.gameFactory = factories.game;
   }
 
   init(): void {
@@ -68,11 +68,11 @@ export class ScreenManager {
   }
 
   showGame(config: GameConfig, connection: GameConnection): void {
-    if (!this.placeholderGameFactory) {
-      console.error('PlaceholderGame factory not set');
+    if (!this.gameFactory) {
+      console.error('Game factory not set');
       return;
     }
-    this.transition(this.placeholderGameFactory(config, connection));
+    this.transition(this.gameFactory(config, connection));
   }
 
   getContainer(): HTMLElement {

@@ -76,51 +76,7 @@ export type HostToGuestMessage =
   | GameStartMessage
   | HostDisconnectedMessage;
 
-// === Game Phase Messages ===
-
-export interface GameInput {
-  left: boolean;
-  right: boolean;
-  up: boolean;
-  down: boolean;
-}
-
-export interface PlayerPosition {
-  slotIndex: SlotIndex;
-  x: number;
-  y: number;
-}
-
-export interface GameStateMessage {
-  type: 'game_state';
-  positions: PlayerPosition[];
-  timestamp: number;
-}
-
-export interface PlayerInputMessage {
-  type: 'player_input';
-  input: GameInput;
-}
-
-// === Tron Game Messages ===
-
-import type { TronGameStateData, TronInput } from '../types/game';
-
-export interface TronStateMessage {
-  type: 'tron_state';
-  state: TronGameStateData;
-  timestamp: number;
-}
-
-export interface TronInputMessage {
-  type: 'tron_input';
-  input: TronInput;
-}
-
-// === Unified Message Types ===
-
 export type LobbyMessage = GuestToHostMessage | HostToGuestMessage;
-export type GameMessage = GameStateMessage | PlayerInputMessage | TronStateMessage | TronInputMessage;
 
 // Type guards
 

@@ -3,10 +3,12 @@
 import type { SlotIndex } from '../types/lobby';
 import type { TronPlayerState, TrailSegment, TronInput, EquippedWeapon, ActiveEffect } from '../types/game';
 
-// Game constants
-export const PLAY_WIDTH = 750;
-export const PLAY_HEIGHT = 600;
-const FIXED_POINT_SCALE = 1000;
+import { PLAY_WIDTH, PLAY_HEIGHT, FIXED_POINT_SCALE } from './constants';
+import type { PixelGrid } from './PixelGrid';
+
+// Re-exported for existing importers
+export { PLAY_WIDTH, PLAY_HEIGHT } from './constants';
+
 const TURN_SPEED = 4;        // Degrees per frame
 const MOVE_SPEED = 1000;     // 1 pixel per frame (in fixed-point)
 
@@ -131,19 +133,18 @@ export class TronPlayer {
     return newSegments;
   }
 
-  // Check collision against occupied pixels (map of pixel coord -> color)
-  // Returns the pixel coordinate that was hit, or null if no collision
-  // For diagonal movement, also checks intermediate pixels to prevent "slipping through"
-  checkCollision(pixelOwners: Map<string, string>): string | null {
+  // Check collision against the collision map.
+  // Returns the pixel that was hit, or null if no collision.
+  // For diagonal movement, also checks the two pixels we "squeeze between" so
+  // that 1px diagonal trails cannot be slipped through.
+  checkCollision(pixels: PixelGrid): { x: number; y: number } | null {
     if (!this.alive) return null;
 
     const currX = this.getScreenX();
     const currY = this.getScreenY();
 
-    // Check current position
-    const currKey = `${currX},${currY}`;
-    if (pixelOwners.has(currKey)) {
-      return currKey;
+    if (pixels.has(currX, currY)) {
+      return { x: currX, y: currY };
     }
 
     // If we haven't moved yet (prevScreenX < 0), only check current position
@@ -152,18 +153,14 @@ export class TronPlayer {
     const dx = currX - this.prevScreenX;
     const dy = currY - this.prevScreenY;
 
-    // For diagonal movement, check the intermediate pixels that we "pass through"
-    // When moving from (x,y) to (x+1,y+1), we pass through (x+1,y) and (x,y+1)
-    if (dx !== 0 && dy !== 0) {
-      // Diagonal move - check both intermediate pixels
-      const interX = `${this.prevScreenX + dx},${this.prevScreenY}`;
-      const interY = `${this.prevScreenX},${this.prevScreenY + dy}`;
-
-      if (pixelOwners.has(interX)) {
-        return interX;
+    // Only a plain one-pixel diagonal step has intermediate pixels
+    // (wrap-arounds and teleports produce larger deltas)
+    if (Math.abs(dx) === 1 && Math.abs(dy) === 1) {
+      if (pixels.has(this.prevScreenX + dx, this.prevScreenY)) {
+        return { x: this.prevScreenX + dx, y: this.prevScreenY };
       }
-      if (pixelOwners.has(interY)) {
-        return interY;
+      if (pixels.has(this.prevScreenX, this.prevScreenY + dy)) {
+        return { x: this.prevScreenX, y: this.prevScreenY + dy };
       }
     }
 
@@ -185,6 +182,8 @@ export class TronPlayer {
     this.equippedWeapon = null;
     this.activeEffects = [];
     this.moveFrameCounter = 0;
+    this.prevScreenX = -1;
+    this.prevScreenY = -1;
   }
 
   // Equip a weapon (replaces current weapon)
