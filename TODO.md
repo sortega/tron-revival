@@ -91,16 +91,19 @@ Goal: the game rules run headless and deterministically, with tests guarding the
 - [x] `vite.config.ts`: HTTPS certs optional (B18)
 - [x] Headless fuzz test: random inputs on real levels, invariants hold, deterministic per seed
 
-## Iteration 2 — Local mode
+## Iteration 2 — Local mode  ✅
 
 Design: `design/local-and-ai.md`
 
-- [ ] Design doc: local play, input sources, session abstraction
-- [ ] `GameSession` abstraction so `TronGame` does not depend on a network connection
-- [ ] Per-player keyboard maps (original bindings adapted to modern keyboards)
-- [ ] Local setup screen: per slot Human (keys) / AI / Off, mode, level
-- [ ] Enable "LOCAL GAME" in the main menu
-- [ ] Fixed-timestep simulation decoupled from rAF (B8)
+- [x] Design doc: local play, input sources, session abstraction, AI
+- [x] `GameSession` abstraction (`HostSession` / `GuestSession`); `TronGame` is now only a view
+- [x] `InputManager` with per-player keyboard schemes (solo / arrows / wasd / ijkl / numpad)
+- [x] Local setup screen (slots, mode, level; remembered in localStorage)
+- [x] "LOCAL GAME" enabled in the main menu
+- [x] Fixed-timestep `Ticker`; network host keeps simulating in a hidden tab via worker timer (B8)
+- [x] Escape peer-supplied strings in lobby/menu (B9); errors shown in the menu instead of `alert()`
+- [x] Touch layout only when the primary pointer is coarse (B17); no history pollution (B14)
+- [x] Stuck keys after window blur
 
 ## Iteration 3 — AI players
 
@@ -140,7 +143,6 @@ Design: update `design/networking.md` (connectivity section)
 - [ ] Handshake instead of the 500 ms timer (B13); reject mid-game joins (B15)
 - [ ] Connection diagnostics in the lobby (signaling state, ICE candidate type: direct/relay, RTT)
 - [ ] `?relay=1` debug switch forcing TURN-only, so the cross-network path can be tested on one machine
-- [ ] Escape all peer-supplied strings (B9)
 
 ## Iteration 6 — Tooling & dependencies
 
@@ -157,4 +159,3 @@ Design: update `design/networking.md` (connectivity section)
 - [ ] Host migration
 - [ ] Gamepad support
 - [ ] Spectator-friendly late join (full trail snapshot)
-- [ ] Touch-laptop detection (B17), history handling (B14)

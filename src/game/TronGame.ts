@@ -1,73 +1,76 @@
-// TronGame - Main game screen integrating all components
+// TronGame - Game screen: layout, input, rendering, sound.
+// All game logic lives behind the GameSession it is given.
 
 import type { Screen, ScreenManager } from '../screens/ScreenManager';
-import type { GameConnection } from '../network/GameConnection';
-import type { GameConfig, TronInput, TronGameStateData, SoundEvent, RoundPhase } from '../types/game';
+import type { GameConfig, TronGameStateData, SoundEvent, RoundPhase } from '../types/game';
 import { LEVELS } from '../types/game';
-import type { SlotIndex } from '../types/lobby';
-import { TronGameState } from './TronGameState';
+import { TICK_RATE } from './constants';
 import { TronRenderer } from './TronRenderer';
-import { TronInputHandler, isTouchDevice, isIOS } from './TronInput';
+import { InputManager, CONTROL_SCHEMES, isTouchDevice, isIOS } from './input/InputManager';
+import type { InputBinding } from './input/InputManager';
 import { getSoundManager, type SoundName } from './SoundManager';
-import { serializeState } from '../network/serialization';
+import { Ticker } from './Ticker';
+import type { GameSession } from './session/GameSession';
+import { escapeHtml } from '../util/html';
 
 export class TronGame implements Screen {
   private container: HTMLElement;
   private screenManager: ScreenManager;
   private config: GameConfig;
-  private connection: GameConnection;
+  private session: GameSession;
 
   private renderer: TronRenderer | null = null;
-  private inputHandler: TronInputHandler | null = null;
-  private gameState: TronGameState | null = null;
-  private animationId: number | null = null;
+  private input: InputManager | null = null;
+  private ticker: Ticker | null = null;
 
-  // Host stores inputs from all players
-  private playerInputs: Map<SlotIndex, TronInput> = new Map();
-
-  // Guest receives state from host
-  private receivedState: TronGameStateData | null = null;
-
-  // Last time we processed a frame (for consistent timing)
-  private lastFrameTime: number = 0;
-  private readonly TARGET_FRAME_TIME = 1000 / 70; // 70fps
-
-  // FPS tracking for debug display (circular buffer)
-  private frameTimes: number[] = new Array(70).fill(0);
-  private frameTimeIndex: number = 0;
-  private frameCount: number = 0;
+  // Steps-per-second tracking for the debug display
+  private stepTimes: number[] = [];
+  private currentFps: number = TICK_RATE;
   private lastFpsUpdate: number = 0;
-  private currentFps: number = 70;
   private showFps: boolean = localStorage.getItem('showFps') === 'true';
   private fpsKeyHandler: ((e: KeyboardEvent) => void) | null = null;
-
-  // Network stats tracking
-  private bytesSent: { time: number; bytes: number }[] = [];
-  private bytesReceived: { time: number; bytes: number }[] = [];
-  private currentLagMs: number = 0;
-  private lagSamples: number[] = [];  // Rolling window of lag samples
-  private latestPingTimestamp: number = 0;  // Host stores latest guest ping for echo
 
   // Double-tap detection for mobile FPS toggle
   private lastTapTime: number = 0;
 
   // Track loaded level to detect changes
   private loadedLevelIndex: number = -1;
+  private levelLoading: boolean = false;
 
   // Track previous round phase to detect transitions and stop sound loops
   private previousPhase: RoundPhase | null = null;
-  private levelLoading: boolean = false;
 
   constructor(
     container: HTMLElement,
     screenManager: ScreenManager,
     config: GameConfig,
-    connection: GameConnection
+    session: GameSession
   ) {
     this.container = container;
     this.screenManager = screenManager;
     this.config = config;
-    this.connection = connection;
+    this.session = session;
+  }
+
+  private localBindings(): InputBinding[] {
+    const bindings: InputBinding[] = [];
+    for (const player of this.config.players) {
+      if (player.control.type === 'local') {
+        bindings.push({ slot: player.slotIndex, scheme: player.control.scheme });
+      }
+    }
+    return bindings;
+  }
+
+  // One line per local human describing their keys
+  private controlsHint(): string {
+    const humans = this.config.players.filter(p => p.control.type === 'local');
+    if (humans.length === 0) return '<div>Spectating</div>';
+    return humans.map(p => {
+      const scheme = p.control.type === 'local' ? CONTROL_SCHEMES[p.control.scheme] : null;
+      const name = humans.length > 1 ? `<span style="color: ${p.color};">${escapeHtml(p.nickname)}</span>: ` : '';
+      return `<div>${name}${scheme?.label ?? ''}</div>`;
+    }).join('');
   }
 
   render(): void {
@@ -79,33 +82,24 @@ export class TronGame implements Screen {
       this.renderDesktopLayout();
     }
 
-    // Initialize input handler
-    this.inputHandler = new TronInputHandler('arrows');
+    const bindings = this.localBindings();
+    this.input = new InputManager(bindings);
 
-    // Setup touch controls if on mobile
-    if (isTouch) {
+    // Touch controls drive the first local human
+    if (isTouch && bindings[0]) {
       const joystickZone = document.getElementById('joystickZone');
       const actionButton = document.getElementById('actionButton');
       if (joystickZone && actionButton) {
-        this.inputHandler.initTouchControls(joystickZone, actionButton);
+        this.input.initTouchControls(bindings[0].slot, joystickZone, actionButton);
       }
     }
 
-    // Setup network handlers
-    this.setupNetworkHandlers();
+    this.session.onFrame = (frame) => this.applyFrameEvents(frame);
+    this.session.onEnded = (reason) => {
+      this.screenManager.showMainMenu(reason);
+    };
 
-    // Initialize game state
-    if (this.config.isHost) {
-      // Host creates authoritative game state
-      this.gameState = new TronGameState(this.config.players, this.config.gameMode, this.config.levelMode);
-    } else {
-      // Guest creates local state for rendering (updated from network)
-      this.gameState = new TronGameState(this.config.players, this.config.gameMode, this.config.levelMode);
-    }
-
-    // Event listeners
     document.getElementById('backBtn')?.addEventListener('click', () => {
-      this.cleanup();
       this.screenManager.showMainMenu();
     });
 
@@ -178,7 +172,7 @@ export class TronGame implements Screen {
 
     // FPS toggle with 'f' key
     this.fpsKeyHandler = (e: KeyboardEvent) => {
-      if (e.key === 'f' || e.key === 'F') {
+      if (e.code === 'KeyF') {
         this.showFps = !this.showFps;
         localStorage.setItem('showFps', this.showFps ? 'true' : 'false');
       }
@@ -191,7 +185,6 @@ export class TronGame implements Screen {
       gameCanvas?.addEventListener('touchend', (e) => {
         const now = Date.now();
         if (now - this.lastTapTime < 300) {
-          // Double tap detected
           this.showFps = !this.showFps;
           localStorage.setItem('showFps', this.showFps ? 'true' : 'false');
           e.preventDefault();
@@ -200,9 +193,19 @@ export class TronGame implements Screen {
       });
     }
 
-    // Start game loop
-    this.lastFrameTime = performance.now();
-    this.startGameLoop();
+    // Debug / end-to-end test hook
+    (window as unknown as { __teratron?: unknown }).__teratron = {
+      config: this.config,
+      view: () => this.session.getViewState(),
+      stats: () => this.session.getNetworkStats(),
+    };
+
+    this.ticker = new Ticker(
+      () => this.step(),
+      () => this.draw(),
+      { runInBackground: this.session.runsInBackground }
+    );
+    this.ticker.start();
   }
 
   private renderDesktopLayout(): void {
@@ -254,7 +257,7 @@ export class TronGame implements Screen {
           margin-top: 1rem;
           text-align: center;
         ">
-          <div>LEFT/RIGHT: Turn | SPACE: Ready/Fire</div>
+          ${this.controlsHint()}
         </div>
       </div>
     `;
@@ -526,220 +529,38 @@ export class TronGame implements Screen {
     this.renderer = new TronRenderer(canvasContainer, this.config.players, true);
   }
 
-  private setupNetworkHandlers(): void {
-    if (this.config.isHost) {
-      // Host receives input from guests
-      this.connection.setCallbacks({
-        onPlayerInput: (slotIndex, input) => {
-          const tronInput = input;
-          this.playerInputs.set(slotIndex, tronInput);
-          // Store latest ping timestamp for RTT echo
-          if (tronInput.pingTimestamp) {
-            this.latestPingTimestamp = tronInput.pingTimestamp;
-          }
-        },
-      });
-    } else {
-      // Guest receives state from host
-      this.connection.setCallbacks({
-        onTronState: (state) => {
-          this.receivedState = state;
+  // One simulation tick
+  private step(): void {
+    if (!this.input) return;
+    this.session.step(this.input.getInputs());
 
-          // Track network stats for debug display
-          const now = performance.now();
-
-          // Estimate bytes received for bitrate
-          const jsonSize = JSON.stringify(state).length;
-          this.bytesReceived.push({ time: now, bytes: jsonSize });
-          // Keep only last 2 seconds of data
-          const cutoff = now - 2000;
-          this.bytesReceived = this.bytesReceived.filter(s => s.time >= cutoff);
-
-          // Calculate lag using RTT (round-trip time) - immune to clock skew
-          if (state.pongTimestamp) {
-            // RTT = now - when we sent the ping; one-way lag ≈ RTT / 2
-            const rtt = Date.now() - state.pongTimestamp;
-            const lagMs = Math.max(0, Math.round(rtt / 2));
-            // Keep rolling window of 20 samples
-            this.lagSamples.push(lagMs);
-            if (this.lagSamples.length > 20) {
-              this.lagSamples.shift();
-            }
-            // Use median for stability (less affected by outliers)
-            const sorted = [...this.lagSamples].sort((a, b) => a - b);
-            this.currentLagMs = sorted[Math.floor(sorted.length / 2)] ?? 0;
-          }
-
-          // Apply one-shot events of every state as it arrives; several states can
-          // arrive between two rendered frames and none of their events may be lost
-          this.applyFrameEvents(state);
-        },
-        onHostDisconnected: () => {
-          getSoundManager().stopAllLoops();  // Stop any lingering sound loops
-          alert('Host disconnected');
-          this.cleanup();
-          this.screenManager.showMainMenu();
-        },
-      });
-    }
-  }
-
-  private startGameLoop(): void {
-    const loop = (currentTime: number): void => {
-      // Calculate delta time
-      let deltaTime = currentTime - this.lastFrameTime;
-
-      // Process multiple frames if needed (decouples game logic from display refresh)
-      // Cap at 5 frames per RAF to prevent spiral of death when tab is backgrounded
-      let framesProcessed = 0;
-      const maxFramesPerRaf = 5;
-
-      while (deltaTime >= this.TARGET_FRAME_TIME && framesProcessed < maxFramesPerRaf) {
-        this.lastFrameTime += this.TARGET_FRAME_TIME;
-        deltaTime -= this.TARGET_FRAME_TIME;
-        this.processFrame();
-        framesProcessed++;
-      }
-
-      // If we hit the cap, reset timing to prevent accumulating debt
-      if (framesProcessed >= maxFramesPerRaf) {
-        this.lastFrameTime = currentTime;
-      }
-
-      this.animationId = requestAnimationFrame(loop);
-    };
-
-    this.animationId = requestAnimationFrame(loop);
-  }
-
-  private processFrame(): void {
-    if (!this.inputHandler || !this.renderer || !this.gameState) return;
-
-    // Track FPS using circular buffer (O(1) per frame)
+    // Track steps per second (should stay at TICK_RATE)
     const now = performance.now();
-    this.frameTimes[this.frameTimeIndex] = now;
-    this.frameTimeIndex = (this.frameTimeIndex + 1) % 70;
-    if (this.frameCount < 70) this.frameCount++;
-
-    // Update FPS display every 500ms
-    if (now - this.lastFpsUpdate > 500 && this.frameCount >= 2) {
-      // Find oldest and newest times in circular buffer
-      const oldestIndex = this.frameCount < 70 ? 0 : this.frameTimeIndex;
-      const newestIndex = (this.frameTimeIndex + 69) % 70;
-      const elapsed = this.frameTimes[newestIndex]! - this.frameTimes[oldestIndex]!;
-      if (elapsed > 0) {
-        this.currentFps = Math.round((this.frameCount - 1) * 1000 / elapsed);
-      }
+    this.stepTimes.push(now);
+    while (this.stepTimes.length > 0 && this.stepTimes[0]! < now - 1000) this.stepTimes.shift();
+    if (now - this.lastFpsUpdate > 500) {
+      this.currentFps = this.stepTimes.length;
       this.lastFpsUpdate = now;
     }
-
-    // Check if level needs to be loaded (for both host and guest)
-    const currentLevelIndex = this.gameState.currentLevelIndex;
-    if (currentLevelIndex !== this.loadedLevelIndex && !this.levelLoading) {
-      this.loadLevel(currentLevelIndex);
-    }
-
-    // Get local input
-    const myInput = this.inputHandler.getInput();
-    const mySlot = this.connection.getMySlotIndex();
-
-    if (this.config.isHost) {
-      // Host: Process all inputs and update state
-
-      // Store local player's input
-      if (mySlot !== null) {
-        this.playerInputs.set(mySlot, myInput);
-      }
-
-      // Tick game state with all inputs
-      this.gameState.tick(this.playerInputs);
-
-      // Get serialized state
-      const stateData = this.gameState.serialize();
-
-      this.applyFrameEvents(stateData);
-
-      // Broadcast state to guests
-      this.broadcastState(stateData);
-
-      // Render (host sends stats for display)
-      const networkStats = this.showFps ? this.getNetworkStats() : undefined;
-      this.renderer.render(stateData.round, stateData.match, this.showFps ? this.currentFps : undefined, networkStats);
-    } else {
-      // Guest: Send input to host and render received state
-
-      // Send input to host with ping timestamp for RTT measurement
-      const inputWithPing: TronInput = { ...myInput, pingTimestamp: Date.now() };
-      this.connection.sendInput(inputWithPing);
-
-      // If we have received state, update and render
-      if (this.receivedState) {
-        // Update local game state from network
-        this.gameState.updateFromState(this.receivedState);
-
-        // Render (guest receives stats for display)
-        const networkStats = this.showFps ? this.getNetworkStats() : undefined;
-        this.renderer.render(this.receivedState.round, this.receivedState.match, this.showFps ? this.currentFps : undefined, networkStats);
-      } else {
-        // Render initial state while waiting for first update
-        const stateData = this.gameState.serialize();
-        this.renderer.render(stateData.round, stateData.match, this.showFps ? this.currentFps : undefined);
-      }
-    }
-
   }
 
-  private getNetworkStats(): { lagMs: number; bytesIn: number; bytesOut: number } {
-    const now = performance.now();
-    const windowMs = 2000;  // 2 second window
-
-    // Calculate bytes per second for outgoing (host)
-    let bytesOut = 0;
-    const sentCutoff = now - windowMs;
-    for (const sample of this.bytesSent) {
-      if (sample.time >= sentCutoff) {
-        bytesOut += sample.bytes;
-      }
-    }
-    bytesOut = Math.round((bytesOut * 1000) / windowMs);  // Convert to bytes/sec
-
-    // Calculate bytes per second for incoming (guest)
-    let bytesIn = 0;
-    const recvCutoff = now - windowMs;
-    for (const sample of this.bytesReceived) {
-      if (sample.time >= recvCutoff) {
-        bytesIn += sample.bytes;
-      }
-    }
-    bytesIn = Math.round((bytesIn * 1000) / windowMs);  // Convert to bytes/sec
-
-    return {
-      lagMs: this.currentLagMs,
-      bytesIn,
-      bytesOut,
-    };
-  }
-
-  private broadcastState(state: TronGameStateData): void {
-    // Add timestamp for lag estimation (fallback, affected by clock skew)
-    state.sentAt = Date.now();
-    // Echo guest's ping timestamp for RTT calculation
-    if (this.latestPingTimestamp) {
-      state.pongTimestamp = this.latestPingTimestamp;
+  // One display frame
+  private draw(): void {
+    if (!this.renderer) return;
+    const view = this.session.getViewState();
+    if (!view) {
+      this.renderer.renderMessage('Waiting for host...');
+      return;
     }
 
-    // Serialize to MessagePack binary format
-    const packed = serializeState(state);
+    // Load the level image when the level changes
+    const levelIndex = view.match.currentLevelIndex;
+    if (levelIndex !== this.loadedLevelIndex && !this.levelLoading) {
+      this.loadLevel(levelIndex);
+    }
 
-    // Track actual binary size for bitrate display
-    const now = performance.now();
-    this.bytesSent.push({ time: now, bytes: packed.length });
-    // Keep only last 2 seconds of data
-    const cutoff = now - 2000;
-    this.bytesSent = this.bytesSent.filter(s => s.time >= cutoff);
-
-    // Broadcast pre-serialized binary state to all guests
-    this.connection.broadcastBinaryState(packed);
+    const stats = this.showFps ? this.session.getNetworkStats() ?? undefined : undefined;
+    this.renderer.render(view.round, view.match, this.showFps ? this.currentFps : undefined, stats);
   }
 
   // Apply the one-shot events carried by a simulation frame (trail growth, cleared
@@ -810,7 +631,7 @@ export class TronGame implements Screen {
   }
 
   private loadLevel(levelIndex: number): void {
-    if (!this.renderer || !this.gameState) return;
+    if (!this.renderer) return;
 
     const level = LEVELS[levelIndex];
     if (!level) return;
@@ -818,10 +639,7 @@ export class TronGame implements Screen {
     this.levelLoading = true;
 
     this.renderer.loadLevel(level).then((obstacles) => {
-      // Only host adds obstacles to game state (guests just render the background)
-      if (this.config.isHost && this.gameState) {
-        this.gameState.setLevelObstacles(obstacles);
-      }
+      this.session.setLevelObstacles(levelIndex, obstacles);
       this.loadedLevelIndex = levelIndex;
       this.levelLoading = false;
     }).catch((error) => {
@@ -831,30 +649,24 @@ export class TronGame implements Screen {
   }
 
   cleanup(): void {
-    // Stop all sound loops
     getSoundManager().stopAllLoops();
 
-    // Stop game loop
-    if (this.animationId !== null) {
-      cancelAnimationFrame(this.animationId);
-      this.animationId = null;
-    }
+    this.ticker?.stop();
+    this.ticker = null;
 
-    // Cleanup FPS key handler
     if (this.fpsKeyHandler) {
       document.removeEventListener('keydown', this.fpsKeyHandler);
       this.fpsKeyHandler = null;
     }
 
-    // Cleanup input handler
-    this.inputHandler?.cleanup();
-    this.inputHandler = null;
+    this.input?.cleanup();
+    this.input = null;
 
-    // Cleanup renderer
     this.renderer?.destroy();
     this.renderer = null;
 
-    // Disconnect
-    this.connection.disconnect();
+    this.session.onFrame = null;
+    this.session.onEnded = null;
+    this.session.destroy();
   }
 }

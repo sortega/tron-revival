@@ -5,7 +5,11 @@ import { LobbyConnection } from '../network/LobbyConnection';
 import { GameConnection } from '../network/GameConnection';
 import type { LobbyState, SlotIndex, GameMode } from '../types/lobby';
 import { getSlotColor, canStartGame, getFilledSlotCount, findFirstOpenSlot } from '../types/lobby';
-import type { GameConfig, GamePlayer, Spectator } from '../types/game';
+import type { GameConfig, GamePlayer } from '../types/game';
+import type { GameSession } from '../game/session/GameSession';
+import { HostSession } from '../game/session/HostSession';
+import { GuestSession } from '../game/session/GuestSession';
+import { escapeHtml } from '../util/html';
 import { LEVELS } from '../types/game';
 import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
 
@@ -201,19 +205,19 @@ export class NetworkLobby implements Screen {
         console.log('[NetworkLobby] Joined as slot', slotIndex);
       },
       onJoinRejected: (reason) => {
-        alert(`Could not join: ${reason}`);
-        this.screenManager.showMainMenu();
+        this.connection.disconnect();
+        this.screenManager.showMainMenu(`Could not join: ${reason}`);
       },
       onGameStart: (_countdown) => {
         // Transition to game
         if (this.lobbyState) {
-          const { gameConfig, gameConnection } = this.createGameSession();
-          this.screenManager.showGame(gameConfig, gameConnection);
+          const { gameConfig, session } = this.createGameSession();
+          this.screenManager.showGame(gameConfig, session);
         }
       },
       onHostDisconnected: () => {
-        alert('Host disconnected');
-        this.screenManager.showMainMenu();
+        this.connection.disconnect();
+        this.screenManager.showMainMenu('Host disconnected');
       },
       onError: (error) => {
         console.error('[NetworkLobby] Error:', error);
@@ -236,7 +240,7 @@ export class NetworkLobby implements Screen {
         if (this.lobbyState === null) {
           console.log('[NetworkLobby] Connection timeout - no lobby data received');
           this.connection.disconnect();
-          this.screenManager.showMainMenu();
+          this.screenManager.showMainMenu('Could not reach the room. Check the code, or the host may be behind a restrictive network.');
         }
       }, 20000);
     }
@@ -282,14 +286,14 @@ export class NetworkLobby implements Screen {
         <div style="margin-bottom: 1rem;">
           <label style="color: #888; display: block; margin-bottom: 0.5rem;">Your Nickname:</label>
           <div style="display: flex; gap: 0.5rem;">
-            <input id="nicknameInput" type="text" value="${this.myNickname}" disabled style="flex: 1; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333; box-sizing: border-box;" />
+            <input id="nicknameInput" type="text" value="${escapeHtml(this.myNickname)}" disabled style="flex: 1; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333; box-sizing: border-box;" />
             <button disabled style="padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333; font-size: 1rem;">🎲</button>
           </div>
         </div>
 
         <div style="margin-bottom: 1rem;">
           <label style="color: #888; display: block; margin-bottom: 0.5rem;">Room Code:</label>
-          <div style="background: #000; padding: 0.5rem; border: 1px solid #333; color: #0f0; font-family: monospace; text-align: center; letter-spacing: 0.1em;">${roomId}</div>
+          <div style="background: #000; padding: 0.5rem; border: 1px solid #333; color: #0f0; font-family: monospace; text-align: center; letter-spacing: 0.1em;">${escapeHtml(roomId)}</div>
           <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
             <button id="copyCodeBtn" style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #002; color: #08f; border: 1px solid #08f;">📋 CODE</button>
             <button id="copyLinkBtn" style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #002; color: #08f; border: 1px solid #08f;">🔗 LINK</button>
@@ -361,7 +365,7 @@ export class NetworkLobby implements Screen {
         <div style="margin-bottom: 1rem;">
           <label style="color: #888; display: block; margin-bottom: 0.5rem;">Your Nickname:</label>
           <div style="display: flex; gap: 0.5rem;">
-            <input id="nicknameInput" type="text" value="${this.myNickname}" style="
+            <input id="nicknameInput" type="text" value="${escapeHtml(this.myNickname)}" style="
               flex: 1;
               padding: 0.5rem;
               font-family: monospace;
@@ -393,7 +397,7 @@ export class NetworkLobby implements Screen {
             word-break: break-all;
             text-align: center;
             letter-spacing: 0.1em;
-          ">${roomId}</div>
+          ">${escapeHtml(roomId)}</div>
           <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
             <button id="copyCodeBtn" style="
               flex: 1;
@@ -552,7 +556,7 @@ export class NetworkLobby implements Screen {
         <div style="margin-bottom: 1rem;">
           <label style="color: #888; display: block; margin-bottom: 0.5rem;">Your Nickname:</label>
           <div style="display: flex; gap: 0.5rem;">
-            <input id="nicknameInput" type="text" value="${this.myNickname}" style="
+            <input id="nicknameInput" type="text" value="${escapeHtml(this.myNickname)}" style="
               flex: 1;
               padding: 0.5rem;
               font-family: monospace;
@@ -584,7 +588,7 @@ export class NetworkLobby implements Screen {
             word-break: break-all;
             text-align: center;
             letter-spacing: 0.1em;
-          ">${roomId}</div>
+          ">${escapeHtml(roomId)}</div>
           <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
             <button id="copyCodeBtn" style="
               flex: 1;
@@ -754,7 +758,7 @@ export class NetworkLobby implements Screen {
           border-radius: 4px;
         ">
           <div style="flex: 1;">
-            <div style="color: #888;">${peer.nickname}${isPeerHost ? ' 🛠️' : ''}</div>
+            <div style="color: #888;">${escapeHtml(peer.nickname)}${isPeerHost ? ' 🛠️' : ''}</div>
           </div>
         </div>
       `;
@@ -799,7 +803,7 @@ export class NetworkLobby implements Screen {
     let actionBtn = '';
 
     if (isOccupied) {
-      statusText = slot.nickname || 'Player';
+      statusText = escapeHtml(slot.nickname || 'Player');
       if (isMe) statusText += ' (You)';
       if (slot.isHost) statusText += ' 🛠️';
       // Show leave button if this is my slot
@@ -883,8 +887,8 @@ export class NetworkLobby implements Screen {
       const color = msg.senderSlotIndex !== null ? getSlotColor(mode, msg.senderSlotIndex) : '#fff';
       return `
         <div style="margin-bottom: 0.5rem;">
-          <span style="color: ${color};">${msg.senderNickname}:</span>
-          <span style="color: #fff;"> ${msg.text}</span>
+          <span style="color: ${color};">${escapeHtml(msg.senderNickname)}:</span>
+          <span style="color: #fff;"> ${escapeHtml(msg.text)}</span>
         </div>
       `;
     }).join('');
@@ -948,9 +952,9 @@ export class NetworkLobby implements Screen {
     });
   }
 
-  private createGameSession(): { gameConfig: GameConfig; gameConnection: GameConnection } {
+  private createGameSession(): { gameConfig: GameConfig; session: GameSession } {
     const lobbyState = this.lobbyState!;
-    const myPeerId = this.connection.getMyPeerId();
+    const mySlot = this.connection.getMySlotIndex();
 
     // Build players from filled slots
     const players: GamePlayer[] = lobbyState.slots
@@ -959,13 +963,10 @@ export class NetworkLobby implements Screen {
         slotIndex: slot.slotIndex,
         nickname: slot.nickname,
         color: getSlotColor(lobbyState.gameMode, slot.slotIndex),
-        isLocal: slot.peerId === myPeerId,
+        control: slot.slotIndex === mySlot
+          ? { type: 'local' as const, scheme: 'solo' as const }
+          : { type: 'remote' as const },
       }));
-
-    // Build spectators from unassigned peers
-    const spectators: Spectator[] = lobbyState.spectators.map(peer => ({
-      nickname: peer.nickname,
-    }));
 
     // Build peer-to-slot mapping for GameConnection
     const slotByPeerId = new Map<string, SlotIndex>();
@@ -977,19 +978,16 @@ export class NetworkLobby implements Screen {
 
     const gameConfig: GameConfig = {
       players,
-      spectators,
-      isHost: this.connection.isHostMode(),
       gameMode: lobbyState.gameMode,
       levelMode: lobbyState.levelMode,
     };
 
-    const gameConnection = new GameConnection(
-      this.connection,
-      slotByPeerId,
-      this.connection.getMySlotIndex()
-    );
+    const transport = new GameConnection(this.connection, slotByPeerId);
+    const session = this.connection.isHostMode()
+      ? new HostSession(gameConfig, { transport })
+      : new GuestSession(transport, mySlot);
 
-    return { gameConfig, gameConnection };
+    return { gameConfig, session };
   }
 
   private autoJoinFirstSlot(): void {

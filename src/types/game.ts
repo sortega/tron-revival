@@ -2,21 +2,24 @@
 
 import type { SlotIndex, GameMode, LevelMode } from './lobby';
 
+export type ControlScheme = 'solo' | 'arrows' | 'wasd' | 'ijkl' | 'numpad';
+export type BotDifficulty = 'easy' | 'normal' | 'hard';
+
+// How a player is controlled, from this machine's point of view
+export type PlayerControl =
+  | { type: 'local'; scheme: ControlScheme }   // human on this machine
+  | { type: 'remote' }                          // input arrives over the network
+  | { type: 'ai'; difficulty: BotDifficulty };  // bot run by the authoritative session
+
 export interface GamePlayer {
   slotIndex: SlotIndex;
   nickname: string;
   color: string;
-  isLocal: boolean;  // This player is controlled locally
-}
-
-export interface Spectator {
-  nickname: string;
+  control: PlayerControl;
 }
 
 export interface GameConfig {
   players: GamePlayer[];
-  spectators: Spectator[];
-  isHost: boolean;
   gameMode: GameMode;
   levelMode: LevelMode;
 }
@@ -143,17 +146,21 @@ export interface TronGameStateData {
   colorBlindnessFrames?: number;
   // White flash effect remaining frames (bomb-on-bomb collision)
   whiteFlashFrames?: number;
-  // Timestamp when state was sent (for lag estimation)
-  sentAt?: number;
-  // Echo of guest's pingTimestamp for RTT measurement
-  pongTimestamp?: number;
+  // Per-slot echo of the newest input timestamp (`TronInputMessage.t`) the host has
+  // consumed, corrected for the time it waited on the host. RTT = now - pong.
+  pongs?: Partial<Record<SlotIndex, number>>;
 }
 
 // Input includes action key for ready signal
 export interface TronInput {
   steer: number;    // Proportional steering: -1 (full left) to 1 (full right), 0 = straight
   action: boolean;  // Ready signal / special action
-  pingTimestamp?: number;  // For RTT measurement (guest's Date.now() when sending)
+}
+
+// Input as sent by a guest to the host
+export interface TronInputMessage extends TronInput {
+  seq: number;  // Sequence number, one per simulated guest tick
+  t: number;    // Guest clock (ms) when sent; echoed back for RTT measurement
 }
 
 // === Teleport Portal Types ===

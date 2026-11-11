@@ -1,6 +1,7 @@
 // Main menu screen
 
 import type { Screen, ScreenManager } from './ScreenManager';
+import { escapeHtml } from '../util/html';
 
 export class MainMenu implements Screen {
   private container: HTMLElement;
@@ -8,9 +9,12 @@ export class MainMenu implements Screen {
   private showingSubmenu: boolean = false;
   private showingJoinInput: boolean = false;
 
-  constructor(container: HTMLElement, screenManager: ScreenManager) {
+  private message: string | undefined;
+
+  constructor(container: HTMLElement, screenManager: ScreenManager, message?: string) {
     this.container = container;
     this.screenManager = screenManager;
+    this.message = message;
   }
 
   render(): void {
@@ -38,27 +42,26 @@ export class MainMenu implements Screen {
           gap: 1rem;
           align-items: center;
         ">
+          ${this.message ? `<div style="
+            padding: 0.75rem 1.5rem;
+            background: #210;
+            color: #fa0;
+            border: 1px solid #a60;
+            border-radius: 4px;
+            font-family: monospace;
+          ">${escapeHtml(this.message)}</div>` : ''}
+
           <button id="localGameBtn" style="
             padding: 1rem 3rem;
             font-size: 1.2rem;
             font-family: monospace;
-            background: #333;
-            color: #666;
-            border: 2px solid #444;
-            cursor: not-allowed;
-            position: relative;
-          " disabled>
+            background: #111;
+            color: #0ff;
+            border: 2px solid #0ff;
+            cursor: pointer;
+            transition: all 0.2s;
+          ">
             LOCAL GAME
-            <span style="
-              position: absolute;
-              top: -10px;
-              right: -10px;
-              background: #444;
-              color: #888;
-              font-size: 0.6rem;
-              padding: 2px 6px;
-              border-radius: 3px;
-            ">COMING SOON</span>
           </button>
 
           <button id="networkGameBtn" style="
@@ -168,6 +171,10 @@ export class MainMenu implements Screen {
     const joinCancelBtn = document.getElementById('joinCancelBtn');
     const joinError = document.getElementById('joinError');
 
+    document.getElementById('localGameBtn')?.addEventListener('click', () => {
+      this.screenManager.showLocalSetup();
+    });
+
     // Toggle submenu
     networkGameBtn?.addEventListener('click', () => {
       if (this.showingJoinInput) {
@@ -223,14 +230,16 @@ export class MainMenu implements Screen {
     });
 
     // Hover effects
-    networkGameBtn?.addEventListener('mouseenter', () => {
-      networkGameBtn.style.background = '#022';
-      networkGameBtn.style.boxShadow = '0 0 10px #0ff';
-    });
-    networkGameBtn?.addEventListener('mouseleave', () => {
-      networkGameBtn.style.background = '#111';
-      networkGameBtn.style.boxShadow = 'none';
-    });
+    for (const btn of [networkGameBtn, document.getElementById('localGameBtn')]) {
+      btn?.addEventListener('mouseenter', () => {
+        btn.style.background = '#022';
+        btn.style.boxShadow = '0 0 10px #0ff';
+      });
+      btn?.addEventListener('mouseleave', () => {
+        btn.style.background = '#111';
+        btn.style.boxShadow = 'none';
+      });
+    }
   }
 
   private handleJoin(input: HTMLInputElement | null, errorEl: HTMLElement | null): void {

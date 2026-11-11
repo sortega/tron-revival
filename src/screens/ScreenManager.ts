@@ -1,7 +1,7 @@
 // Screen manager for navigation between screens
 
 import type { GameConfig } from '../types/game';
-import type { GameConnection } from '../network/GameConnection';
+import type { GameSession } from '../game/session/GameSession';
 
 export interface Screen {
   render(): void;
@@ -18,20 +18,23 @@ export class ScreenManager {
   private currentScreen: Screen | null = null;
 
   // Screen factories (to avoid circular dependencies)
-  private mainMenuFactory: (() => Screen) | null = null;
+  private mainMenuFactory: ((message?: string) => Screen) | null = null;
+  private localSetupFactory: (() => Screen) | null = null;
   private networkLobbyFactory: ((options: LobbyOptions) => Screen) | null = null;
-  private gameFactory: ((config: GameConfig, connection: GameConnection) => Screen) | null = null;
+  private gameFactory: ((config: GameConfig, session: GameSession) => Screen) | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
   }
 
   setScreenFactories(factories: {
-    mainMenu: () => Screen;
+    mainMenu: (message?: string) => Screen;
+    localSetup: () => Screen;
     networkLobby: (options: LobbyOptions) => Screen;
-    game: (config: GameConfig, connection: GameConnection) => Screen;
+    game: (config: GameConfig, session: GameSession) => Screen;
   }): void {
     this.mainMenuFactory = factories.mainMenu;
+    this.localSetupFactory = factories.localSetup;
     this.networkLobbyFactory = factories.networkLobby;
     this.gameFactory = factories.game;
   }
@@ -49,14 +52,23 @@ export class ScreenManager {
     }
   }
 
-  showMainMenu(): void {
+  /** Show the main menu, optionally with a notice (e.g. why a game ended). */
+  showMainMenu(message?: string): void {
     if (!this.mainMenuFactory) {
       console.error('MainMenu factory not set');
       return;
     }
-    this.transition(this.mainMenuFactory());
-    // Clear URL params
-    window.history.pushState({}, '', window.location.pathname);
+    this.transition(this.mainMenuFactory(message));
+    // Clear URL params without adding a history entry
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+
+  showLocalSetup(): void {
+    if (!this.localSetupFactory) {
+      console.error('LocalSetup factory not set');
+      return;
+    }
+    this.transition(this.localSetupFactory());
   }
 
   showNetworkLobby(options: LobbyOptions): void {
@@ -67,12 +79,12 @@ export class ScreenManager {
     this.transition(this.networkLobbyFactory(options));
   }
 
-  showGame(config: GameConfig, connection: GameConnection): void {
+  showGame(config: GameConfig, session: GameSession): void {
     if (!this.gameFactory) {
       console.error('Game factory not set');
       return;
     }
-    this.transition(this.gameFactory(config, connection));
+    this.transition(this.gameFactory(config, session));
   }
 
   getContainer(): HTMLElement {

@@ -1,6 +1,7 @@
 import { ScreenManager } from './screens/ScreenManager';
 import { MainMenu } from './screens/MainMenu';
 import { NetworkLobby } from './screens/NetworkLobby';
+import { LocalSetup } from './screens/LocalSetup';
 import { TronGame } from './game/TronGame';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -10,9 +11,10 @@ const screenManager = new ScreenManager(app);
 
 // Set up screen factories
 screenManager.setScreenFactories({
-  mainMenu: () => new MainMenu(app, screenManager),
+  mainMenu: (message) => new MainMenu(app, screenManager, message),
+  localSetup: () => new LocalSetup(app, screenManager),
   networkLobby: (options) => new NetworkLobby(app, screenManager, options),
-  game: (config, connection) => new TronGame(app, screenManager, config, connection),
+  game: (config, session) => new TronGame(app, screenManager, config, session),
 });
 
 // Start the app

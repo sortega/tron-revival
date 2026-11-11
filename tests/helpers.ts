@@ -14,7 +14,7 @@ export function makePlayers(count: number, mode: GameMode = 'ffa'): GamePlayer[]
     slotIndex: i as SlotIndex,
     nickname: `P${i}`,
     color: mode === 'ffa' ? FFA_COLORS[i as SlotIndex] : getSlotColor(mode, i as SlotIndex),
-    isLocal: i === 0,
+    control: { type: 'remote' as const },
   }));
 }
 

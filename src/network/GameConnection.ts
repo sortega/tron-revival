@@ -1,64 +1,41 @@
-// GameConnection - Clean wrapper for game-phase networking
-// Hides lobby details from the game
+// GameConnection - game-phase view of the lobby connection.
+// Implements the transports used by HostSession and GuestSession.
 
 import type { LobbyConnection } from './LobbyConnection';
 import type { SlotIndex } from '../types/lobby';
-import type { TronGameStateData, TronInput } from '../types/game';
+import type { TronInputMessage } from '../types/game';
+import type { GuestTransport, HostTransport } from '../game/session/GameSession';
 
-export interface GameConnectionCallbacks {
-  onPlayerInput?: (slotIndex: SlotIndex, input: TronInput) => void;
-  onHostDisconnected?: () => void;
-  onTronState?: (state: TronGameStateData) => void;
-}
-
-export class GameConnection {
-  private connection: LobbyConnection;
-  private callbacks: GameConnectionCallbacks = {};
-  private slotByPeerId: Map<string, SlotIndex>;
-  private mySlotIndex: SlotIndex | null;
+export class GameConnection implements HostTransport, GuestTransport {
+  onInput: ((slot: SlotIndex, input: TronInputMessage) => void) | null = null;
+  onState: ((data: Uint8Array) => void) | null = null;
+  onHostDisconnected: (() => void) | null = null;
 
   constructor(
-    connection: LobbyConnection,
-    slotByPeerId: Map<string, SlotIndex>,
-    mySlotIndex: SlotIndex | null
+    private readonly connection: LobbyConnection,
+    private readonly slotByPeerId: Map<string, SlotIndex>
   ) {
-    this.connection = connection;
-    this.slotByPeerId = slotByPeerId;
-    this.mySlotIndex = mySlotIndex;
     this.connection.setCallbacks({
-      onGameState: (state) => this.callbacks.onTronState?.(state),
+      onGameState: (data) => this.onState?.(data),
       onPlayerInput: (peerId, input) => {
         const slotIndex = this.slotByPeerId.get(peerId);
         if (slotIndex !== undefined) {
-          this.callbacks.onPlayerInput?.(slotIndex, input);
+          this.onInput?.(slotIndex, input);
         }
       },
-      onHostDisconnected: () => this.callbacks.onHostDisconnected?.(),
+      onHostDisconnected: () => this.onHostDisconnected?.(),
     });
   }
 
-  setCallbacks(callbacks: GameConnectionCallbacks): void {
-    this.callbacks = { ...this.callbacks, ...callbacks };
-  }
-
-  isHost(): boolean {
-    return this.connection.isHostMode();
-  }
-
-  getMySlotIndex(): SlotIndex | null {
-    return this.mySlotIndex;
-  }
-
-  // Broadcast pre-serialized binary state (MessagePack-encoded TronGameStateData)
-  broadcastBinaryState(data: Uint8Array): void {
+  broadcastState(data: Uint8Array): void {
     this.connection.broadcastBinaryState(data);
   }
 
-  sendInput(input: TronInput): void {
+  sendInput(input: TronInputMessage): void {
     this.connection.sendInput(input);
   }
 
-  disconnect(): void {
+  close(): void {
     this.connection.disconnect();
   }
 }

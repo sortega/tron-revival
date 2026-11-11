@@ -19,8 +19,7 @@ import type {
   GuestToHostMessage,
   HostToGuestMessage,
 } from './protocol';
-import type { TronGameStateData, TronInput } from '../types/game';
-import { deserializeState } from './serialization';
+import type { TronInputMessage } from '../types/game';
 
 const APP_ID = 'teratron-lobby';
 
@@ -70,8 +69,8 @@ export interface LobbyConnectionCallbacks {
   onHostDisconnected?: () => void;
   onError?: (error: string) => void;
   // Game phase callbacks
-  onGameState?: (state: TronGameStateData) => void;
-  onPlayerInput?: (peerId: string, input: TronInput) => void;
+  onGameState?: (data: Uint8Array) => void;
+  onPlayerInput?: (peerId: string, input: TronInputMessage) => void;
 }
 
 export class LobbyConnection {
@@ -84,7 +83,7 @@ export class LobbyConnection {
 
   // Action senders
   private sendLobbyMsg: ((msg: HostToGuestMessage | GuestToHostMessage, target?: string) => void) | null = null;
-  private sendGameInput: ((msg: TronInput, target?: string) => void) | null = null;
+  private sendGameInput: ((msg: TronInputMessage, target?: string) => void) | null = null;
   private sendBinaryState: ((data: Uint8Array, target?: string) => void) | null = null;
 
   // Host-only state
@@ -178,7 +177,7 @@ export class LobbyConnection {
       const [sendInput, getInput] = this.room.makeAction<any>('gameInput');
       this.sendGameInput = (msg, target) => sendInput(msg, target);
 
-      getInput((msg: TronInput, peerId: string) => {
+      getInput((msg: TronInputMessage, peerId: string) => {
         this.callbacks.onPlayerInput?.(peerId, msg);
       });
 
@@ -187,7 +186,7 @@ export class LobbyConnection {
       this.sendBinaryState = (data, target) => sendBinary(data, target);
 
       getBinary((data: Uint8Array, _peerId: string) => {
-        this.callbacks.onGameState?.(deserializeState(data));
+        this.callbacks.onGameState?.(data);
       });
 
       // Handle peer events
@@ -251,7 +250,7 @@ export class LobbyConnection {
       this.setStatus('disconnected');
 
       // Clear URL
-      window.history.pushState({}, '', window.location.pathname);
+      window.history.replaceState({}, '', window.location.pathname);
     }
   }
 
@@ -334,7 +333,7 @@ export class LobbyConnection {
     this.sendBinaryState(data);
   }
 
-  sendInput(input: TronInput): void {
+  sendInput(input: TronInputMessage): void {
     if (this.isHost || !this.sendGameInput) return;
     this.sendGameInput(input);
   }

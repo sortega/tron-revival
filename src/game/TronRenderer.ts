@@ -4,17 +4,12 @@ import type { SlotIndex } from '../types/lobby';
 import { FFA_COLORS, TEAM_COLORS } from '../types/lobby';
 import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard } from '../types/game';
 import type { GamePlayer } from '../types/game';
-import { PLAY_WIDTH, PLAY_HEIGHT } from './constants';
+import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
 import { PixelGrid, forEachLinePixel } from './PixelGrid';
 import { SpriteAtlas } from '../sprites';
 import { SPRITE_HASH } from './spriteHash';
 
-// Network stats for debug overlay
-export interface NetworkStats {
-  lagMs: number;
-  bytesIn: number;   // bytes/sec incoming
-  bytesOut: number;  // bytes/sec outgoing
-}
+import type { NetworkStats } from './session/GameSession';
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
@@ -271,6 +266,17 @@ export class TronRenderer {
         this.ctx.fillText(`In: ${kbIn} KB/s  Out: ${kbOut} KB/s`, 4, y + 14);
       }
     }
+  }
+
+  // Full-screen text shown when there is no game state to draw yet
+  renderMessage(text: string): void {
+    this.ctx.fillStyle = '#000';
+    this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    this.ctx.fillStyle = '#0ff';
+    this.ctx.font = 'bold 24px monospace';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(text, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
   }
 
   // Add trail segments to the off-screen canvas
@@ -565,7 +571,7 @@ export class TronRenderer {
               y + slotHeight * 0.25
             );
             // Draw remaining seconds below icon in black
-            const remainingSecs = Math.ceil(effect.remainingFrames / 70);
+            const remainingSecs = Math.ceil(effect.remainingFrames / TICK_RATE);
             this.ctx.fillStyle = '#000';
             this.ctx.font = 'bold 14px monospace';
             this.ctx.textAlign = 'center';
@@ -591,7 +597,7 @@ export class TronRenderer {
             this.ctx.font = 'bold 14px monospace';
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'top';
-            this.ctx.fillText(`${Math.ceil(remainingFrames / 70)}s`, centerX, y + slotHeight * 0.75 + 22);
+            this.ctx.fillText(`${Math.ceil(remainingFrames / TICK_RATE)}s`, centerX, y + slotHeight * 0.75 + 22);
           } else if (ammo !== undefined && ammo > 1) {
             // Shot-based weapon: show ammo count (skip single-use)
             this.ctx.fillStyle = '#000';
