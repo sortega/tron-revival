@@ -3,9 +3,9 @@
 import type { Screen, ScreenManager, LobbyOptions } from './ScreenManager';
 import { LobbyConnection } from '../network/LobbyConnection';
 import { GameConnection } from '../network/GameConnection';
-import type { LobbyState, SlotIndex, GameMode } from '../types/lobby';
+import type { LobbyState, PlayerSlot, SlotIndex, GameMode } from '../types/lobby';
 import { getSlotColor, canStartGame, getFilledSlotCount, findFirstOpenSlot } from '../types/lobby';
-import type { GameConfig, GamePlayer } from '../types/game';
+import type { BotDifficulty, GameConfig, GamePlayer, PlayerControl } from '../types/game';
 import type { GameSession } from '../game/session/GameSession';
 import { HostSession } from '../game/session/HostSession';
 import { GuestSession } from '../game/session/GuestSession';
@@ -790,48 +790,57 @@ export class NetworkLobby implements Screen {
       document.getElementById(`leaveSlot${i}`)?.addEventListener('click', () => {
         this.connection.leaveSlot();
       });
+      // Bots (host only)
+      document.getElementById(`addBot${i}`)?.addEventListener('click', () => {
+        this.connection.addBot(i as SlotIndex, 'normal');
+      });
+      document.getElementById(`removeBot${i}`)?.addEventListener('click', () => {
+        this.connection.removeBot(i as SlotIndex);
+      });
+      document.getElementById(`botLevel${i}`)?.addEventListener('change', (e) => {
+        this.connection.setBotDifficulty(i as SlotIndex, (e.target as HTMLSelectElement).value as BotDifficulty);
+      });
     }
   }
 
-  private renderSlot(index: SlotIndex, mode: GameMode, mySlotIndex: SlotIndex | null, _isHost: boolean): string {
+  private renderSlot(index: SlotIndex, mode: GameMode, mySlotIndex: SlotIndex | null, isHost: boolean): string {
     const slot = this.lobbyState!.slots[index];
     const color = getSlotColor(mode, index);
     const isOccupied = slot.peerId !== null;
     const isMe = slot.slotIndex === mySlotIndex;
+    const smallBtn = (id: string, label: string, fg: string, bg: string) => `<button id="${id}" style="
+          padding: 0.25rem 0.5rem;
+          font-size: 0.8rem;
+          font-family: monospace;
+          cursor: pointer;
+          background: ${bg};
+          color: ${fg};
+          border: 1px solid ${fg};
+        ">${label}</button>`;
 
     let statusText: string;
     let actionBtn = '';
 
-    if (isOccupied) {
+    if (slot.ai) {
+      statusText = `${escapeHtml(slot.nickname)} 🤖`;
+      if (isHost) {
+        const options = (['easy', 'normal', 'hard'] as const)
+          .map(d => `<option value="${d}" ${slot.ai === d ? 'selected' : ''}>${d}</option>`).join('');
+        actionBtn = `<select id="botLevel${index}" style="padding: 0.2rem; font-family: monospace; font-size: 0.8rem;
+          background: #000; color: #0ff; border: 1px solid #0ff;">${options}</select>
+          ${smallBtn(`removeBot${index}`, '✕', '#f44', '#200')}`;
+      } else {
+        statusText += ` <span style="color: #666;">(${slot.ai})</span>`;
+      }
+    } else if (isOccupied) {
       statusText = escapeHtml(slot.nickname || 'Player');
       if (isMe) statusText += ' (You)';
       if (slot.isHost) statusText += ' 🛠️';
-      // Show leave button if this is my slot
-      if (isMe) {
-        actionBtn = `<button id="leaveSlot${index}" style="
-          padding: 0.25rem 0.5rem;
-          font-size: 0.8rem;
-          font-family: monospace;
-          cursor: pointer;
-          background: #200;
-          color: #f44;
-          border: 1px solid #f44;
-        ">LEAVE</button>`;
-      }
+      if (isMe) actionBtn = smallBtn(`leaveSlot${index}`, 'LEAVE', '#f44', '#200');
     } else {
       statusText = 'Open';
-      // Show join button for empty slots (if not this slot)
-      if (mySlotIndex !== index) {
-        actionBtn = `<button id="joinSlot${index}" style="
-          padding: 0.25rem 0.5rem;
-          font-size: 0.8rem;
-          font-family: monospace;
-          cursor: pointer;
-          background: #002;
-          color: #08f;
-          border: 1px solid #08f;
-        ">JOIN</button>`;
-      }
+      actionBtn = smallBtn(`joinSlot${index}`, 'JOIN', '#08f', '#002');
+      if (isHost) actionBtn += smallBtn(`addBot${index}`, '+ AI', '#0c8', '#021');
     }
 
     return `
@@ -963,9 +972,7 @@ export class NetworkLobby implements Screen {
         slotIndex: slot.slotIndex,
         nickname: slot.nickname,
         color: getSlotColor(lobbyState.gameMode, slot.slotIndex),
-        control: slot.slotIndex === mySlot
-          ? { type: 'local' as const, scheme: 'solo' as const }
-          : { type: 'remote' as const },
+        control: this.controlFor(slot, mySlot),
       }));
 
     // Build peer-to-slot mapping for GameConnection
@@ -988,6 +995,14 @@ export class NetworkLobby implements Screen {
       : new GuestSession(transport, mySlot);
 
     return { gameConfig, session };
+  }
+
+  // How a lobby slot is controlled from this machine's point of view
+  private controlFor(slot: PlayerSlot, mySlot: SlotIndex | null): PlayerControl {
+    if (slot.slotIndex === mySlot) return { type: 'local', scheme: 'solo' };
+    // Bots are simulated by the host; for guests they are just remote players
+    if (slot.ai && this.connection.isHostMode()) return { type: 'ai', difficulty: slot.ai };
+    return { type: 'remote' };
   }
 
   private autoJoinFirstSlot(): void {

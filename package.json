@@ -10,7 +10,8 @@
     "deploy": "npm run build && gh-pages -d dist",
     "sprites": "npx tsx scripts/build-sprites.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sim": "SIM_REPORT=1 vitest run tests/bots.test.ts --silent=false"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

@@ -6,7 +6,8 @@ import type { GameConfig, TronGameStateData, SoundEvent, RoundPhase } from '../t
 import { LEVELS } from '../types/game';
 import { TICK_RATE } from './constants';
 import { TronRenderer } from './TronRenderer';
-import { InputManager, CONTROL_SCHEMES, isTouchDevice, isIOS } from './input/InputManager';
+import { InputManager, isTouchDevice, isIOS } from './input/InputManager';
+import { CONTROL_SCHEMES } from './input/controlSchemes';
 import type { InputBinding } from './input/InputManager';
 import { getSoundManager, type SoundName } from './SoundManager';
 import { Ticker } from './Ticker';
@@ -560,7 +561,7 @@ export class TronGame implements Screen {
     }
 
     const stats = this.showFps ? this.session.getNetworkStats() ?? undefined : undefined;
-    this.renderer.render(view.round, view.match, this.showFps ? this.currentFps : undefined, stats);
+    this.renderer.render(view.round, view.match, this.showFps ? this.currentFps : undefined, stats, view.overlayTrails);
   }
 
   // Apply the one-shot events carried by a simulation frame (trail growth, cleared
@@ -594,6 +595,12 @@ export class TronGame implements Screen {
     if (state.clearedAreas) {
       for (const { x, y, w, h } of state.clearedAreas) {
         renderer.clearRect(x, y, w, h);
+      }
+    }
+    if (state.deaths) {
+      for (const d of state.deaths) {
+        const name = this.config.players.find(p => p.slotIndex === d.slotIndex)?.nickname ?? d.slotIndex;
+        console.info(`[game] ${name} died: ${d.cause} at ${d.x},${d.y}`);
       }
     }
     if (state.ridiculousDeathSlots) {

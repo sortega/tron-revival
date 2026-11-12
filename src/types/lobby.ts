@@ -1,5 +1,7 @@
 // Lobby types for Teratron
 
+import type { BotDifficulty } from './game';
+
 export type SlotIndex = 0 | 1 | 2 | 3;
 export type GameMode = 'ffa' | 'team';
 export type LevelMode = 'cycle' | string;  // 'cycle' or specific level id
@@ -45,6 +47,12 @@ export interface PlayerSlot {
   peerId: string | null;  // null = slot is open
   nickname: string;
   isHost: boolean;
+  ai?: BotDifficulty;     // Set when the slot is a bot run by the host
+}
+
+/** Pseudo peer id of the bot occupying a slot. */
+export function aiPeerId(slotIndex: SlotIndex): string {
+  return `ai:${slotIndex}`;
 }
 
 export interface ChatMessage {

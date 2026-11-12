@@ -32,12 +32,38 @@ export function forEachLinePixel(
   }
 }
 
+// Coarse occupancy: the arena divided in COARSE_CELL-pixel squares, each counting its
+// occupied pixels. Lets bots reason about free space without scanning every pixel.
+export const COARSE_CELL = 8;
+export const COARSE_COLS = Math.ceil(PLAY_WIDTH / COARSE_CELL);
+export const COARSE_ROWS = Math.ceil(PLAY_HEIGHT / COARSE_CELL);
+
 export class PixelGrid {
   readonly width = PLAY_WIDTH;
   readonly height = PLAY_HEIGHT;
   private cells = new Uint16Array(PLAY_WIDTH * PLAY_HEIGHT);
+  private coarse = new Uint16Array(COARSE_COLS * COARSE_ROWS);
   private palette: string[] = [''];
   private paletteIndex = new Map<string, number>();
+
+  // Write one cell, keeping the coarse counts in sync. `i` must be in range.
+  private write(i: number, value: number): void {
+    const old = this.cells[i]!;
+    if ((old === 0) !== (value === 0)) {
+      const x = i % PLAY_WIDTH;
+      const y = (i - x) / PLAY_WIDTH;
+      const c = Math.floor(y / COARSE_CELL) * COARSE_COLS + Math.floor(x / COARSE_CELL);
+      this.coarse[c] = this.coarse[c]! + (value === 0 ? -1 : 1);
+    }
+    this.cells[i] = value;
+  }
+
+  /** True if the coarse cell (column, row) contains no occupied pixel. Wraps. */
+  coarseFree(col: number, row: number): boolean {
+    const c = ((row % COARSE_ROWS) + COARSE_ROWS) % COARSE_ROWS * COARSE_COLS
+      + ((col % COARSE_COLS) + COARSE_COLS) % COARSE_COLS;
+    return this.coarse[c] === 0;
+  }
 
   private inBounds(x: number, y: number): boolean {
     return x >= 0 && y >= 0 && x < PLAY_WIDTH && y < PLAY_HEIGHT;
@@ -68,15 +94,16 @@ export class PixelGrid {
       this.palette.push(color);
       this.paletteIndex.set(color, idx);
     }
-    this.cells[y * PLAY_WIDTH + x] = idx;
+    this.write(y * PLAY_WIDTH + x, idx);
   }
 
   delete(x: number, y: number): void {
-    if (this.inBounds(x, y)) this.cells[y * PLAY_WIDTH + x] = 0;
+    if (this.inBounds(x, y)) this.write(y * PLAY_WIDTH + x, 0);
   }
 
   clear(): void {
     this.cells.fill(0);
+    this.coarse.fill(0);
   }
 
   /** Clear a w×h rectangle whose top-left corner is (x, y), wrapping around edges. */
@@ -84,7 +111,7 @@ export class PixelGrid {
     for (let dy = 0; dy < h; dy++) {
       const row = wrap(y + dy, PLAY_HEIGHT) * PLAY_WIDTH;
       for (let dx = 0; dx < w; dx++) {
-        this.cells[row + wrap(x + dx, PLAY_WIDTH)] = 0;
+        this.write(row + wrap(x + dx, PLAY_WIDTH), 0);
       }
     }
   }
@@ -92,7 +119,7 @@ export class PixelGrid {
   /** Clear every pixel on a line (wrapping). */
   clearLine(x0: number, y0: number, x1: number, y1: number): void {
     forEachLinePixel(x0, y0, x1, y1, (x, y) => {
-      this.cells[y * PLAY_WIDTH + x] = 0;
+      this.write(y * PLAY_WIDTH + x, 0);
     });
   }
 
@@ -114,6 +141,7 @@ export class PixelGrid {
     this.palette = [...other.palette];
     this.paletteIndex = new Map(other.paletteIndex);
     this.cells.set(other.cells);
+    this.coarse.set(other.coarse);
   }
 
   /** Number of occupied pixels (O(n); for tests and diagnostics). */

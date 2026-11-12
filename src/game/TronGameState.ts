@@ -15,6 +15,8 @@ import type {
   Explosion,
   Bodyguard,
   ClearedRect,
+  DeathCause,
+  DeathEvent,
 } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import {
@@ -30,9 +32,11 @@ import { TronPlayer, getStartingPosition } from './TronPlayer';
 import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
 import { ItemLauncher } from './ItemLauncher';
 import { PixelGrid } from './PixelGrid';
+import { TELEPORT_COOLDOWN_FRAMES, findPortalExit, movePlayer, movesForTick, ownTurboBoost, teleportTo } from './movement';
 import type { Rng } from './rng';
 
 const COUNTDOWN_SECONDS = 3;
+const NO_INPUT: TronInput = { steer: 0, action: false };
 
 // Helper: Check if two line segments intersect (for diagonal collision detection)
 // Uses cross product method to detect if segments AB and CD intersect
@@ -109,10 +113,6 @@ export class TronGameState {
   items: GameItem[] = [];
   private itemLauncher: ItemLauncher;
 
-  // Track teleport cooldowns to prevent instant re-teleport
-  private teleportCooldowns: Map<SlotIndex, number> = new Map();
-  private readonly TELEPORT_COOLDOWN_FRAMES = 35;   // 0.5 seconds at 70fps
-
   // New trail segments this frame (for network efficiency)
   private frameTrailSegments: Map<SlotIndex, TrailSegment[]> = new Map();
 
@@ -138,6 +138,8 @@ export class TronGameState {
   private frameClearedAreas: ClearedRect[] = [];
   // Cleared lines this frame (tracer paths), flat [x0, y0, x1, y1, ...]
   private frameClearedLines: number[] = [];
+  // Deaths this frame, with their cause
+  private frameDeaths: DeathEvent[] = [];
   // A new round started this frame (renderer must reset trails)
   private frameRoundStarted: boolean = false;
 
@@ -242,6 +244,15 @@ export class TronGameState {
     this.initRound();
   }
 
+  // Read-only views for bots and tests
+  getProjectiles(): readonly Projectile[] {
+    return this.projectiles;
+  }
+
+  getBodyguards(): readonly Bodyguard[] {
+    return this.bodyguards;
+  }
+
   // Queue a sound event for network sync
   private queueSound(sound: string): void {
     this.frameSoundEvents.push({ sound });
@@ -257,9 +268,14 @@ export class TronGameState {
     this.frameSoundEvents.push({ sound: '', stopLoop: loopKey });
   }
 
+  private recordDeath(player: TronPlayer, cause: DeathCause): void {
+    this.frameDeaths.push({ slotIndex: player.slotIndex, cause, x: player.getScreenX(), y: player.getScreenY() });
+  }
+
   // Kill a player and handle ridiculous death if applicable
-  private killPlayerWithSound(player: TronPlayer, isRidiculousDeath: boolean): void {
+  private killPlayerWithSound(player: TronPlayer, isRidiculousDeath: boolean, cause: DeathCause): void {
     player.kill();
+    this.recordDeath(player, cause);
     if (isRidiculousDeath) {
       const count = (this.ridiculousDeaths.get(player.slotIndex) || 0) + 1;
       this.ridiculousDeaths.set(player.slotIndex, count);
@@ -288,7 +304,6 @@ export class TronGameState {
     this.playersReady.clear();
     this.prevActionState.clear();
     this.portals = [];
-    this.teleportCooldowns.clear();
     this.items = [];
     this.itemLauncher.reset();
     this.borderLocks.clear();
@@ -372,10 +387,8 @@ export class TronGameState {
   private tickPlaying(inputs: Map<SlotIndex, TronInput>): void {
 
     // Decrement teleport cooldowns
-    for (const [slotIndex, cooldown] of this.teleportCooldowns) {
-      if (cooldown > 0) {
-        this.teleportCooldowns.set(slotIndex, cooldown - 1);
-      }
+    for (const player of this.players) {
+      if (player.teleportCooldown > 0) player.teleportCooldown--;
     }
 
     // Calculate speedFactors for all players
@@ -384,28 +397,14 @@ export class TronGameState {
     // Calculate moves per frame for each player
     const movesPerPlayer: Map<SlotIndex, number> = new Map();
     for (const player of this.players) {
-      if (!player.alive) continue;
-
+      const input = inputs.get(player.slotIndex) ?? NO_INPUT;
       const factor = speedFactors.get(player.slotIndex) ?? 1;
-      let movesThisFrame: number;
-
-      if (factor >= 1) {
-        // Fast: move 'factor' times this frame
-        movesThisFrame = factor;
-      } else {
-        // Slow: move once every N frames where N = 2 - factor
-        // factor 0 -> every 2 frames, factor -1 -> every 3 frames, etc.
-        player.moveFrameCounter++;
-        const frameInterval = 2 - factor;
-        if (player.moveFrameCounter >= frameInterval) {
-          movesThisFrame = 1;
-          player.moveFrameCounter = 0;
-        } else {
-          movesThisFrame = 0;
-        }
-      }
-
-      movesPerPlayer.set(player.slotIndex, movesThisFrame);
+      // Recorded for guests, which predict movement from these (see movement.ts)
+      player.baseSpeed = factor - ownTurboBoost(player, input);
+      player.lastSteer = input.steer;
+      player.lastAction = input.action;
+      if (!player.alive) continue;
+      movesPerPlayer.set(player.slotIndex, movesForTick(player, factor));
     }
 
     // Find maximum moves this frame (for step-by-step simulation)
@@ -426,14 +425,8 @@ export class TronGameState {
         const playerMoves = movesPerPlayer.get(player.slotIndex) ?? 1;
         if (step >= playerMoves) continue; // This player doesn't move this step
 
-        let input = inputs.get(player.slotIndex) || { steer: 0, action: false };
-
-        // Control Reversal effect inverts steering
-        if (player.hasEffect('reverse')) {
-          input = { ...input, steer: -input.steer };
-        }
-
-        const newSegments = player.update(input);
+        // Control Reversal is applied inside movePlayer
+        const newSegments = movePlayer(player, inputs.get(player.slotIndex) ?? NO_INPUT);
 
         // Check collision immediately after move
         const collisionPixel = player.checkCollision(this.pixels);
@@ -448,7 +441,8 @@ export class TronGameState {
           const isProtected = hasShield || (hasCrossing && isOwnColor);
 
           if (!isProtected) {
-            this.killPlayerWithSound(player, isOwnColor);
+            this.killPlayerWithSound(player, isOwnColor,
+              isOwnColor ? 'own-trail' : this.players.some(p => p.color === pixelOwner) ? 'trail' : 'level');
             continue;
           }
         }
@@ -487,8 +481,8 @@ export class TronGameState {
             const p1HasShield = p1.hasEffect('shield');
             const p2HasShield = p2.hasEffect('shield');
 
-            if (!p1HasShield) p1.kill();
-            if (!p2HasShield) p2.kill();
+            if (!p1HasShield) { p1.kill(); this.recordDeath(p1, 'crossing'); }
+            if (!p2HasShield) { p2.kill(); this.recordDeath(p2, 'crossing'); }
 
             if (!p1HasShield || !p2HasShield) {
               this.queueSound('laughs');
@@ -508,8 +502,7 @@ export class TronGameState {
     // Check teleport collision for alive players
     for (const player of this.players) {
       if (!player.alive) continue;
-      const cooldown = this.teleportCooldowns.get(player.slotIndex) || 0;
-      if (cooldown === 0) {
+      if (player.teleportCooldown === 0) {
         this.checkTeleport(player);
       }
     }
@@ -933,7 +926,7 @@ export class TronGameState {
               this.bombImpact(px, py, proj.ownerSlot);
             } else {
               this.tracerExpire(px, py);
-              this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot);
+              this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot, 'tracer');
             }
             toRemove.push(proj.id);
             hitPlayer = true;
@@ -1219,7 +1212,7 @@ export class TronGameState {
       const dist = Math.sqrt((px - x) ** 2 + (py - y) ** 2);
       if (dist < this.BULLET_KILL_RADIUS) {
         const isSelfKill = ownerSlot !== undefined && player.slotIndex === ownerSlot;
-        this.killPlayerWithSound(player, isSelfKill);
+        this.killPlayerWithSound(player, isSelfKill, 'bullet');
       }
     }
 
@@ -1263,7 +1256,7 @@ export class TronGameState {
       const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
       if (wrapDx < this.BOMB_KILL_RADIUS && wrapDy < this.BOMB_KILL_RADIUS) {
         const isSelfKill = ownerSlot !== undefined && player.slotIndex === ownerSlot;
-        this.killPlayerWithSound(player, isSelfKill);
+        this.killPlayerWithSound(player, isSelfKill, 'bomb');
       }
     }
 
@@ -1324,7 +1317,7 @@ export class TronGameState {
       const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
       const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
       if (wrapDx < killRadius && wrapDy < killRadius) {
-        this.killPlayerWithSound(player, false);
+        this.killPlayerWithSound(player, false, 'bomb');
       }
     }
 
@@ -1368,8 +1361,9 @@ export class TronGameState {
     this.explosions = this.explosions.filter(e => e.frame < this.EXPLOSION_FRAMES);
   }
 
-  // Tick visual effects that continue during waiting_ready phase
-  private tickVisualEffects(): void {
+  // Tick effects. Once the round is over (`roundOver`) only pure animations continue:
+  // projectiles and bodyguards freeze in place.
+  private tickVisualEffects(roundOver: boolean = false): void {
     // Animate portals (slower rotation)
     this.portalAnimTick++;
     if (this.portalAnimTick >= this.PORTAL_ANIM_SPEED) {
@@ -1390,14 +1384,16 @@ export class TronGameState {
     }
 
     // Update projectiles, explosions, and bodyguards
-    this.tickProjectiles();
     this.tickExplosions();
-    this.tickBodyguards();
+    if (!roundOver) {
+      this.tickProjectiles();
+      this.tickBodyguards();
+    }
   }
 
   private tickWaitingReady(inputs: Map<SlotIndex, TronInput>): void {
-    // Continue ticking visual elements (projectiles keep flying, explosions animate)
-    this.tickVisualEffects();
+    // Explosions and portals keep animating; projectiles and bodyguards are frozen
+    this.tickVisualEffects(true);
 
     // Check for action key presses (one-shot: only on rising edge)
     for (const [slotIndex, input] of inputs) {
@@ -1539,43 +1535,13 @@ export class TronGameState {
     return null;
   }
 
-  // Check if player is touching a portal and teleport them
+  // Check if player is touching a portal and teleport them to the other end
   private checkTeleport(player: TronPlayer): void {
-    const px = player.getScreenX();
-    const py = player.getScreenY();
-
-    for (const portal of this.portals) {
-      // Check distance to first endpoint
-      const d1 = Math.sqrt((px - portal.x1) ** 2 + (py - portal.y1) ** 2);
-      if (d1 < PORTAL_RADIUS) {
-        this.teleportPlayer(player, portal.x2, portal.y2);
-        return;
-      }
-
-      // Check distance to second endpoint
-      const d2 = Math.sqrt((px - portal.x2) ** 2 + (py - portal.y2) ** 2);
-      if (d2 < PORTAL_RADIUS) {
-        this.teleportPlayer(player, portal.x1, portal.y1);
-        return;
-      }
-    }
-  }
-
-  // Teleport a player to the outer ring of a portal, maintaining direction
-  private teleportPlayer(player: TronPlayer, portalX: number, portalY: number): void {
-    // Calculate exit position on the outer ring of the destination portal
-    // Player appears on the outer edge, moving in the same direction
-    const dirRad = (player.direction * Math.PI) / 180;
-    const exitX = portalX + Math.cos(dirRad) * PORTAL_OUTER_RADIUS;
-    const exitY = portalY + Math.sin(dirRad) * PORTAL_OUTER_RADIUS;
-
-    // Update player position (convert to fixed-point)
-    player.x = Math.floor(exitX * 1000);
-    player.y = Math.floor(exitY * 1000);
-
-    // Set cooldown to prevent immediate re-teleport
-    this.teleportCooldowns.set(player.slotIndex, this.TELEPORT_COOLDOWN_FRAMES);
-
+    const exit = findPortalExit(this.portals, player.getScreenX(), player.getScreenY());
+    if (!exit) return;
+    teleportTo(player, exit);
+    // Cooldown prevents immediate re-teleport
+    player.teleportCooldown = TELEPORT_COOLDOWN_FRAMES;
     this.queueSound('teleport');
   }
 
@@ -1826,7 +1792,7 @@ export class TronGameState {
       const py = player.getScreenY();
       const dist = this.wrappedDistance(bgX, bgY, px, py);
       if (dist < this.BODYGUARD_KILL_RADIUS) {
-        this.killPlayerWithSound(player, false);
+        this.killPlayerWithSound(player, false, 'bodyguard');
       }
     }
   }
@@ -2010,6 +1976,8 @@ export class TronGameState {
     this.frameClearedAreas = [];
     const clearedLines = this.frameClearedLines.length > 0 ? this.frameClearedLines : undefined;
     this.frameClearedLines = [];
+    const deaths = this.frameDeaths.length > 0 ? this.frameDeaths : undefined;
+    this.frameDeaths = [];
     const roundStarted = this.frameRoundStarted || undefined;
     this.frameRoundStarted = false;
 
@@ -2024,6 +1992,7 @@ export class TronGameState {
       clearedAreas,
       clearedLines,
       roundStarted,
+      deaths,
       colorBlindnessFrames: this.colorBlindnessRemainingFrames > 0 ? this.colorBlindnessRemainingFrames : undefined,
       whiteFlashFrames: this.whiteFlashRemainingFrames > 0 ? this.whiteFlashRemainingFrames : undefined,
     };

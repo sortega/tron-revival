@@ -407,20 +407,106 @@ interface SoundEvent {
 }
 ```
 
-### Input Handling
+### Input Handling, Prediction and Reconciliation
 
-**Guest inputs:**
+Guests must not wait a network round trip to see their own steering: at 280°/s a 100 ms
+round trip is 28° of overshoot, which makes the game feel uncontrollable. The netcode
+therefore uses client-side prediction with server (host) reconciliation.
+
+#### Wire messages
+
 ```typescript
-interface TronInput {
-  left: boolean;
-  right: boolean;
-  action: boolean;  // Ready signal / fire weapon
+// Guest → host, one per guest simulation tick (70 Hz)
+interface TronInputMessage {
+  seq: number;     // Monotonic sequence number
+  steer: number;   // -1..1
+  action: boolean;
+  t: number;       // Guest clock in ms, echoed back for RTT measurement
+}
+
+// Host → guests: the game state plus
+interface TronGameStateData {
+  // ...
+  acks?: Record<SlotIndex, number>;   // Last input seq consumed for each remote slot
+  pongs?: Record<SlotIndex, number>;  // Echo of `t`, advanced by the time it waited on the host
 }
 ```
 
-- Guests send input state on the `gameInput` channel
-- Host applies inputs to authoritative game state
-- Ready signal (`action: true` during `waiting_ready` phase) advances to next round
+Player states on the wire also carry what a guest needs to reproduce movement exactly:
+`speedFactor`, `moveFrameCounter`, `teleportCooldown` and the `steer` applied on that tick.
+
+#### Host: input queue
+
+- Each remote slot has a FIFO of received inputs. Every host tick consumes **one** input per
+  slot, so that each guest tick maps to exactly one host tick.
+- Queue empty (jitter, guest stalled): the last input is held for that tick; nothing is acked.
+- Queue longer than `MAX_INPUT_QUEUE` (4): the oldest entries are skipped (and acked) to bound
+  the added latency when a guest runs slightly fast or delivers a burst.
+- Inputs are sanitised (`steer` clamped to [-1, 1], `action` coerced to boolean).
+
+#### Guest: prediction
+
+The guest keeps `pending`: every input it has sent that the host has not acked yet.
+
+Every guest tick:
+1. Sample local input, assign `seq`, send it, append it to `pending`.
+2. Advance the *predicted* local player one tick with that input, using the same movement
+   code as the host (`TronPlayer` movement, speed factor, Control Reversal, arena wrap,
+   portals).
+
+Every received state:
+1. Drop `pending` entries with `seq <= acks[mySlot]`.
+2. Reset the predicted player to the authoritative player state from the host.
+3. Replay all remaining `pending` inputs on top of it.
+
+The view shows the predicted local player instead of the (older) authoritative one. Because
+the host consumes exactly the inputs the guest predicted with, the prediction is exact
+whenever nothing unpredictable happened; when it was not (held input, Swap item, speed change
+caused by another player's Slow weapon, death) step 2 snaps the player to the truth.
+
+Guests never predict collisions or death: the host decides. A predicted player can therefore
+appear to drive a few pixels into a wall before the host's verdict arrives.
+
+#### Predicted trail
+
+The authoritative trail (drawn permanently on the trail canvas) ends where the host last saw
+the player, a few pixels behind the predicted head. The pixels travelled while replaying
+`pending` are exposed as a *provisional trail* and drawn every frame on top of the trail
+canvas without being stored, so the trail visually reaches the head.
+
+#### Dead reckoning for remote players
+
+Remote players arrive `lag` old. The local player is shown ahead of the host (by the inputs
+in flight), so to show a mutually consistent picture the guest extrapolates every other
+living player forward by the same number of ticks (`pending.length`, capped at
+`MAX_EXTRAPOLATION_TICKS` = 12 ≈ 170 ms), assuming it keeps its last known `steer`. The
+extrapolated segment is drawn as a provisional trail too. When the next state arrives the
+extrapolation restarts from the new authoritative position, so errors never accumulate.
+
+Projectiles are extrapolated linearly the same way. Everything else (items, portals,
+explosions, scores) is shown as received.
+
+#### One-shot events
+
+Trail growth, cleared pixels, sounds, round start, etc. are attached to the state of the
+tick they happened on. The guest applies the events of **every** state as it arrives (several
+may arrive between two rendered frames) and only uses the latest state for drawing.
+
+#### Latency measurement
+
+`pongs[slot] = t + (time the input waited on the host)`, so `RTT = guestNow - pong` is
+independent of clock offsets and of host frame timing. The debug overlay (key `F`) shows the
+median one-way lag, bitrate, and the number of predicted ticks.
+
+#### Validation
+
+`tests/netcode.test.ts` wires a `HostSession` and a `GuestSession` through a simulated link
+with configurable latency and jitter on a virtual clock and asserts that
+- the predicted position for input `seq` equals the host's position after consuming `seq`
+  (exactly, for jitter-free links; within a small bound otherwise),
+- the guest's view responds to input on the same tick regardless of latency,
+- no event is lost or duplicated (guest trail canvas equals host trail grid),
+- dead reckoning reduces the position error of remote players versus no extrapolation.
 
 ## Implementation Structure
 

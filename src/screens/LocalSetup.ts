@@ -2,32 +2,14 @@
 // See design/local-and-ai.md.
 
 import type { Screen, ScreenManager } from './ScreenManager';
-import type { GameMode, LevelMode, SlotIndex } from '../types/lobby';
-import { getSlotColor, getSlotColorName } from '../types/lobby';
-import type { BotDifficulty, ControlScheme, GameConfig, GamePlayer } from '../types/game';
+import { getSlotColor } from '../types/lobby';
 import { LEVELS } from '../types/game';
-import { CONTROL_SCHEMES, SHARED_SCHEMES } from '../game/input/InputManager';
+import { CONTROL_SCHEMES } from '../game/input/controlSchemes';
+import { SLOTS, SLOT_KINDS, assignSchemes, buildLocalConfig, canStartLocal, defaultLocalSetup } from '../game/localSetup';
+import type { LocalSetupState, LocalSlotKind } from '../game/localSetup';
 import { HostSession } from '../game/session/HostSession';
 
-export type LocalSlotKind = 'off' | 'human' | `ai-${BotDifficulty}`;
-
-const SLOT_KINDS: { kind: LocalSlotKind; label: string }[] = [
-  { kind: 'off', label: 'Off' },
-  { kind: 'human', label: 'Human' },
-];
-
-export interface LocalSetupState {
-  slots: [LocalSlotKind, LocalSlotKind, LocalSlotKind, LocalSlotKind];
-  gameMode: GameMode;
-  levelMode: LevelMode;
-}
-
 const STORAGE_KEY = 'teratron-local-setup';
-const SLOTS: SlotIndex[] = [0, 1, 2, 3];
-
-export function defaultLocalSetup(): LocalSetupState {
-  return { slots: ['human', 'human', 'off', 'off'], gameMode: 'ffa', levelMode: 'cycle' };
-}
 
 function loadSetup(): LocalSetupState {
   try {
@@ -48,44 +30,6 @@ function loadSetup(): LocalSetupState {
     // Corrupt storage: fall back to defaults
   }
   return defaultLocalSetup();
-}
-
-/** Control scheme for each human slot: `solo` when alone, distinct shared schemes otherwise. */
-export function assignSchemes(slots: readonly LocalSlotKind[]): Map<SlotIndex, ControlScheme> {
-  const humans = SLOTS.filter(i => slots[i] === 'human');
-  const schemes = new Map<SlotIndex, ControlScheme>();
-  if (humans.length === 1) {
-    schemes.set(humans[0]!, 'solo');
-  } else {
-    humans.forEach((slot, i) => schemes.set(slot, SHARED_SCHEMES[i]!));
-  }
-  return schemes;
-}
-
-export function canStartLocal(setup: LocalSetupState): boolean {
-  const active = setup.slots.filter(k => k !== 'off').length;
-  return setup.gameMode === 'team' ? active === 4 : active >= 2;
-}
-
-/** Build the game configuration for a local setup. */
-export function buildLocalConfig(setup: LocalSetupState): GameConfig {
-  const schemes = assignSchemes(setup.slots);
-  const players: GamePlayer[] = [];
-  for (const slot of SLOTS) {
-    const kind = setup.slots[slot]!;
-    if (kind === 'off') continue;
-    const colorName = getSlotColorName(setup.gameMode, slot);
-    const base = setup.gameMode === 'team' ? `${colorName} ${slot < 2 ? 1 : 2}` : colorName;
-    players.push({
-      slotIndex: slot,
-      nickname: kind === 'human' ? base : `${base} Bot`,
-      color: getSlotColor(setup.gameMode, slot),
-      control: kind === 'human'
-        ? { type: 'local', scheme: schemes.get(slot)! }
-        : { type: 'ai', difficulty: kind.slice(3) as BotDifficulty },
-    });
-  }
-  return { players, gameMode: setup.gameMode, levelMode: setup.levelMode };
 }
 
 export class LocalSetup implements Screen {

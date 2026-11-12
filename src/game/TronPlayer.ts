@@ -61,6 +61,15 @@ export class TronPlayer {
   // Frame counter for slow movement (speedFactor < 1)
   moveFrameCounter: number = 0;
 
+  // Frames until this player can use a portal again
+  teleportCooldown: number = 0;
+
+  // Last tick's speed factor (without the player's own Turbo weapon) and input.
+  // Sent to guests so they can predict / extrapolate movement.
+  baseSpeed: number = 1;
+  lastSteer: number = 0;
+  lastAction: boolean = false;
+
   // Item state
   equippedWeapon: EquippedWeapon | null = null;
   activeEffects: ActiveEffect[] = [];
@@ -182,6 +191,10 @@ export class TronPlayer {
     this.equippedWeapon = null;
     this.activeEffects = [];
     this.moveFrameCounter = 0;
+    this.teleportCooldown = 0;
+    this.baseSpeed = 1;
+    this.lastSteer = 0;
+    this.lastAction = false;
     this.prevScreenX = -1;
     this.prevScreenY = -1;
   }
@@ -250,6 +263,11 @@ export class TronPlayer {
       nickname: this.nickname,
       equippedWeapon: this.equippedWeapon,
       activeEffects: [...this.activeEffects],
+      speed: this.baseSpeed,
+      moveCounter: this.moveFrameCounter,
+      tpCooldown: this.teleportCooldown,
+      steer: this.lastSteer,
+      action: this.lastAction,
     };
   }
 
@@ -259,7 +277,13 @@ export class TronPlayer {
     this.y = state.y;
     this.direction = state.direction;
     this.alive = state.alive;
-    this.equippedWeapon = state.equippedWeapon;
-    this.activeEffects = state.activeEffects ? [...state.activeEffects] : [];
+    // Copies: prediction mutates these and must not touch the received state
+    this.equippedWeapon = state.equippedWeapon ? { ...state.equippedWeapon } : null;
+    this.activeEffects = state.activeEffects ? state.activeEffects.map(e => ({ ...e })) : [];
+    this.baseSpeed = state.speed;
+    this.moveFrameCounter = state.moveCounter;
+    this.teleportCooldown = state.tpCooldown;
+    this.lastSteer = state.steer;
+    this.lastAction = state.action;
   }
 }

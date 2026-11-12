@@ -37,6 +37,27 @@ describe('round lifecycle', () => {
     expect(game.scores.get(0)).toBe(1);
   });
 
+  it('freezes projectiles and bodyguards when the round ends', () => {
+    const game = makeGame(2);
+    skipCountdown(game);
+    const p = game.players[0]!;
+    // Give player 0 a bodyguard and a rifle, and fire a few tracers
+    game.items.length = 0;
+    game.items.push({ id: 900, sprite: 'bodyguard_item', category: 'automatic', x: p.getScreenX() + 6, y: p.getScreenY() + 6, active: true, hp: 40 });
+    for (let i = 0; i < 12; i++) game.tick(new Map());
+    p.equipWeapon('rifle', 200);
+    for (let i = 0; i < 4; i++) game.tick(inputs({ action: true }));
+    expect(game.getBodyguards().length).toBe(1);
+    expect(game.getProjectiles().length).toBeGreaterThan(0);
+
+    game.players[1]!.kill();
+    game.tick(new Map());
+    expect(game.phase).toBe('waiting_ready');
+    const snapshot = JSON.stringify([game.getProjectiles(), game.getBodyguards()]);
+    for (let i = 0; i < 50; i++) game.tick(new Map());
+    expect(JSON.stringify([game.getProjectiles(), game.getBodyguards()])).toBe(snapshot);
+  });
+
   it('flags the start of every round for the renderer', () => {
     const game = makeGame(2);
     expect(game.serialize().roundStarted).toBe(true);

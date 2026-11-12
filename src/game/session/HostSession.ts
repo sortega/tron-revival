@@ -7,6 +7,8 @@ import { TronGameState } from '../TronGameState';
 import type { PixelGrid } from '../PixelGrid';
 import type { Rng } from '../rng';
 import { serializeState } from '../../network/serialization';
+import { BotController } from '../ai/BotController';
+import { createRng } from '../rng';
 import { ByteRate } from './GameSession';
 import type { GameSession, HostTransport, NetworkStats, ViewState } from './GameSession';
 
@@ -26,25 +28,45 @@ export class HostSession implements GameSession {
   private readonly now: () => number;
   private readonly inputs = new Map<SlotIndex, TronInput>();
   private readonly localSlots = new Set<SlotIndex>();
+  private readonly bots: BotController[] = [];
   private lastFrame: TronGameStateData;
   private readonly bytesOut = new ByteRate();
   private readonly pings = new Map<SlotIndex, { t: number; receivedAt: number }>();
+  private readonly queues = new Map<SlotIndex, QueuedInput[]>();
+  private readonly acks: Partial<Record<SlotIndex, number>> = {};
 
   constructor(config: GameConfig, options: HostSessionOptions = {}) {
     this.transport = options.transport ?? null;
     this.now = options.now ?? (() => performance.now());
     this.game = new TronGameState(config.players, config.gameMode, config.levelMode, options.rng);
 
+    const rng = options.rng ?? Math.random;
     for (const player of config.players) {
-      if (player.control.type === 'local') this.localSlots.add(player.slotIndex);
+      if (player.control.type === 'local') {
+        this.localSlots.add(player.slotIndex);
+      } else if (player.control.type === 'ai') {
+        // Each bot gets its own random stream so bots don't perturb each other
+        const botRng = createRng(Math.floor(rng() * 0x100000000));
+        this.bots.push(new BotController(player.slotIndex, player.control.difficulty, botRng));
+      }
     }
 
     if (this.transport) {
       this.transport.onInput = (slot, input) => {
         // Only accept network input for slots that are not controlled here
-        if (this.localSlots.has(slot)) return;
-        this.inputs.set(slot, { steer: clampSteer(input.steer), action: !!input.action });
-        if (typeof input.t === 'number') this.pings.set(slot, { t: input.t, receivedAt: this.now() });
+        if (this.localSlots.has(slot) || this.bots.some(b => b.slot === slot)) return;
+        let queue = this.queues.get(slot);
+        if (!queue) {
+          queue = [];
+          this.queues.set(slot, queue);
+        }
+        queue.push({
+          steer: clampSteer(input.steer),
+          action: !!input.action,
+          seq: typeof input.seq === 'number' ? input.seq : 0,
+          t: typeof input.t === 'number' ? input.t : 0,
+          receivedAt: this.now(),
+        });
       };
     }
 
@@ -71,6 +93,23 @@ export class HostSession implements GameSession {
       if (this.localSlots.has(slot)) this.inputs.set(slot, input);
     }
 
+    // Remote players: consume exactly one queued input per tick, so that every guest
+    // tick maps to one host tick (this is what makes guest prediction exact)
+    for (const [slot, queue] of this.queues) {
+      // Too far behind (burst, or a guest clock running fast): skip the oldest
+      while (queue.length > MAX_INPUT_QUEUE) queue.shift();
+      const next = queue.shift();
+      // Queue empty: keep the previous input for this tick and ack nothing new
+      if (!next) continue;
+      this.inputs.set(slot, { steer: next.steer, action: next.action });
+      this.acks[slot] = next.seq;
+      this.pings.set(slot, next);
+    }
+
+    for (const bot of this.bots) {
+      this.inputs.set(bot.slot, bot.decide(this.game));
+    }
+
     this.game.tick(this.inputs);
     const frame = this.game.serialize();
     this.lastFrame = frame;
@@ -81,7 +120,7 @@ export class HostSession implements GameSession {
       const now = this.now();
       const pongs: Partial<Record<SlotIndex, number>> = {};
       for (const [slot, ping] of this.pings) pongs[slot] = ping.t + (now - ping.receivedAt);
-      const packed = serializeState({ ...frame, pongs });
+      const packed = serializeState({ ...frame, pongs, acks: this.acks });
       this.bytesOut.add(packed.length, this.now());
       this.transport.broadcastState(packed);
     }
@@ -105,6 +144,15 @@ export class HostSession implements GameSession {
   destroy(): void {
     this.transport?.close();
   }
+}
+
+/** Inputs a guest may have waiting on the host before the oldest are skipped. */
+export const MAX_INPUT_QUEUE = 4;
+
+interface QueuedInput extends TronInput {
+  seq: number;
+  t: number;
+  receivedAt: number;
 }
 
 function clampSteer(steer: unknown): number {

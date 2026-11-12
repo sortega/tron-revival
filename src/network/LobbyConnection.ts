@@ -14,12 +14,14 @@ import {
   createEmptySlot,
   findFirstOpenSlot,
   findSlotByPeerId,
+  aiPeerId,
+  getSlotColorName,
 } from '../types/lobby';
 import type {
   GuestToHostMessage,
   HostToGuestMessage,
 } from './protocol';
-import type { TronInputMessage } from '../types/game';
+import type { BotDifficulty, TronInputMessage } from '../types/game';
 
 const APP_ID = 'teratron-lobby';
 
@@ -265,6 +267,36 @@ export class LobbyConnection {
   setLevelMode(mode: LevelMode): void {
     if (!this.isHost || !this.lobbyState) return;
     this.lobbyState.levelMode = mode;
+    this.broadcastLobbyState();
+  }
+
+  /** Put a bot in an open slot (host only). */
+  addBot(slotIndex: SlotIndex, difficulty: BotDifficulty): void {
+    if (!this.isHost || !this.lobbyState) return;
+    if (this.lobbyState.slots[slotIndex].peerId !== null) return;
+    const name = `${getSlotColorName(this.lobbyState.gameMode, slotIndex)} Bot`;
+    this.lobbyState.slots[slotIndex] = {
+      slotIndex,
+      peerId: aiPeerId(slotIndex),
+      nickname: name,
+      isHost: false,
+      ai: difficulty,
+    };
+    this.broadcastLobbyState();
+  }
+
+  setBotDifficulty(slotIndex: SlotIndex, difficulty: BotDifficulty): void {
+    if (!this.isHost || !this.lobbyState) return;
+    const slot = this.lobbyState.slots[slotIndex];
+    if (!slot.ai) return;
+    slot.ai = difficulty;
+    this.broadcastLobbyState();
+  }
+
+  removeBot(slotIndex: SlotIndex): void {
+    if (!this.isHost || !this.lobbyState) return;
+    if (!this.lobbyState.slots[slotIndex].ai) return;
+    this.lobbyState.slots[slotIndex] = createEmptySlot(slotIndex);
     this.broadcastLobbyState();
   }
 

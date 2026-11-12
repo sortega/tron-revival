@@ -46,6 +46,28 @@ describe('PixelGrid', () => {
     expect(g.firstHitOnLine(0, 6, 20, 6)).toBeNull();
   });
 
+  it('keeps coarse occupancy in sync', () => {
+    const g = new PixelGrid();
+    expect(g.coarseFree(0, 0)).toBe(true);
+    g.set(3, 3, '#fff');
+    g.set(4, 4, '#fff');
+    g.set(3, 3, '#f00'); // Overwrite: still one pixel
+    expect(g.coarseFree(0, 0)).toBe(false);
+    expect(g.coarseFree(1, 0)).toBe(true);
+    g.delete(3, 3);
+    expect(g.coarseFree(0, 0)).toBe(false);
+    g.clearRect(0, 0, 8, 8);
+    expect(g.coarseFree(0, 0)).toBe(true);
+    // Wraps
+    g.set(PLAY_WIDTH - 1, PLAY_HEIGHT - 1, '#fff');
+    expect(g.coarseFree(-1, -1)).toBe(false);
+    const copy = new PixelGrid();
+    copy.copyFrom(g);
+    g.clear();
+    expect(copy.coarseFree(-1, -1)).toBe(false);
+    expect(g.coarseFree(-1, -1)).toBe(true);
+  });
+
   it('copies independently', () => {
     const a = new PixelGrid();
     a.set(1, 1, '#abc');

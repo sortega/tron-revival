@@ -39,6 +39,20 @@ export interface ClearedRect {
   h: number;
 }
 
+export type DeathCause =
+  | 'trail'       // Another player's trail (or a locked border)
+  | 'own-trail'   // Own colour ("ridiculous death")
+  | 'level'       // Level obstacle
+  | 'crossing'    // Head-on / diagonal crossing with another player
+  | 'bullet' | 'tracer' | 'bomb' | 'bodyguard';
+
+export interface DeathEvent {
+  slotIndex: SlotIndex;
+  cause: DeathCause;
+  x: number;
+  y: number;
+}
+
 // Projectile type: 'bullet' = Glock (explodes on impact), 'tracer' = Rifle (clears trail, has lifespan), 'bomb' = heavy missile
 export type ProjectileType = 'bullet' | 'tracer' | 'bomb';
 
@@ -85,6 +99,12 @@ export interface TronPlayerState {
   nickname: string;
   equippedWeapon: EquippedWeapon | null;
   activeEffects: ActiveEffect[];
+  // Movement details that let guests predict / extrapolate (see networking.md)
+  speed: number;         // Speed factor this tick, without the player's own Turbo weapon
+  moveCounter: number;   // Slow-movement frame counter
+  tpCooldown: number;    // Frames until portals work again for this player
+  steer: number;         // Input applied this tick
+  action: boolean;
 }
 
 export type RoundPhase = 'countdown' | 'playing' | 'waiting_ready';
@@ -142,6 +162,8 @@ export interface TronGameStateData {
   clearedLines?: number[];
   // A new round started on this tick - renderer must reset trails and level damage
   roundStarted?: boolean;
+  // Players that died on this tick and why
+  deaths?: DeathEvent[];
   // Color blindness effect remaining frames (for trail color cycling and sprite animation)
   colorBlindnessFrames?: number;
   // White flash effect remaining frames (bomb-on-bomb collision)
@@ -149,6 +171,8 @@ export interface TronGameStateData {
   // Per-slot echo of the newest input timestamp (`TronInputMessage.t`) the host has
   // consumed, corrected for the time it waited on the host. RTT = now - pong.
   pongs?: Partial<Record<SlotIndex, number>>;
+  // Last input sequence number consumed for each remote slot
+  acks?: Partial<Record<SlotIndex, number>>;
 }
 
 // Input includes action key for ready signal

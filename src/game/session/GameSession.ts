@@ -3,18 +3,21 @@
 // remote host (network guest). See design/local-and-ai.md.
 
 import type { SlotIndex } from '../../types/lobby';
-import type { TronGameStateData, TronInput, TronInputMessage, TronMatchState, TronRoundState } from '../../types/game';
+import type { TrailSegment, TronGameStateData, TronInput, TronInputMessage, TronMatchState, TronRoundState } from '../../types/game';
 import type { PixelGrid } from '../PixelGrid';
 
 export interface NetworkStats {
   lagMs: number;     // Estimated one-way latency to the host
   bytesIn: number;   // bytes/sec incoming
   bytesOut: number;  // bytes/sec outgoing
+  predictedTicks?: number;  // Guest: inputs sent but not yet acknowledged by the host
 }
 
 export interface ViewState {
   round: TronRoundState;
   match: TronMatchState;
+  /** Provisional trail pixels (predicted / extrapolated), redrawn every frame. */
+  overlayTrails?: { color: string; segments: TrailSegment[] }[];
 }
 
 export interface GameSession {

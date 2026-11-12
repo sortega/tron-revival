@@ -137,7 +137,10 @@ export class TronRenderer {
   }
 
   // Main render function
-  render(round: TronRoundState, match: TronMatchState, fps?: number, networkStats?: NetworkStats): void {
+  render(
+    round: TronRoundState, match: TronMatchState, fps?: number, networkStats?: NetworkStats,
+    overlayTrails?: { color: string; segments: TrailSegment[] }[]
+  ): void {
     // Clear the play area
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
@@ -158,6 +161,14 @@ export class TronRenderer {
       this.ctx.drawImage(this.tintCanvas, 0, 0);
     } else {
       this.ctx.drawImage(this.trailCanvas, 0, 0);
+    }
+
+    // Provisional trails (guest prediction): not part of the trail canvas
+    if (overlayTrails) {
+      for (const { color, segments } of overlayTrails) {
+        this.ctx.fillStyle = color;
+        for (const seg of segments) this.ctx.fillRect(seg.x, seg.y, 1, 1);
+      }
     }
 
     // Draw teleport portals
@@ -259,7 +270,8 @@ export class TronRenderer {
         // Lag with color coding (green < 50ms, yellow < 100ms, red >= 100ms)
         const lagColor = networkStats.lagMs < 50 ? '#0f0' : networkStats.lagMs < 100 ? '#ff0' : '#f44';
         this.ctx.fillStyle = lagColor;
-        this.ctx.fillText(`Lag: ${networkStats.lagMs}ms`, 4, y);
+        const predicted = networkStats.predictedTicks !== undefined ? `  Predicted: ${networkStats.predictedTicks} ticks` : '';
+        this.ctx.fillText(`Lag: ${networkStats.lagMs}ms${predicted}`, 4, y);
 
         // Bitrate (cyan for data rates)
         this.ctx.fillStyle = '#0ff';

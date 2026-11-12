@@ -105,17 +105,24 @@ Design: `design/local-and-ai.md`
 - [x] Touch layout only when the primary pointer is coarse (B17); no history pollution (B14)
 - [x] Stuck keys after window blur
 
-## Iteration 3 — AI players
+## Iteration 3 — AI players  ✅
 
 Design: `design/local-and-ai.md`
 
-- [ ] Bot controller producing `TronInput` from game state (wall avoidance via ray casts,
-      space-seeking, item pickup, weapon use, auto-ready)
-- [ ] Difficulty levels
-- [ ] Bots in local games
-- [ ] Bots in network games (host-run; lobby slot type `ai`)
-- [ ] **Automated gameplay validation**: headless bot-vs-bot matches across all levels asserting
-      survival-time and round-completion metrics; regression baseline for bot quality
+- [x] `BotController`: trajectory rollouts with the real movement/collision rules, a second
+      "escape" turn, corridor (U-turn room) and enclosed-area (coarse flood fill) awareness,
+      moving hazards, item goals, weapon use, auto-ready, Control Reversal compensation
+- [x] Difficulty levels (easy / normal / hard)
+- [x] Bots in local games (setup screen)
+- [x] Bots in network games (host-run; `+ AI` on open lobby slots)
+- [x] Death causes recorded by the simulation (`deaths` events; logged to the console)
+- [x] **Automated gameplay validation**: `tests/sim.ts` headless match runner; `tests/bots.test.ts`
+      regression thresholds; `npm run sim` prints a per-level tuning table
+- [ ] Bots: dodge projectiles and bomb blast areas
+- [ ] Bots: most remaining deaths are "own trail" in self-made pockets; a Voronoi-style
+      territory estimate would help more than longer lookahead
+- [ ] Bots cost ~0.35 ms (normal) / ~0.6 ms (hard) per tick each; fine for 3 bots on desktop,
+      check low-end phones hosting
 
 ## Iteration 4 — Netcode: make it controllable
 
@@ -151,9 +158,37 @@ Design: update `design/networking.md` (connectivity section)
 - [ ] GitHub Actions: typecheck + test + build on PR; Pages deploy on main
 - [ ] Refresh `architecture.md` and README (T9)
 
+## Room & session robustness (requested)
+
+- [ ] Rejoin after a page reload: keep the room code in the URL / sessionStorage plus a stable
+      player id, so a reloaded guest gets its slot back and resumes the running game (needs a
+      full-state snapshot for late joiners: trails, level damage, scores)
+- [ ] Host reload: either restore the room from saved state or migrate the host
+- [ ] Back to lobby from a game without creating a new room (host returns everyone to the
+      lobby; settings can be changed; scores optionally kept)
+- [ ] Share the room as a QR code that can be scanned from a phone
+
+## Gameplay fidelity (requested)
+
+- [x] Satellites (bodyguards) freeze when the round ends
+- [x] Projectiles freeze when the round ends
+- [ ] Sidebar: desaturate a player's panel halfway to black-and-white while they are dead, and
+      fully black-and-white for slots that are not playing
+- [ ] Level 8: automatic doors are not implemented yet (check `old-tron/` source and
+      `old-tron-design.md` for the original behaviour; design doc first)
+
+## Open reports
+
+- [ ] **Laptop vs phone: both players died at the first instant of round 1.** Not reproduced with
+      two headless browsers on one machine. Deaths now carry a cause and are logged to the
+      console (`[game] X died: <cause> at x,y`) to pin it down next time. Need to know which
+      device hosted, which browser, and whether it was the dev server or the deployed build.
+- [ ] Warzone / Portals levels contain nearly-black (e.g. `#010101`) pixels that are invisible
+      but solid; decide whether to clean the images or use a brightness threshold
+
 ## Later / ideas
 
-- [ ] Return-to-lobby after a match, match length setting (T10)
+- [ ] Match length setting
 - [ ] Split `TronGameState` into systems (weapons, bodyguards, portals) (T2)
 - [ ] Extract game HTML/CSS out of `TronGame` (T6)
 - [ ] Host migration
