@@ -34,7 +34,7 @@ import {
   ITEM_COLLISION_RADIUS,
 } from '../types/game';
 import { TronPlayer, getStartingPosition } from './TronPlayer';
-import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
+import { PLAY_WIDTH, PLAY_HEIGHT, READY_LOCK_TICKS, TICK_RATE } from './constants';
 import { ItemLauncher } from './ItemLauncher';
 import { PixelGrid } from './PixelGrid';
 import { TELEPORT_COOLDOWN_FRAMES, findPortalExit, movePlayer, movesForTick, ownTurboBoost, teleportTo } from './movement';
@@ -92,6 +92,8 @@ export class TronGameState {
   /** The dentist's hand, on the level that has one */
   private hand: HandState | null = null;
   playersReady: Set<SlotIndex> = new Set();
+  // Ticks left before action presses count as "ready" (see design/architecture.md)
+  private readyLockTicks = 0;
   gameMode: GameMode;
   levelMode: LevelMode;
 
@@ -1450,13 +1452,17 @@ export class TronGameState {
     // Explosions and portals keep animating; projectiles and bodyguards are frozen
     this.tickVisualEffects(true);
 
+    // Presses right after the round ends are ignored: they were meant as shots
+    const locked = this.readyLockTicks > 0;
+    if (locked) this.readyLockTicks--;
+
     // Check for action key presses (one-shot: only on rising edge)
     for (const [slotIndex, input] of inputs) {
       const wasPressed = this.prevActionState.get(slotIndex) || false;
       const isPressed = input.action;
 
       // Toggle ready on rising edge (key just pressed)
-      if (isPressed && !wasPressed) {
+      if (isPressed && !wasPressed && !locked) {
         if (this.playersReady.has(slotIndex)) {
           this.playersReady.delete(slotIndex);
         } else {
@@ -1954,6 +1960,7 @@ export class TronGameState {
 
   private endRound(alivePlayers: TronPlayer[]): void {
     this.phase = 'waiting_ready';
+    this.readyLockTicks = READY_LOCK_TICKS;
 
     // Clear border lock state
     this.borderLocks.clear();

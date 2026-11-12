@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PixelGrid } from '../src/game/PixelGrid';
 import { serializeState, deserializeState } from '../src/network/serialization';
 import { createRng } from '../src/game/rng';
-import { PLAY_WIDTH, PLAY_HEIGHT } from '../src/game/constants';
+import { PLAY_WIDTH, PLAY_HEIGHT, READY_LOCK_TICKS } from '../src/game/constants';
 import type { SlotIndex } from '../src/types/lobby';
 import type { TronInput } from '../src/types/game';
 import { inputs, loadLevelGrid, makeGame, place, skipCountdown } from './helpers';
@@ -19,12 +19,34 @@ function finishRoundAndReady(game: ReturnType<typeof makeGame>): void {
   game.tick(new Map());
   game.serialize();
   expect(game.phase).toBe('waiting_ready');
+  for (let i = 0; i < READY_LOCK_TICKS; i++) game.tick(new Map());
   const press = inputs(...game.players.map(() => ({ action: true })));
   game.tick(press);
   game.serialize();
 }
 
 describe('round lifecycle', () => {
+  it('ignores action presses in the first 100 ms after a round ends', () => {
+    const game = makeGame(2);
+    skipCountdown(game);
+    game.players[1]!.kill();
+    game.tick(new Map());
+    expect(game.phase).toBe('waiting_ready');
+    const press = inputs({ action: true }, { action: true });
+    const release = inputs({}, {});
+    // Taps during the lock do nothing
+    for (let i = 0; i < READY_LOCK_TICKS; i++) game.tick(i % 2 === 0 ? press : release);
+    expect(game.playersReady.size).toBe(0);
+    // A button held through the lock does not count either
+    game.tick(press);
+    game.tick(press);
+    expect(game.phase).toBe('waiting_ready');
+    // Released and pressed again: ready
+    game.tick(release);
+    game.tick(press);
+    expect(game.phase).toBe('countdown');
+  });
+
   it('counts down, plays and awards the round to the survivor', () => {
     const game = makeGame(2);
     expect(game.phase).toBe('countdown');
