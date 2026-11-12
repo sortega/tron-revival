@@ -37,19 +37,20 @@ clamped to it). Satellites freeze when the round ends and disappear with their o
   against the whole path the projectile travels in the tick and against the path the
   satellite itself travels, so fast tracers cannot jump over it. Along a projectile's path
   whatever comes first counts: a satellite behind the victim does not save them.
-  A blocked bullet or tracer just disappears; a blocked H-bomb explodes there.
+  - A **tracer** (rifle, Uzi, shotgun pellet, level gun) disappears. The satellite is not
+    harmed.
+  - A **Glock bullet bounces straight back** the way it came, from the point of contact,
+    and from then on belongs to the satellite's owner: the owner's satellites let it
+    through, and whoever it kills was killed by the owner. Fired from a distance by a
+    player who keeps driving down the line of fire, it comes back and kills the shooter.
+  - An **H-bomb** explodes there.
 - **Players.** An enemy whose head comes within 5 px of a satellite (or of the path it
   travelled in the tick) dies, shield or not, with death cause `bodyguard`.
 
 ## Overwhelming a satellite
 
-A satellite is practically indestructible: **only an H-bomb blast destroys it** (every
-satellite within 50 px of the blast goes). It does wear — it has **1500 hit points** and
-every projectile it blocks costs what that projectile does to items, 10 for a tracer
-(rifle, Uzi, shotgun pellet, level gun) and 50 for a Glock bullet — and it fades as it
-wears (`Bodyguard.hp` travels to guests with the rest of the round state). But 150 pellets
-on one satellite is far more than a shotgun's 20 blasts normally land; hit points do not
-regenerate, and at 0 it would be destroyed with a small explosion.
+A satellite cannot be damaged by gunfire: **only an H-bomb blast destroys it** (every
+satellite within 50 px of the blast goes).
 
 What beats a satellite is **volume and speed of fire**. At 10 px per tick it cannot always
 get from the far side of its orbit into the line of fire before fast pellets arrive, and
@@ -61,8 +62,8 @@ ticks, over 24 directions and orbit positions:
 | 1 | owner dies 8/24 | 2/24 | 1/24 |
 | 6 | 24/24 | 6/24 | 1/24 |
 
-No satellite was destroyed in any of these. A single Glock bullet or a rifle burst is
-stopped in every set-up of the tests.
+A single Glock bullet (bounced back) or a rifle burst is stopped in every set-up of the
+tests.
 
 ## Bots
 
@@ -73,11 +74,10 @@ while that enemy has satellites, instead of only the satellites themselves.
 
 `tests/bodyguards.test.ts`:
 
-- A Glock bullet and a rifle burst fired at the owner from several directions are stopped,
-  wherever on the orbit the satellite happened to be.
+- A rifle burst fired at the owner from 12 directions is stopped wherever on the orbit the
+  satellite happened to be; a Glock bullet is bounced back and kills its shooter.
 - An enemy driving into the area is killed by the satellite before reaching the owner; one
   passing outside it is left alone; a team-mate is not harmed.
 - Shotgun: one blast is stopped more often than not; six in a row overwhelm a lone
-  satellite without destroying it; three satellites hold out; each pellet stopped costs
-  10 points.
+  satellite without destroying it; three satellites hold out.
 - With two satellites and two simultaneous threats, each takes one.

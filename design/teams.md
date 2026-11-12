@@ -32,10 +32,13 @@ score is derived from it wherever it is shown.
 ## Other team rules
 
 - Friendly fire is on: trails, shots and blasts hurt team-mates like anyone else.
+- The *Slow* weapon, which slows the other players while its trigger is held, does not
+  slow team-mates. (No weapon speeds other players up; Turbo only affects its user.)
 - Satellites spare team-mates ([bodyguards.md](./bodyguards.md)).
 - Bots do not hunt team-mates ([local-and-ai.md](./local-and-ai.md)).
 
 ## Validation
 
 `tests/rules.test.ts`: a team that wins with both members alive scores 2, with one alive 1
-(and only the survivor gets the win); a draw scores nothing.
+(and only the survivor gets the win); a draw scores nothing. The Slow weapon slows the other
+team and not a team-mate.

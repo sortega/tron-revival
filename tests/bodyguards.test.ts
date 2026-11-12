@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { PixelGrid } from '../src/game/PixelGrid';
-import { BODYGUARD_HP } from '../src/types/game';
 import type { TronInput } from '../src/types/game';
 import type { SlotIndex } from '../src/types/lobby';
 import { makeGame, place, skipCountdown } from './helpers';
@@ -68,30 +67,51 @@ function run(g: Game, ticks: number, press: (slot: number, tick: number) => bool
 }
 
 describe('satellites block projectiles', () => {
-  for (const [weapon, dist] of [['glock', 150], ['rifle', 110]] as const) {
-    it(`stop ${weapon} fire from any side, wherever they are on their orbit`, () => {
-      for (const from of DIRECTIONS) {
-        for (const settle of [20, 55, 90, 125]) {
-          const g = arena();
-          const owner = guardedOwner(g, 1, settle);
-          aimAtOwner(g, 0, owner, from, dist, weapon);
-          const deaths = run(g, 45, (slot, i) => slot === 0 && (weapon === 'glock' ? i === 0 : i < 12));
-          expect(deaths.filter(d => d.startsWith(`${OWNER}:`)), `from ${from.toFixed(1)}, settle ${settle}`).toEqual([]);
-          expect(g.getBodyguards()[0]!.hp).toBeLessThan(BODYGUARD_HP);
-        }
+  it('stop rifle fire from any side, wherever they are on their orbit, unharmed', () => {
+    for (const from of DIRECTIONS) {
+      for (const settle of [20, 55, 90, 125]) {
+        const g = arena();
+        const owner = guardedOwner(g, 1, settle);
+        aimAtOwner(g, 0, owner, from, 110, 'rifle');
+        const deaths = run(g, 45, (slot, i) => slot === 0 && i < 12);
+        expect(deaths.filter(d => d.startsWith(`${OWNER}:`)), `from ${from.toFixed(1)}, settle ${settle}`).toEqual([]);
+        expect(g.getBodyguards().length).toBe(1);
       }
-    });
-  }
+    }
+  });
+
+  it('bounce a Glock bullet straight back at whoever fired it', () => {
+    for (const from of DIRECTIONS) {
+      for (const settle of [20, 55, 90, 125]) {
+        const g = arena();
+        const owner = guardedOwner(g, 1, settle);
+        aimAtOwner(g, 0, owner, from, 150, 'glock');
+        let returned = false;
+        const deaths: string[] = [];
+        for (let i = 0; i < 60 && g.phase === 'playing'; i++) {
+          g.tick(new Map<SlotIndex, TronInput>([[0, { steer: 0, action: i === 0 }]]));
+          g.items.length = 0;
+          // After the bounce the bullet belongs to the satellite's owner
+          if (g.getProjectiles().some(p => p.type === 'bullet' && p.ownerSlot === OWNER)) returned = true;
+          for (const d of g.serialize().deaths ?? []) deaths.push(`${d.slotIndex}:${d.cause}`);
+        }
+        const label = `from ${from.toFixed(1)}, settle ${settle}`;
+        expect(returned, label).toBe(true);
+        // The shooter kept driving down the line of fire, and so into its own bullet
+        expect(deaths, label).toEqual(['0:bullet']);
+        expect(g.getBodyguards().length).toBe(1);
+      }
+    }
+  });
 
   it('split up when there are two threats', () => {
     const g = arena(3);
     const owner = guardedOwner(g, 2, 40);
     aimAtOwner(g, 0, owner, Math.PI / 2, 150, 'glock');
     aimAtOwner(g, 2, owner, -Math.PI / 2, 150, 'glock');
-    const deaths = run(g, 45, (slot, i) => slot !== OWNER && i === 0);
-    expect(deaths.filter(d => d.startsWith(`${OWNER}:`))).toEqual([]);
-    // One bullet each
-    expect(g.getBodyguards().map(bg => bg.hp)).toEqual([BODYGUARD_HP - 50, BODYGUARD_HP - 50]);
+    const deaths = run(g, 60, (slot, i) => slot !== OWNER && i === 0);
+    // Both bullets were bounced back
+    expect(deaths.sort()).toEqual(['0:bullet', '2:bullet']);
   });
 });
 
@@ -151,7 +171,8 @@ describe('satellites attack intruders', () => {
 describe('satellites under shotgun fire', () => {
   /**
    * `blasts` shotgun blasts from 95 px, over all directions: how often the owner dies,
-   * and how often a satellite is destroyed while its owner is still alive.
+   * and how often a satellite disappears while its owner is still alive (never: tracers
+   * cannot harm it).
    */
   function shotgun(satellites: number, blasts: number): { kills: number; cases: number; destroyed: number } {
     let kills = 0;
@@ -195,22 +216,5 @@ describe('satellites under shotgun fire', () => {
     const { kills, cases, destroyed } = shotgun(3, 6);
     expect(kills).toBeLessThan(cases / 4);
     expect(destroyed).toBe(0);
-  });
-
-  it('wears a satellite down by 10 points per pellet', () => {
-    let measured = 0;
-    for (const from of DIRECTIONS) {
-      const g = arena();
-      const owner = guardedOwner(g, 1, 20);
-      aimAtOwner(g, 0, owner, from, 95, 'shotgun');
-      run(g, 20, (slot, i) => slot === 0 && i === 0);
-      const satellite = g.getBodyguards()[0];
-      if (!satellite) continue; // The blast got through and the satellite went with its owner
-      measured++;
-      expect(satellite.hp).toBeLessThan(BODYGUARD_HP);
-      expect(satellite.hp).toBeGreaterThanOrEqual(BODYGUARD_HP - 300);
-      expect((BODYGUARD_HP - satellite.hp) % 10).toBe(0);
-    }
-    expect(measured).toBeGreaterThan(DIRECTIONS.length / 2);
   });
 });

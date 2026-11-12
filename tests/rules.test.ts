@@ -104,6 +104,16 @@ describe('round lifecycle', () => {
   });
 });
 
+describe('speed weapons', () => {
+  it('in free-for-all the Slow weapon slows everybody else', () => {
+    const game = makeGame(3);
+    skipCountdown(game);
+    game.players[0]!.equipWeapon('slow', undefined, 700);
+    game.tick(inputs({ action: true }));
+    expect(game.serialize().round.players.map(p => p.speed)).toEqual([1, 0, 0]);
+  });
+});
+
 describe('death', () => {
   it('takes away the weapon and the effects', () => {
     const game = makeGame(3);
@@ -150,6 +160,15 @@ describe('team scoring', () => {
     // Purple (slots 0 and 2) won with one member standing: team score 1
     expect(scores(game)).toEqual([0, 0, 1, 0]);
     expect(game.roundWinner).toBe(2);
+  });
+
+  it('the Slow weapon slows the other team, not a team-mate', () => {
+    const game = team();
+    game.players[0]!.equipWeapon('slow', undefined, 700);
+    game.tick(inputs({ action: true }));
+    const speeds = game.serialize().round.players.map(p => p.speed);
+    // Slots 0 and 2 are team-mates
+    expect(speeds).toEqual([1, 0, 1, 0]);
   });
 
   it('a draw scores nothing', () => {

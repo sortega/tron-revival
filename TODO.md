@@ -202,6 +202,7 @@ Design: `design/networking.md` (rewritten)
 - [x] Projectiles freeze when the round ends
 - [x] Sidebar: grey panel for dead players (who lose their weapon and effects) and for
       slots that are not playing; team colours in team mode (`sidebar_team`)
+- [x] Team mode: the Slow weapon does not slow team-mates
 - [x] Team mode: every survivor scores, team score = sum, shown as the headline between
       rounds (`design/teams.md`)
 - [x] Round summary shows how each player died
@@ -242,8 +243,8 @@ Rules: `design/projectiles.md`.
 - [x] A tracer hitting something on the tick it wraps erased a line across the whole arena
 - [x] H-bomb blast is a circle (cleared area, players, items, satellites)
 - [x] Satellites (`design/bodyguards.md`): intercept shots on their course instead of
-      chasing them, attack players who enter their area; 8 px/tick and 1500 HP, so they can
-      be overwhelmed by volume of fire but only an H-bomb destroys them
+      chasing them, attack players who enter their area; 10 px/tick; tracers cannot harm
+      them and Glock bullets bounce back; only an H-bomb destroys them
 
 ## Open reports
 

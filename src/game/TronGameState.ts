@@ -24,7 +24,6 @@ import { GUN_BURST_CHANCE } from './guns';
 import { createHand, stepHand } from './hand';
 import type { HandState } from './hand';
 import {
-  BODYGUARD_HP,
   LEVELS,
   NO_OWNER,
   PORTAL_RADIUS,
@@ -1077,8 +1076,9 @@ export class TronGameState {
         continue;
       }
       if (blocker) {
-        this.blockProjectile(blocker.bg, proj);
-        toRemove.push(proj.id);
+        const stopX = prevX + (unwrappedX - prevX) * blocker.t;
+        const stopY = prevY + (unwrappedY - prevY) * blocker.t;
+        if (this.blockProjectile(blocker.bg, proj, stopX, stopY)) toRemove.push(proj.id);
         continue;
       }
 
@@ -1693,9 +1693,10 @@ export class TronGameState {
           // Turbo weapon: +1 to self
           speedFactors.set(slotIndex, (speedFactors.get(slotIndex) ?? 1) + 1);
         } else if (player.equippedWeapon.sprite === 'slow') {
-          // Slow weapon: -1 to all others
+          // Slow weapon: -1 to all others, except team-mates (design/teams.md)
+          const team = this.gameMode === 'team';
           for (const other of this.players) {
-            if (other.slotIndex !== slotIndex) {
+            if (other.slotIndex !== slotIndex && !(team && other.slotIndex % 2 === slotIndex % 2)) {
               speedFactors.set(other.slotIndex, (speedFactors.get(other.slotIndex) ?? 1) - 1);
             }
           }
@@ -1951,7 +1952,6 @@ export class TronGameState {
       x: player.x,
       y: player.y,
       phaseOffset: 0, // Will be redistributed below
-      hp: BODYGUARD_HP,
     });
 
     // Redistribute phase offsets for all bodyguards of this player
@@ -1965,7 +1965,7 @@ export class TronGameState {
   // === Satellites: see design/bodyguards.md ===
 
   private bodyguardAlive(bg: Bodyguard): boolean {
-    return bg.id >= 0 && bg.hp > 0;
+    return bg.id >= 0;
   }
 
   // Satellites spare their owner and, in team mode, the owner's team-mates
@@ -2020,23 +2020,24 @@ export class TronGameState {
     return best;
   }
 
-  // A satellite stops a projectile and wears down. The caller removes the projectile.
-  private blockProjectile(bg: Bodyguard, proj: Projectile): void {
+  // A satellite stops a projectile at (x, y). Returns true if the projectile is gone;
+  // a Glock bullet is not: it bounces straight back and now belongs to the satellite's
+  // owner. Nothing here harms the satellite except a bomb's blast.
+  private blockProjectile(bg: Bodyguard, proj: Projectile, x: number, y: number): boolean {
     if (proj.type === 'bomb') {
       // The bomb goes off here (and its blast takes the satellite with it)
       this.bombImpact(Math.floor(proj.x / 1000), Math.floor(proj.y / 1000), proj.ownerSlot);
-      return;
+      return true;
     }
-    bg.hp -= proj.type === 'bullet' ? this.GLOCK_DAMAGE : this.TRACER_DAMAGE;
-    if (bg.hp <= 0) {
-      this.explosions.push({
-        id: this.nextExplosionId++,
-        x: Math.floor(bg.x / 1000),
-        y: Math.floor(bg.y / 1000),
-        frame: 0,
-      });
-      this.queueSound('explosion');
+    if (proj.type === 'bullet') {
+      proj.x = (((x % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH) * 1000;
+      proj.y = (((y % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT) * 1000;
+      proj.direction = (proj.direction + 180) % 360;
+      proj.ownerSlot = bg.ownerSlot;
+      proj.ownerCooldown = this.PROJECTILE_OWNER_COOLDOWN;
+      return false;
     }
+    return true; // Tracers just disappear
   }
 
   // Drop destroyed satellites and spread the survivors evenly around their orbit
@@ -2204,8 +2205,7 @@ export class TronGameState {
           const touching = proj.type === 'bomb'
             ? this.bombCovers(proj, bg.x / 1000, bg.y / 1000, this.BODYGUARD_BLOCK_RADIUS)
             : this.distanceToPath(proj.x / 1000, proj.y / 1000, path.x0, path.y0, path.x1, path.y1) < this.BODYGUARD_BLOCK_RADIUS;
-          if (touching) {
-            this.blockProjectile(bg, proj);
+          if (touching && this.blockProjectile(bg, proj, proj.x / 1000, proj.y / 1000)) {
             blocked.add(proj.id);
           }
         }
