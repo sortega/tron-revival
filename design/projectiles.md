@@ -25,7 +25,7 @@ that row or column — typically its own shooter.)
 | Projectile | Speed (px/tick) | Hits a player within | Effect on the player |
 |------------|-----------------|----------------------|----------------------|
 | Bullet (Glock) | 5 × speed factor | 6 px of the path | Explosion: kills everyone within 6 px, shield or not |
-| Tracer (Rifle, Uzi, Shotgun, level guns) | 5–50 | 1 px of the path | Kills that player (a shield protects) |
+| Tracer (Rifle, Uzi, Shotgun, level guns) | 5–50 | 1 px of the path on both axes (the 3 × 3 pixels around the head) | Kills that player (a shield protects) |
 | H-bomb | 2 | its body, see below | Blast: kills everyone within 50 px |
 
 ## Weapon match-ups
@@ -36,15 +36,36 @@ taken from `PROCESS Weapon` / `Traya` / `Disparo`:
 | Weapon | Shots | Speed (px/tick) | Reach | Hits a player within |
 |--------|-------|-----------------|-------|----------------------|
 | Glock | 1 bullet per press, 20 | 5 | until it hits something | 6 px (explosion) |
-| Rifle (AK-47) | bursts of 5 tracers, dead straight, 200 | 5 | 600 px | 1 px |
-| Shotgun | 30 pellets per press, ±5°, 20 blasts | 10–30 | 100–300 px | 1 px |
-| Uzi | 20 tracers per tick while held, ±30°, 10 s | 5–25 for 2 ticks (original: 10–50 for 1) | 10–50 px | 1 px |
+| Rifle (AK-47) | bursts of 5 tracers, dead straight, 200 | 5 | 600 px | 3 × 3 px |
+| Shotgun | 30 pellets per press, ±5°, 20 blasts | 10–30 | 100–300 px | 3 × 3 px |
+| Uzi | 20 tracers per tick while held, ±30°, 10 s | 5–25 for 2 ticks (original: 10–50 for 1) | 10–50 px | 3 × 3 px |
 
 - **Uzi beats Glock**: its cloud of tracers sets off incoming bullets (below). It loses to
   the shotgun and the rifle, which kill from far outside its 50 px.
 - **Shotgun beats Glock** the same way, and is outranged by the rifle.
-- **Rifle** has the longest reach but must touch the target to the pixel; a Glock bullet
-  only has to pass within 6 px, so the Glock is the easier one to aim.
+- **Rifle** has the longest reach but must pass within a pixel of the target; a Glock
+  bullet only has to pass within 6 px, so the Glock is the easier one to aim.
+
+### The rifle's line of fire
+
+Held down, the rifle fires a burst of 5 tracers, one every 2 ticks, every 20 ticks, for
+about 11 s (200 rounds). Each tracer does 5 px per tick, so along the line there are 40 px
+of tracers followed by 60 px of nothing: the line is dangerous, not a wall. A tracer kills
+when its path in the tick passes through the 3 × 3 pixels around a head (the original
+tested the same box, but only where the tracer landed each frame).
+
+Players crossing an established line of fire, measured over 580 positions and timings:
+
+| Crossing | Killed |
+|----------|--------|
+| At a right angle | 57 % |
+| At 45° | 55 % |
+| At 20° (spends longer near the line) | 72 % |
+| At a right angle with Turbo | 51 % |
+
+With a 1 × 1 hit test (before) a right-angle crossing was killed 37 % of the time; a model
+of the original's code gives 33 %. Firing the 5 tracers on consecutive ticks, as the
+original does, bunches them up and lowers the figure to 38 %, so the spacing was kept.
 
 ## Bullets against tracers
 
@@ -111,6 +132,8 @@ strips in `clearedAreas`.
 - A bullet fired into Uzi fire from 8 directions and 3 distances never reaches the Uzi's
   owner; one meeting a rifle tracer head-on explodes half-way; a shooter's own tracers do
   not set off their bullet.
+- The rifle's line of fire kills between 45 % and 70 % of right-angle crossings; a tracer
+  kills a head 1 px beside its path and misses one 2 px beside it.
 - Match-ups: Uzi reach ≤ 55 px < shotgun ≤ 310 px < rifle; shotgun fire stops a bullet
   from 8 directions; a shot passing 4 px beside a player kills with the Glock and misses
   with the rifle.

@@ -63,7 +63,9 @@ if (process.env.SIM_REPORT) {
     }, 120_000);
 
     it('hard beats easy', () => {
-      const r = runMatch({ level: 'blank', drivers: ['hard', 'easy'], rounds: 14, seed: 5, maxRoundSeconds: 90 });
+      // Two seeds: a single run of 14 rounds swings too much with every rule change
+      const r = [5, 6].flatMap(seed =>
+        runMatch({ level: 'blank', drivers: ['hard', 'easy'], rounds: 14, seed, maxRoundSeconds: 90 }));
       expect(winRate(r, 0)).toBeGreaterThan(0.6);
     }, 120_000);
 

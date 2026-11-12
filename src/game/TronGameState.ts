@@ -192,7 +192,7 @@ export class TronGameState {
   private readonly RIFLE_SHOT_DELAY = 1;        // Frames between shots in burst
   private readonly PROJECTILE_OWNER_COOLDOWN = 10; // Frames before owner collision is checked
   private readonly TRACER_LIFESPAN = 120;       // Frames before tracer expires
-  private readonly TRACER_KILL_RADIUS = 1;      // Original 1px touch-kill
+  private readonly TRACER_KILL_REACH = 1;       // Kills within 1 px on both axes: the 3x3 box of the original
   private readonly TRACER_CLEAR_RADIUS = 1;     // 3x3 area on death
 
   // Uzi weapon constants
@@ -1025,8 +1025,7 @@ export class TronGameState {
       let hitPlayer = false;
       if (this.phase !== 'waiting_ready') {
         // Bomb uses direct impact radius (like bullets), not the kill radius
-        const killRadius = proj.type === 'bullet' ? this.BULLET_KILL_RADIUS :
-                          proj.type === 'bomb' ? this.BULLET_KILL_RADIUS : this.TRACER_KILL_RADIUS;
+        const killRadius = this.BULLET_KILL_RADIUS;
         for (const player of this.players) {
           if (!player.alive) continue;
           // Skip owner during cooldown period
@@ -1039,8 +1038,14 @@ export class TronGameState {
           if (proj.type === 'bomb') {
             hit = !blocker && this.bombCovers(proj, px, py, this.BOMB_PLAYER_MARGIN);
           } else {
-            const closest = this.closestOnPath(px, py, prevX, prevY, unwrappedX, unwrappedY);
-            hit = closest.dist < killRadius && closest.t < stopT;
+            if (proj.type === 'tracer') {
+              // A tracer kills when its path passes through the 3x3 pixels around the head
+              const t = this.pathEntersBox(px, py, this.TRACER_KILL_REACH, prevX, prevY, unwrappedX, unwrappedY);
+              hit = t !== null && t < stopT;
+            } else {
+              const closest = this.closestOnPath(px, py, prevX, prevY, unwrappedX, unwrappedY);
+              hit = closest.dist < killRadius && closest.t < stopT;
+            }
           }
           if (hit) {
             if (proj.type === 'bullet') {
@@ -1352,6 +1357,39 @@ export class TronGameState {
           x: ((Math.round(px) % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH,
           y: ((Math.round(py) % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT,
         };
+      }
+    }
+    return best;
+  }
+
+  // Does the path travelled this tick (x0,y0 → x1,y1) pass through the square of
+  // ±`reach` pixels around a point? Returns how far along the path it enters (0..1), or
+  // null. Like closestOnPath, the point is also tried wrapped around.
+  private pathEntersBox(
+    px: number, py: number, reach: number, x0: number, y0: number, x1: number, y1: number
+  ): number | null {
+    const shiftX = x1 < 0 ? -PLAY_WIDTH : x1 >= PLAY_WIDTH ? PLAY_WIDTH : 0;
+    const shiftY = y1 < 0 ? -PLAY_HEIGHT : y1 >= PLAY_HEIGHT ? PLAY_HEIGHT : 0;
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    let best: number | null = null;
+    for (const sx of shiftX !== 0 ? [0, shiftX] : [0]) {
+      for (const sy of shiftY !== 0 ? [0, shiftY] : [0]) {
+        // Slab test of the segment against the square
+        let enter = 0;
+        let leave = 1;
+        let crosses = true;
+        for (const [start, delta, centre] of [[x0, dx, px + sx], [y0, dy, py + sy]] as const) {
+          if (delta === 0) {
+            if (Math.abs(start - centre) > reach) crosses = false;
+            continue;
+          }
+          const t1 = (centre - reach - start) / delta;
+          const t2 = (centre + reach - start) / delta;
+          enter = Math.max(enter, Math.min(t1, t2));
+          leave = Math.min(leave, Math.max(t1, t2));
+        }
+        if (crosses && enter <= leave && (best === null || enter < best)) best = enter;
       }
     }
     return best;

@@ -58,10 +58,8 @@ ticks, over 24 directions and orbit positions:
 
 | Blasts in a row | 1 satellite | 2 satellites | 3 satellites |
 |-----------------|-------------|--------------|--------------|
-| 1 | owner dies 8/24 | 2/24 | 0/24 |
-| 6 | 24/24 | 4/24 | 0/24 |
-
-(At 8 px per tick the first blast got through 10, 8 and 4 times; at 12, 6, 2 and 0.)
+| 1 | owner dies 8/24 | 2/24 | 1/24 |
+| 6 | 24/24 | 6/24 | 1/24 |
 
 No satellite was destroyed in any of these. A single Glock bullet or a rifle burst is
 stopped in every set-up of the tests.

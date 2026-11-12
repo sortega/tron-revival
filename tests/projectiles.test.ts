@@ -232,6 +232,53 @@ describe('weapon match-ups', () => {
     expect(rifle).toBeGreaterThan(450);
   });
 
+  it('sustained rifle fire kills more than half of those who cross it, not all', () => {
+    // The rifle fires bursts of 5 with gaps in between: the line can be crossed with luck
+    let killed = 0;
+    let total = 0;
+    for (let x = 350; x <= 550; x += 20) {
+      for (let phase = 0; phase < 20; phase += 2) {
+        const g = arena();
+        place(g, 0, 100, 300, 0);
+        place(g, 1, 100, 550, 0);          // out of the way until the line is established
+        g.players[0]!.equipWeapon('rifle', 200);
+        const hold = inputs({ action: true }, {});
+        for (let i = 0; i < 100 + phase; i++) {
+          g.tick(hold);
+          g.items.length = 0;
+          g.serialize();
+        }
+        place(g, 1, x, 260, 90);           // drives straight down across the line of fire
+        total++;
+        for (let i = 0; i < 60 && g.phase === 'playing'; i++) {
+          g.tick(hold);
+          g.items.length = 0;
+          const deaths = (g.serialize().deaths ?? []).map(d => `${d.slotIndex}:${d.cause}`);
+          if (deaths.length > 0) {
+            expect(deaths).toEqual(['1:tracer']);
+            killed++;
+            break;
+          }
+        }
+      }
+    }
+    expect(killed / total).toBeGreaterThan(0.45);
+    expect(killed / total).toBeLessThan(0.7);
+  });
+
+  it('a tracer kills within the 3x3 pixels around a head, no further', () => {
+    const outcome = (offset: number): string[] => {
+      const g = arena();
+      place(g, 0, 200, 300, 0);
+      place(g, 1, 304, 300 + offset, 0);   // ahead of the shooter, moving along the line of fire
+      return fireAndWatch(g, 'rifle', 60);
+    };
+    expect(outcome(1)).toContain('1:tracer');
+    expect(outcome(-1)).toContain('1:tracer');
+    expect(outcome(2)).toEqual([]);
+    expect(outcome(-2)).toEqual([]);
+  });
+
   it('shotgun fire stops a Glock bullet', () => {
     for (let k = 0; k < 8; k++) {
       const from = (k * Math.PI) / 4 + 0.1;
