@@ -124,19 +124,24 @@ Design: `design/local-and-ai.md`
 - [ ] Bots cost ~0.35 ms (normal) / ~0.6 ms (hard) per tick each; fine for 3 bots on desktop,
       check low-end phones hosting
 
-## Iteration 4 — Netcode: make it controllable
+## Iteration 4 — Netcode: make it controllable  ✅
 
-Design: update `design/networking.md` (prediction & reconciliation section)
+Design: `design/networking.md` (Input Handling, Prediction and Reconciliation)
 
-- [ ] Sequence-numbered inputs, per-player input queue on host, ack in state
-- [ ] Client-side prediction + reconciliation for the local player (B5)
-- [ ] Provisional (predicted) local trail rendering
-- [ ] Dead reckoning for remote players (extrapolate by measured one-way delay)
-- [ ] Per-guest ping echo (B10)
-- [ ] Slim the wire format: static player data out of per-tick state, compact projectiles,
-      run-length cleared areas (T7)
-- [ ] Headless netcode test rig: host + guest sims joined by a simulated link
-      (latency / jitter), asserting prediction error bounds
+- [x] Sequence-numbered inputs, per-player input queue on host, ack in state
+- [x] Client-side prediction + reconciliation for the local player (B5), sharing the host's
+      movement code (`movement.ts`): speed factors, Control Reversal, wrap, portals
+- [x] Provisional (predicted) trail rendering
+- [x] Dead reckoning for remote players
+- [x] Per-guest ping echo, immune to clock offset and host hold time (B10)
+- [x] Slim wire format (T7): ~20 KB/s per guest instead of 70+
+- [x] Headless netcode rig (`tests/netsim.ts`): prediction is exact on steady links from
+      0 to 250 ms, bounded under jitter and clock drift; arena reconstruction is bit-exact
+- [x] `?lag=<ms>&jitter=<ms>` artificial latency for manual / browser testing
+- [ ] Smooth the 1-tick corrections under heavy jitter (currently snaps)
+- [ ] Guest-side jitter buffer for remote entities if real-world jitter looks bad
+- [ ] Unreliable/unordered channel for state (needs transport support) to avoid
+      head-of-line blocking on lossy links
 
 ## Iteration 5 — P2P that works across networks
 

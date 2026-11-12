@@ -199,8 +199,11 @@ describe('fuzz', () => {
           expect(p.y).toBeLessThan(PLAY_HEIGHT * 1000);
         }
         if (tick % 50 === 0) {
-          const round = deserializeState(serializeState(state));
-          expect(round.round.players.length).toBe(4);
+          const copy = deserializeState(serializeState(state), state.round.players);
+          expect(copy.round.players).toEqual(state.round.players.map(p => ({ ...p, x: Math.round(p.x), y: Math.round(p.y) })));
+          expect(copy.round.items).toEqual(state.round.items.filter(i => i.active));
+          expect(copy.round.projectiles.length).toBe(state.round.projectiles.length);
+          expect(copy.newTrailSegments).toEqual(state.newTrailSegments);
         }
       }
       expect(roundsFinished).toBeGreaterThanOrEqual(3);

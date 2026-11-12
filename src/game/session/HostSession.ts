@@ -7,6 +7,8 @@ import { TronGameState } from '../TronGameState';
 import type { PixelGrid } from '../PixelGrid';
 import type { Rng } from '../rng';
 import { serializeState } from '../../network/serialization';
+import type { WireState } from '../../network/serialization';
+import { TICK_RATE } from '../constants';
 import { BotController } from '../ai/BotController';
 import { createRng } from '../rng';
 import { ByteRate } from './GameSession';
@@ -34,6 +36,8 @@ export class HostSession implements GameSession {
   private readonly pings = new Map<SlotIndex, { t: number; receivedAt: number }>();
   private readonly queues = new Map<SlotIndex, QueuedInput[]>();
   private readonly acks: Partial<Record<SlotIndex, number>> = {};
+  private readonly lastSent = new Map<string, string>();
+  private framesSent = 0;
 
   constructor(config: GameConfig, options: HostSessionOptions = {}) {
     this.transport = options.transport ?? null;
@@ -86,7 +90,7 @@ export class HostSession implements GameSession {
     if (this.pendingInitialFrame) {
       const initial = this.pendingInitialFrame;
       this.pendingInitialFrame = null;
-      this.onFrame?.(initial);
+      this.emit(initial);
     }
 
     for (const [slot, input] of localInputs) {
@@ -113,6 +117,11 @@ export class HostSession implements GameSession {
     this.game.tick(this.inputs);
     const frame = this.game.serialize();
     this.lastFrame = frame;
+    this.emit(frame);
+  }
+
+  // Deliver a frame to the local view and to every guest
+  private emit(frame: TronGameStateData): void {
     this.onFrame?.(frame);
 
     if (this.transport) {
@@ -120,10 +129,32 @@ export class HostSession implements GameSession {
       const now = this.now();
       const pongs: Partial<Record<SlotIndex, number>> = {};
       for (const [slot, ping] of this.pings) pongs[slot] = ping.t + (now - ping.receivedAt);
-      const packed = serializeState({ ...frame, pongs, acks: this.acks });
-      this.bytesOut.add(packed.length, this.now());
+      // Slow-changing parts are only sent when they change (and once a second, as a
+      // safety net); guests keep the last value they received
+      const refresh = this.framesSent++ % TICK_RATE === 0;
+      const wire: WireState = { ...frame, pongs, acks: this.acks };
+      const round: WireState['round'] = { ...frame.round };
+      wire.round = round;
+      if (!this.changed('match', frame.match) && !refresh) delete wire.match;
+      if (!this.changed('items', frame.round.items) && !refresh) delete round.items;
+      if (!this.changed('portals', frame.round.portals) && !refresh) delete round.portals;
+      const packed = serializeState(wire);
+      this.bytesOut.add(packed.length, now);
       this.transport.broadcastState(packed);
     }
+  }
+
+  /** Sequence number of the last input consumed for a remote slot. */
+  getAck(slot: SlotIndex): number | undefined {
+    return this.acks[slot];
+  }
+
+  // True if `value` differs from what was last recorded under `key`
+  private changed(key: string, value: unknown): boolean {
+    const json = JSON.stringify(value);
+    if (this.lastSent.get(key) === json) return false;
+    this.lastSent.set(key, json);
+    return true;
   }
 
   getViewState(): ViewState {

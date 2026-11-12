@@ -5,6 +5,7 @@
 import type { SlotIndex } from '../../types/lobby';
 import type { TrailSegment, TronGameStateData, TronInput, TronPlayerState } from '../../types/game';
 import { deserializeState } from '../../network/serialization';
+import type { PlayerIdentity } from '../../network/serialization';
 import { ByteRate } from './GameSession';
 import type { GameSession, GuestTransport, NetworkStats, ViewState } from './GameSession';
 import { predictPlayer } from './prediction';
@@ -34,6 +35,7 @@ export class GuestSession implements GameSession {
 
   private readonly transport: GuestTransport;
   private readonly mySlot: SlotIndex | null;
+  private readonly players: readonly PlayerIdentity[];
   private readonly now: () => number;
   private readonly predict: boolean;
   private readonly extrapolate: boolean;
@@ -47,9 +49,13 @@ export class GuestSession implements GameSession {
   private lagSamples: number[] = [];
   private lagMs = 0;
 
-  constructor(transport: GuestTransport, mySlot: SlotIndex | null, options: GuestSessionOptions = {}) {
+  constructor(
+    transport: GuestTransport, mySlot: SlotIndex | null,
+    players: readonly PlayerIdentity[], options: GuestSessionOptions = {}
+  ) {
     this.transport = transport;
     this.mySlot = mySlot;
+    this.players = players;
     this.now = options.now ?? (() => performance.now());
     this.predict = options.predict ?? true;
     this.extrapolate = options.extrapolate ?? true;
@@ -70,7 +76,7 @@ export class GuestSession implements GameSession {
   }
 
   private handleState(data: Uint8Array): void {
-    const state = deserializeState(data);
+    const state = deserializeState(data, this.players, this.latest);
     const now = this.now();
     this.bytesIn.add(data.length, now);
     this.latest = state;

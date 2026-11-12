@@ -3,6 +3,7 @@
 import type { Screen, ScreenManager, LobbyOptions } from './ScreenManager';
 import { LobbyConnection } from '../network/LobbyConnection';
 import { GameConnection } from '../network/GameConnection';
+import { DEBUG_LAG, LaggedTransport } from '../network/LaggedTransport';
 import type { LobbyState, PlayerSlot, SlotIndex, GameMode } from '../types/lobby';
 import { getSlotColor, canStartGame, getFilledSlotCount, findFirstOpenSlot } from '../types/lobby';
 import type { BotDifficulty, GameConfig, GamePlayer, PlayerControl } from '../types/game';
@@ -989,10 +990,12 @@ export class NetworkLobby implements Screen {
       levelMode: lobbyState.levelMode,
     };
 
-    const transport = new GameConnection(this.connection, slotByPeerId);
+    const connection = new GameConnection(this.connection, slotByPeerId);
+    // `?lag=<ms>` adds artificial latency, to test the netcode on one machine
+    const transport = DEBUG_LAG ? new LaggedTransport(connection, DEBUG_LAG) : connection;
     const session = this.connection.isHostMode()
       ? new HostSession(gameConfig, { transport })
-      : new GuestSession(transport, mySlot);
+      : new GuestSession(transport, mySlot, gameConfig.players);
 
     return { gameConfig, session };
   }

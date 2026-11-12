@@ -258,13 +258,20 @@ export class TronGameState {
     this.frameSoundEvents.push({ sound });
   }
 
-  // Queue a looping sound
+  // Looping sounds currently playing, so that start/stop events are only emitted on
+  // transitions (not on every frame the condition holds)
+  private activeLoops = new Set<string>();
+
+  // Start a looping sound (no-op if that loop is already playing)
   private queueLoopSound(sound: string, loopKey: string): void {
+    if (this.activeLoops.has(loopKey)) return;
+    this.activeLoops.add(loopKey);
     this.frameSoundEvents.push({ sound, loop: true, loopKey });
   }
 
-  // Queue stopping a looping sound
+  // Stop a looping sound (no-op if it is not playing)
   private queueStopLoop(loopKey: string): void {
+    if (!this.activeLoops.delete(loopKey)) return;
     this.frameSoundEvents.push({ sound: '', stopLoop: loopKey });
   }
 
@@ -300,6 +307,7 @@ export class TronGameState {
     this.roundWinner = null;
     this.pixels.copyFrom(this.levelObstacles);
     this.frameRoundStarted = true;
+    this.activeLoops.clear(); // The view stops all loops when a round starts or ends
     this.frameTrailSegments.clear();
     this.playersReady.clear();
     this.prevActionState.clear();
@@ -1902,6 +1910,7 @@ export class TronGameState {
 
     // Clear border lock state
     this.borderLocks.clear();
+    this.activeLoops.clear();
 
     const winner = alivePlayers[0];
     if (!winner) {

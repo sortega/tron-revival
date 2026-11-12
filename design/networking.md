@@ -483,8 +483,9 @@ living player forward by the same number of ticks (`pending.length`, capped at
 extrapolated segment is drawn as a provisional trail too. When the next state arrives the
 extrapolation restarts from the new authoritative position, so errors never accumulate.
 
-Projectiles are extrapolated linearly the same way. Everything else (items, portals,
-explosions, scores) is shown as received.
+Everything else (projectiles, items, portals, explosions, scores) is shown as received:
+projectile impacts are decided in host time, and an extrapolated bullet would appear to fly
+through obstacles before vanishing.
 
 #### One-shot events
 
@@ -498,10 +499,31 @@ may arrive between two rendered frames) and only uses the latest state for drawi
 independent of clock offsets and of host frame timing. The debug overlay (key `F`) shows the
 median one-way lag, bitrate, and the number of predicted ticks.
 
+#### Wire format
+
+A frame is MessagePack with positional arrays for the hot parts (`network/serialization.ts`):
+
+- players as tuples, positions rounded to 1/1000 px, no colour/nickname (static, from the
+  lobby),
+- projectiles as one flat number array, trails and border segments as flat `[x, y, ...]`,
+- tracer paths as line segments (`clearedLines`) rather than one entry per pixel,
+- `match`, `items` and `portals` only when they changed (plus once a second); the guest keeps
+  the last value,
+- loop-sound start/stop events only on transitions.
+
+Typical bitrate is 15–25 KB/s per guest (it was 70+ KB/s, with spikes of several hundred
+during Uzi fire).
+
+#### Testing with artificial latency
+
+Opening the game with `?lag=120` (and optionally `&jitter=40`) delays every game message
+that client sends and receives by that many milliseconds, so prediction can be felt and
+tested with two tabs on one machine. The debug overlay (`F`) shows lag and predicted ticks.
+
 #### Validation
 
 `tests/netcode.test.ts` wires a `HostSession` and a `GuestSession` through a simulated link
-with configurable latency and jitter on a virtual clock and asserts that
+(`tests/netsim.ts`) with configurable latency and jitter on a virtual clock and asserts that
 - the predicted position for input `seq` equals the host's position after consuming `seq`
   (exactly, for jitter-free links; within a small bound otherwise),
 - the guest's view responds to input on the same tick regardless of latency,
