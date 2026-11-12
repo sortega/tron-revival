@@ -4,7 +4,7 @@ import {
   doorFrame, doorSolidAt,
 } from '../src/game/doors';
 import { serializeState, deserializeState } from '../src/network/serialization';
-import { TICK_RATE } from '../src/game/constants';
+import { READY_LOCK_TICKS, TICK_RATE } from '../src/game/constants';
 import { inputs, loadLevelGrid, makeGame, place, skipCountdown } from './helpers';
 import { runMatch } from './sim';
 
@@ -118,7 +118,7 @@ describe('doors in the simulation', () => {
   it('only run while playing and restart every round', () => {
     const game = makeGame(2, 1, { level: 'portals' });
     game.setLevelObstacles(loadLevelGrid('portals'));
-    for (let i = 0; i < 20; i++) game.tick(new Map());
+    for (let i = 0; i < READY_LOCK_TICKS; i++) game.tick(new Map());
     expect(game.phase).toBe('countdown');
     expect(game.doorTick).toBe(0);
     skipCountdown(game);
@@ -132,7 +132,7 @@ describe('doors in the simulation', () => {
     expect(game.phase).toBe('waiting_ready');
     const frozen = game.doorTick;
     expect(frozen).toBeGreaterThan(30);
-    for (let i = 0; i < 20; i++) game.tick(new Map());
+    for (let i = 0; i < READY_LOCK_TICKS; i++) game.tick(new Map());
     expect(game.doorTick).toBe(frozen);
     game.tick(inputs({ action: true }, { action: true }));
     expect(game.doorTick).toBe(0);

@@ -26,7 +26,7 @@ function finishRoundAndReady(game: ReturnType<typeof makeGame>): void {
 }
 
 describe('round lifecycle', () => {
-  it('ignores action presses in the first 100 ms after a round ends', () => {
+  it('ignores action presses in the first second after a round ends', () => {
     const game = makeGame(2);
     skipCountdown(game);
     game.players[1]!.kill();
@@ -35,7 +35,8 @@ describe('round lifecycle', () => {
     const press = inputs({ action: true }, { action: true });
     const release = inputs({}, {});
     // Taps during the lock do nothing
-    for (let i = 0; i < READY_LOCK_TICKS; i++) game.tick(i % 2 === 0 ? press : release);
+    for (let i = 0; i < READY_LOCK_TICKS - 1; i++) game.tick(i % 2 === 0 ? press : release);
+    game.tick(press);
     expect(game.playersReady.size).toBe(0);
     // A button held through the lock does not count either
     game.tick(press);

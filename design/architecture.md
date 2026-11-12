@@ -68,7 +68,7 @@ Rules of the layering:
 - Movement rules shared between host and guest prediction live in `movement.ts`.
 - Round flow: `countdown` → `playing` → `waiting_ready` (everyone presses action to toggle
   "ready"; the next round starts when all are). Action presses are ignored for the first
-  `READY_LOCK_TICKS` (7 ticks = 100 ms) of `waiting_ready`, so a shot fired as the round
+  `READY_LOCK_TICKS` (70 ticks = 1 s) of `waiting_ready`, so a shot fired as the round
   ends is not taken as "ready". A button held through the lock must be released and
   pressed again.
 
