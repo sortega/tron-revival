@@ -187,7 +187,7 @@ export class TronGameState {
     shotsRemaining: number;    // Shots left in current burst (0-5)
     shotDelay: number;         // Delay counter between shots in burst
   }> = new Map();
-  private readonly RIFLE_BURST_INTERVAL = 20;   // Frames between bursts
+  private readonly RIFLE_BURST_INTERVAL = 15;   // Ticks between the starts of two bursts (the original: 20)
   private readonly RIFLE_SHOTS_PER_BURST = 5;
   private readonly RIFLE_SHOT_DELAY = 1;        // Frames between shots in burst
   private readonly PROJECTILE_OWNER_COOLDOWN = 10; // Frames before owner collision is checked
@@ -619,7 +619,7 @@ export class TronGameState {
 
             burst.frameCounter++;
 
-            // Start new burst every 20 frames if not already bursting and have enough ammo
+            // Start a new burst when the interval is up, if not already bursting and with enough ammo
             if (burst.shotsRemaining === 0 && burst.frameCounter >= this.RIFLE_BURST_INTERVAL) {
               if ((player.equippedWeapon.ammo ?? 0) >= this.RIFLE_SHOTS_PER_BURST) {
                 burst.shotsRemaining = this.RIFLE_SHOTS_PER_BURST;

@@ -232,12 +232,12 @@ describe('weapon match-ups', () => {
     expect(rifle).toBeGreaterThan(450);
   });
 
-  it('sustained rifle fire kills more than half of those who cross it, not all', () => {
-    // The rifle fires bursts of 5 with gaps in between: the line can be crossed with luck
+  it('sustained rifle fire kills most of those who cross it, not all', () => {
+    // The rifle fires bursts of 5 with short gaps in between: crossing takes luck
     let killed = 0;
     let total = 0;
     for (let x = 350; x <= 550; x += 20) {
-      for (let phase = 0; phase < 20; phase += 2) {
+      for (let phase = 0; phase < 15; phase++) {
         const g = arena();
         place(g, 0, 100, 300, 0);
         place(g, 1, 100, 550, 0);          // out of the way until the line is established
@@ -262,8 +262,24 @@ describe('weapon match-ups', () => {
         }
       }
     }
-    expect(killed / total).toBeGreaterThan(0.45);
-    expect(killed / total).toBeLessThan(0.7);
+    expect(killed / total).toBeGreaterThan(0.65);
+    expect(killed / total).toBeLessThan(0.9);
+  });
+
+  it('200 rifle rounds last about eight and a half seconds of sustained fire', () => {
+    const g = arena();
+    place(g, 0, 100, 300, 0);
+    place(g, 1, 100, 550, 0);
+    g.players[0]!.equipWeapon('rifle', 200);
+    let ticks = 0;
+    while (g.players[0]!.equippedWeapon && ticks < 2000) {
+      g.tick(inputs({ action: true }, {}));
+      g.items.length = 0;
+      g.serialize();
+      ticks++;
+    }
+    expect(g.phase).toBe('playing');
+    expect(ticks).toBe(594); // 40 bursts of 5, one every 15 ticks
   });
 
   it('a tracer kills within the 3x3 pixels around a head, no further', () => {

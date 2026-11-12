@@ -236,7 +236,8 @@ Rules: `design/projectiles.md`.
       its nose touches a wall
 - [x] Glock bullets explode when they cross a tracer (Uzi/rifle fire shoots them down)
 - [x] Tracers kill within the 3×3 pixels around a head, as in the original (was 1×1):
-      sustained rifle fire kills 57 % of right-angle crossings instead of 37 %
+      and the rifle bursts every 15 ticks instead of 20 (8.5 s of fire): sustained rifle
+      fire kills 77 % of right-angle crossings instead of 37 %
 - [x] A single tracer or bullet crossing a flying H-bomb sets it off (whole-path test)
 - [x] A tracer hitting something on the tick it wraps erased a line across the whole arena
 - [x] H-bomb blast is a circle (cleared area, players, items, satellites)
