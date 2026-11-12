@@ -291,6 +291,7 @@ tested with two tabs on one machine. The debug overlay (`F`) shows lag and predi
 | Host reloads in the lobby | Comes back as host (`hostId` matches); guests see "host reconnecting…" meanwhile |
 | Host reloads during a game | The simulation is lost: the host returns and puts the room back in the lobby (scores reset). *Host migration is a possible later improvement* |
 | Host gone | Guests wait 25 s for it to return, then leave to the menu with a message |
+| Host silent during a game | The host sends a state every tick, so a guest that has heard nothing for 1.5 s (`HOST_SILENCE_MS`) shows "Connection to the host lost — waiting…" with a seconds counter over the frozen game. It disappears with the next state. This covers a host that left, crashed or lost its connection (`NetworkStats.silentMs`) |
 | Room empty, host reloads | No peer holds the room state; the host recreates it (remembered in `sessionStorage`) |
 
 ### Snapshot

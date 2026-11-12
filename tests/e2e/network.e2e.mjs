@@ -154,6 +154,16 @@ try {
   await guest.waitForFunction(() => window.__teratron.view()?.match.levelMode === 'bricks', null, { timeout: 15000 });
   check('second game starts with the new settings', true);
 
+  // --- Host goes silent: the guest notices, and recovers ---
+  const frozen = host.evaluate(() => { const end = Date.now() + 3000; while (Date.now() < end); });
+  const noticed = await guest.waitForFunction(() => window.__teratron.stats()?.silentMs > 1500, null, { timeout: 10000 })
+    .then(() => true, () => false);
+  check('guest notices a silent host', noticed);
+  await frozen;
+  const recovered = await guest.waitForFunction(() => window.__teratron.stats()?.silentMs < 500, null, { timeout: 10000 })
+    .then(() => true, () => false);
+  check('guest recovers when the host is back', recovered);
+
   // --- Host reloads: room survives, back in the lobby ---
   await host.reload();
   await inLobby(host, 30000);

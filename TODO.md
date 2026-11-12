@@ -166,8 +166,8 @@ Design: `design/networking.md` (rewritten)
 - [ ] Verify on real devices across networks (phone on mobile data ↔ laptop on Wi-Fi)
 - [ ] Optional alternative signaling strategy (MQTT / own relay) if Nostr relays are blocked
       on some network
-- [ ] Show "host disconnected, waiting…" overlay inside the game (currently only in the lobby
-      and the console)
+- [x] In-game "Connection to the host lost — waiting…" banner when a guest has heard nothing
+      from the host for 1.5 s
 
 ## Iteration 6 — Tooling & dependencies  ✅
 

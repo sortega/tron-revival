@@ -37,6 +37,7 @@ interface PendingInput extends TronInput {
 export class GuestSession implements GameSession {
   onFrame: ((frame: TronGameStateData) => void) | null = null;
   onEnded: ((reason: string) => void) | null = null;
+  private lastStateAt: number | null = null;  // When the last state from the host arrived
   onSnapshot: ((arena: PixelGrid) => void) | null = null;
   readonly runsInBackground = false;
 
@@ -122,6 +123,7 @@ export class GuestSession implements GameSession {
     const state = deserializeState(data, this.players, this.latest);
     if (state.tick !== undefined && state.tick <= this.minTick) return; // Already in the snapshot
     const now = this.now();
+    this.lastStateAt = now;
     this.bytesIn.add(data.length, now);
     this.latest = state;
     this.view = null;
@@ -202,6 +204,7 @@ export class GuestSession implements GameSession {
       bytesIn: this.bytesIn.perSecond(this.now()),
       bytesOut: 0,
       predictedTicks: this.pending.length,
+      silentMs: this.lastStateAt === null ? 0 : this.now() - this.lastStateAt,
     };
   }
 

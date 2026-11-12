@@ -311,6 +311,22 @@ export class TronRenderer {
   }
 
   // Full-screen text shown when there is no game state to draw yet
+  /** A banner over the running game (e.g. the host went silent). */
+  renderNotice(title: string, detail: string): void {
+    const ctx = this.ctx;
+    const midY = CANVAS_HEIGHT / 2;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(0, midY - 50, PLAY_WIDTH, 100);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#f44';
+    ctx.font = 'bold 24px monospace';
+    ctx.fillText(title, PLAY_WIDTH / 2, midY - 14);
+    ctx.fillStyle = '#ccc';
+    ctx.font = '16px monospace';
+    ctx.fillText(detail, PLAY_WIDTH / 2, midY + 18);
+  }
+
   renderMessage(text: string): void {
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);

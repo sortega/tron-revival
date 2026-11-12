@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { HostSession } from '../src/game/session/HostSession';
 import { GuestSession } from '../src/game/session/GuestSession';
+import { HOST_SILENCE_MS } from '../src/game/session/GameSession';
 import { PixelGrid } from '../src/game/PixelGrid';
 import { createRng } from '../src/game/rng';
 import { FFA_COLORS } from '../src/types/lobby';
@@ -312,5 +313,27 @@ describe('joining a game in progress', () => {
     late.loadSnapshot(new Uint8Array([1, 2, 3]));
     rig.net.runUntil(1000);
     expect(late.getViewState()).not.toBeNull();
+  });
+});
+
+describe('host silence', () => {
+  it('is measured by the guest and ends with the next state', () => {
+    const rig = makeRig({ delayMs: 40 });
+    expect(rig.guest.getNetworkStats().silentMs).toBe(0); // Nothing received yet
+    rig.net.runUntil(1000);
+    expect(rig.guest.getNetworkStats().silentMs).toBeLessThan(HOST_SILENCE_MS / 10);
+
+    const broadcast = rig.net.hostTransport.broadcastState;
+    rig.net.hostTransport.broadcastState = () => {};
+    rig.net.runUntil(4000);
+    const silent = rig.guest.getNetworkStats().silentMs!;
+    expect(silent).toBeGreaterThan(HOST_SILENCE_MS);
+    expect(silent).toBeLessThanOrEqual(3000);
+    // The frozen game is still there to look at
+    expect(rig.guest.getViewState()).not.toBeNull();
+
+    rig.net.hostTransport.broadcastState = broadcast;
+    rig.net.runUntil(4200);
+    expect(rig.guest.getNetworkStats().silentMs).toBeLessThan(HOST_SILENCE_MS / 10);
   });
 });

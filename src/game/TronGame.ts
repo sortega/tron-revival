@@ -12,6 +12,7 @@ import type { InputBinding } from './input/InputManager';
 import { getSoundManager, type SoundName } from './SoundManager';
 import { Ticker } from './Ticker';
 import type { GameSession } from './session/GameSession';
+import { HOST_SILENCE_MS } from './session/GameSession';
 import { escapeHtml } from '../util/html';
 
 export class TronGame implements Screen {
@@ -577,8 +578,15 @@ export class TronGame implements Screen {
       this.loadLevel(levelIndex);
     }
 
-    const stats = this.showFps ? this.session.getNetworkStats() ?? undefined : undefined;
-    this.renderer.render(view.round, view.match, this.showFps ? this.currentFps : undefined, stats, view.overlayTrails);
+    const stats = this.session.getNetworkStats() ?? undefined;
+    this.renderer.render(
+      view.round, view.match, this.showFps ? this.currentFps : undefined,
+      this.showFps ? stats : undefined, view.overlayTrails
+    );
+    const silentMs = stats?.silentMs ?? 0;
+    if (silentMs > HOST_SILENCE_MS) {
+      this.renderer.renderNotice('Connection to the host lost', `waiting… ${Math.floor(silentMs / 1000)}s`);
+    }
   }
 
   // Apply the one-shot events carried by a simulation frame (trail growth, cleared

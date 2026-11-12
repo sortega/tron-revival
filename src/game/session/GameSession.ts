@@ -11,7 +11,11 @@ export interface NetworkStats {
   bytesIn: number;   // bytes/sec incoming
   bytesOut: number;  // bytes/sec outgoing
   predictedTicks?: number;  // Guest: inputs sent but not yet acknowledged by the host
+  silentMs?: number;        // Guest: time since the last state from the host
 }
+
+/** A guest that has heard nothing from the host for this long tells the player. */
+export const HOST_SILENCE_MS = 1500;
 
 export interface ViewState {
   round: TronRoundState;
