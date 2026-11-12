@@ -111,3 +111,67 @@ describe('H-bomb body', () => {
     expect(lastX).toBeLessThan(492);
   });
 });
+
+describe('bullets against tracers', () => {
+  /** Player 1 holds the trigger of `weapon`; player 0 fires one Glock bullet at it. */
+  function duel(weapon: string, from: number, dist: number, seed: number): { deaths: string[]; explodedAt: number } {
+    const g = arena(seed);
+    place(g, 1, 375, 300, (from * 180) / Math.PI);                      // facing the shooter
+    place(g, 0, 375 + Math.cos(from) * dist, 300 + Math.sin(from) * dist, ((from * 180) / Math.PI + 180) % 360);
+    if (weapon === 'uzi') g.players[1]!.equipWeapon('uzi', undefined, 700);
+    else g.players[1]!.equipWeapon(weapon, 200);
+    g.players[0]!.equipWeapon('glock', 20);
+    const deaths: string[] = [];
+    let explodedAt = -1;
+    for (let i = 0; i < 60 && g.phase === 'playing'; i++) {
+      g.tick(inputs({ action: i === 0 }, { action: true }));
+      g.items.length = 0;
+      const bullet = g.getProjectiles().find(p => p.type === 'bullet');
+      const target = g.players[1]!;
+      if (bullet) explodedAt = Math.hypot(bullet.x / 1000 - target.x / 1000, bullet.y / 1000 - target.y / 1000);
+      for (const d of g.serialize().deaths ?? []) deaths.push(`${d.slotIndex}:${d.cause}`);
+    }
+    return { deaths, explodedAt };
+  }
+
+  it('a bullet flying into Uzi fire explodes before it gets there', () => {
+    let runs = 0;
+    for (let k = 0; k < 8; k++) {
+      for (const dist of [120, 200, 280]) {
+        const { deaths, explodedAt } = duel('uzi', (k * Math.PI) / 4 + 0.1, dist, k + 1);
+        runs++;
+        expect(deaths, `direction ${k}, ${dist} px`).not.toContain('1:bullet');
+        // Last seen well away from the Uzi's owner
+        expect(explodedAt, `direction ${k}, ${dist} px`).toBeGreaterThan(20);
+      }
+    }
+    expect(runs).toBe(24);
+  });
+
+  it('a bullet meeting a rifle tracer head-on explodes there', () => {
+    const { deaths, explodedAt } = duel('rifle', 0, 300, 1);
+    expect(deaths).not.toContain('1:bullet');
+    // Both do 5 px/tick, so they meet about half-way
+    expect(explodedAt).toBeGreaterThan(100);
+    expect(explodedAt).toBeLessThan(200);
+  });
+
+  it('a bullet does not explode on its own shooter\'s tracers', () => {
+    const g = arena();
+    place(g, 0, 200, 300, 0);
+    place(g, 1, 600, 100, 180);
+    const shooter = g.players[0]!;
+    shooter.equipWeapon('glock', 20);
+    g.tick(inputs({ action: true }, {}));
+    // Switch to the Uzi and spray along the bullet's line
+    shooter.equipWeapon('uzi', undefined, 700);
+    let flew = 0;
+    for (let i = 0; i < 30; i++) {
+      g.tick(inputs({ action: true }, {}));
+      g.items.length = 0;
+      g.serialize();
+      if (g.getProjectiles().some(p => p.type === 'bullet')) flew++;
+    }
+    expect(flew).toBe(30);
+  });
+});

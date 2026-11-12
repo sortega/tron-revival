@@ -232,6 +232,9 @@ Rules: `design/projectiles.md`.
       it, usually its own shooter ("died of his own bullet")
 - [x] H-bomb collides as its 12×18 body: no more flying through a player; explodes when
       its nose touches a wall
+- [x] Glock bullets explode when they cross a tracer (Uzi/rifle fire shoots them down)
+- [ ] Tracer/bullet damage to a flying H-bomb still compares end positions only, so fast
+      tracers can pass through a bomb without damaging it
 - [x] Satellites (`design/bodyguards.md`): intercept shots on their course instead of
       chasing them, attack players who enter their area, wear out (300 HP) so repeated
       shotgun blasts overwhelm them; contact tests are swept and wrap-aware

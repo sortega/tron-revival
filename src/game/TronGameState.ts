@@ -35,6 +35,15 @@ import {
   ITEM_COLLISION_RADIUS,
 } from '../types/game';
 import { TronPlayer, getStartingPosition } from './TronPlayer';
+
+/** The path a tracer travels in one tick, in pixels (the end may lie beyond an edge). */
+interface TracerPath {
+  ownerSlot: Projectile['ownerSlot'];
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
 import { PLAY_WIDTH, PLAY_HEIGHT, READY_LOCK_TICKS, TICK_RATE } from './constants';
 import { ItemLauncher } from './ItemLauncher';
 import { PixelGrid } from './PixelGrid';
@@ -165,6 +174,7 @@ export class TronGameState {
   private readonly BULLET_BASE_SPEED = 5000;  // 5 pixels/frame in fixed-point (at speed factor 1)
   private readonly BULLET_KILL_RADIUS = 6;    // Kill players within 6 pixels
   private readonly BULLET_CLEAR_RADIUS = 5;   // Clear 10x10 area (±5)
+  private readonly BULLET_TRACER_RADIUS = 3;  // A bullet explodes when it passes this close to a tracer
   private readonly BULLET_ITEM_DAMAGE_RADIUS = 16; // Damage items within 16 pixels
   private readonly EXPLOSION_FRAMES = 39;     // 39 animation frames
 
@@ -887,6 +897,22 @@ export class TronGameState {
   private tickProjectiles(): void {
     const toRemove: number[] = [];
 
+    // The paths tracers travel this tick, for bullets to run into
+    const tracerPaths: TracerPath[] = [];
+    if (this.projectiles.some(p => p.type === 'bullet')) {
+      for (const p of this.projectiles) {
+        if (p.type !== 'tracer') continue;
+        const rad = (p.direction * Math.PI) / 180;
+        tracerPaths.push({
+          ownerSlot: p.ownerSlot,
+          x0: p.x / 1000,
+          y0: p.y / 1000,
+          x1: (p.x + Math.cos(rad) * p.speed) / 1000,
+          y1: (p.y + Math.sin(rad) * p.speed) / 1000,
+        });
+      }
+    }
+
     for (const proj of this.projectiles) {
       // Store previous position for line collision check
       const prevX = Math.floor(proj.x / 1000);
@@ -978,6 +1004,13 @@ export class TronGameState {
       // Satellites stop enemy projectiles that pass through them (design/bodyguards.md)
       const blocker = this.findBlocker(proj, prevX, prevY, unwrappedX, unwrappedY);
 
+      // A bullet that crosses a tracer explodes there (design/projectiles.md)
+      const tracerHit = proj.type === 'bullet'
+        ? this.findTracerOnPath(proj, prevX, prevY, unwrappedX, unwrappedY, tracerPaths)
+        : null;
+      // Whatever comes first on the path counts
+      const stopT = Math.min(blocker ? blocker.t : Infinity, tracerHit ? tracerHit.t : Infinity);
+
       // Check collision with players (shield does NOT protect!)
       // Skip player collisions during waiting_ready phase (round is over, let bullets fly visually)
       let hitPlayer = false;
@@ -998,7 +1031,7 @@ export class TronGameState {
             hit = !blocker && this.bombCovers(proj, px, py, this.BOMB_PLAYER_MARGIN);
           } else {
             const closest = this.closestOnPath(px, py, prevX, prevY, unwrappedX, unwrappedY);
-            hit = closest.dist < killRadius && (!blocker || closest.t < blocker.t);
+            hit = closest.dist < killRadius && closest.t < stopT;
           }
           if (hit) {
             if (proj.type === 'bullet') {
@@ -1016,6 +1049,11 @@ export class TronGameState {
         }
       }
       if (hitPlayer) continue;
+      if (tracerHit && tracerHit.t <= stopT) {
+        this.projectileImpact(tracerHit.x, tracerHit.y, proj.ownerSlot);
+        toRemove.push(proj.id);
+        continue;
+      }
       if (blocker) {
         this.blockProjectile(blocker.bg, proj);
         toRemove.push(proj.id);
@@ -1188,6 +1226,65 @@ export class TronGameState {
     }
 
     return null;
+  }
+
+  // Where a bullet's path this tick first comes within reach of a tracer's path.
+  // Tracers of the bullet's own shooter do not count.
+  private findTracerOnPath(
+    bullet: Projectile, x0: number, y0: number, x1: number, y1: number, tracers: readonly TracerPath[]
+  ): { t: number; x: number; y: number } | null {
+    let best: { t: number; x: number; y: number } | null = null;
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    for (const tracer of tracers) {
+      if (tracer.ownerSlot === bullet.ownerSlot) continue;
+      // Compare with the tracer's nearest image (the arena wraps); both paths are short
+      const ox = this.wrapDelta(tracer.x0 - x0, PLAY_WIDTH) - (tracer.x0 - x0);
+      const oy = this.wrapDelta(tracer.y0 - y0, PLAY_HEIGHT) - (tracer.y0 - y0);
+      const bx0 = tracer.x0 + ox;
+      const by0 = tracer.y0 + oy;
+      const ex = tracer.x1 - tracer.x0;
+      const ey = tracer.y1 - tracer.y0;
+      if (Math.abs(bx0 - x0) > 60 || Math.abs(by0 - y0) > 60) continue; // Too far to meet this tick
+
+      // Closest points of two segments
+      const rx = x0 - bx0;
+      const ry = y0 - by0;
+      const a = dx * dx + dy * dy;
+      const e = ex * ex + ey * ey;
+      const f = ex * rx + ey * ry;
+      let s = 0;
+      let u = 0;
+      if (a > 0 && e > 0) {
+        const b = dx * ex + dy * ey;
+        const c = dx * rx + dy * ry;
+        const denom = a * e - b * b;
+        s = denom > 1e-9 ? Math.max(0, Math.min(1, (b * f - c * e) / denom)) : 0;
+        u = (b * s + f) / e;
+        if (u < 0) {
+          u = 0;
+          s = Math.max(0, Math.min(1, -c / a));
+        } else if (u > 1) {
+          u = 1;
+          s = Math.max(0, Math.min(1, (b - c) / a));
+        }
+      } else if (a > 0) {
+        s = Math.max(0, Math.min(1, -(dx * rx + dy * ry) / a));
+      } else if (e > 0) {
+        u = Math.max(0, Math.min(1, f / e));
+      }
+      const px = x0 + dx * s;
+      const py = y0 + dy * s;
+      const dist = Math.hypot(px - (bx0 + ex * u), py - (by0 + ey * u));
+      if (dist < this.BULLET_TRACER_RADIUS && (!best || s < best.t)) {
+        best = {
+          t: s,
+          x: ((Math.round(px) % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH,
+          y: ((Math.round(py) % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT,
+        };
+      }
+    }
+    return best;
   }
 
   // Closest approach of the path travelled this tick (x0,y0 → x1,y1) to a point: the

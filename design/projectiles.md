@@ -28,6 +28,24 @@ that row or column — typically its own shooter.)
 | Tracer (Rifle, Uzi, Shotgun, level guns) | 5–50 | 1 px of the path | Kills that player (a shield protects) |
 | H-bomb | 2 | its body, see below | Blast: kills everyone within 50 px |
 
+## Bullets against tracers
+
+A Glock bullet that crosses a tracer — rifle, Uzi, shotgun pellet or level gun — **explodes
+there**, like on any obstacle: tracer fire shoots bullets down. The tracer flies on. This is
+the original's behaviour, where a tracer is a lit pixel on the background and a bullet
+explodes on any lit pixel it touches.
+
+- The test is between the two paths travelled in the tick (closer than 3 px), not between
+  end positions, so fast Uzi tracers cannot jump over a bullet. Along the bullet's path the
+  first thing met counts: a player, a satellite or a tracer.
+- Tracers of the bullet's own shooter do not set it off.
+- Tracers do not collide with each other (a shotgun spread would destroy itself), and two
+  bullets that meet destroy each other in one explosion.
+
+Not like the original: an H-bomb does not explode on a tracer. It has 100 hit points
+instead; a tracer takes 10 and a bullet 50, and at zero the bomb is destroyed without a
+blast. (That test still compares end positions only.)
+
 ## H-bomb
 
 The bomb is drawn as a 12 × 18 px missile and collides as one: a box 18 px long and 12 px
@@ -54,3 +72,6 @@ The blast is centred on the pixel or player that was hit.
 - Random bomb fly-bys: the bomb never survives a tick in which a player's head is inside
   its body.
 - A bomb flown at a wall explodes when its nose reaches the wall, not its centre.
+- A bullet fired into Uzi fire from 8 directions and 3 distances never reaches the Uzi's
+  owner; one meeting a rifle tracer head-on explodes half-way; a shooter's own tracers do
+  not set off their bullet.
