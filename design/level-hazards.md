@@ -6,7 +6,7 @@ Three of the original maps have a hazard of their own, started by `ItemLauncher`
 | Original map | Level here | Hazard | Status |
 |--------------|-----------|--------|--------|
 | 205 *Inédito* | `dentistry` | The dentist's hand (`PROCESS Mano`) | Planned |
-| 206 *Guerra* | `warzone` | Shell bursts (`PROCESS Guerra`) | Planned |
+| 206 *Guerra* | `warzone` | Shell bursts (`PROCESS Guerra`) | Implemented |
 | 207 *Puertas* | `portals` | Automatic doors (`PROCESS Bandas` / `Banda`) | Implemented |
 
 Related: [old-tron-design.md](./old-tron-design.md), [local-and-ai.md](./local-and-ai.md),
@@ -133,10 +133,42 @@ Original behaviour, for reference when it is implemented:
 - In the original it does **not** kill: touching a player only flips the sprite's
   transparency flag. (`TODO.md` said it kills; the source says otherwise.)
 
-## Shell bursts (level `warzone`) — planned
+## Shell bursts (level `warzone`)
 
-- Every frame, with probability 1/201, one of two guns fires. Each gun is a pair of control
-  points of map 206 (muzzle → aim): (385, 250) → (413, 243) and (623, 264) → (582, 270).
-- A burst is 30 tracer pellets (`Traya`, the Uzi/shotgun pellet) from the muzzle, each with a
-  direction within ±5° of the aim, speed 10–30 and lifetime 10, plus the explosion sound.
-  Pellets kill players and erase trails like any other tracer.
+The tank and the cannon painted on the map fire at random.
+
+### Guns
+
+A gun is a pair of control points of map 206 in `TRON.FPG` (muzzle → aim):
+
+| Gun | Muzzle | Aim | Direction (screen degrees, 0° = right, 90° = down) |
+|-----|--------|-----|-----|
+| Tank | 385, 250 | 413, 243 | ≈ 346° (right, slightly up) |
+| Cannon | 623, 264 | 582, 270 | ≈ 172° (left, slightly down) |
+
+### Rules
+
+- On every `playing` tick, with probability 1/201 (the original's `rand(0,200)==1`), one
+  gun chosen at random fires a burst, with the explosion sound.
+- A burst is exactly a Shotgun blast without an owner: 30 pellets from the muzzle, each
+  deviating up to ±5° from the gun's direction, speed 10–30 px/tick, lifetime 10 ticks
+  (so they reach 100–300 px). Pellets are ordinary `tracer` projectiles: they kill players
+  (death cause `tracer`; a shield protects, as against any tracer), and erase trails and
+  scenery along their path.
+- Pellets have no owner: `Projectile.ownerSlot` is `NO_OWNER` (-1). Nobody is immune and
+  no satellite lets them through.
+- Randomness comes from the simulation's seeded RNG, so matches stay deterministic.
+
+### Bots
+
+Bots that avoid hazards (`normal`, `hard`) know the fire zones, as a human who has played
+the level does: rollout steps inside a gun's zone (within ±7° of its direction and 220 px
+of the muzzle) during the first 80 steps make a path less attractive. They may still cross
+when the alternatives are worse.
+
+### Validation
+
+- Rule tests: a burst is 30 ownerless pellets inside the cone; bursts happen at the
+  expected rate and only while playing; a player parked in front of a muzzle is killed
+  with cause `tracer`; levels without guns never fire.
+- Bot matches on `warzone`: deaths by gunfire stay a small share.

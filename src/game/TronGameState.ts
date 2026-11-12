@@ -20,8 +20,10 @@ import type {
 } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { anyDoorSolidAt, doorFrame } from './doors';
+import { GUN_BURST_CHANCE } from './guns';
 import {
   LEVELS,
+  NO_OWNER,
   PORTAL_RADIUS,
   PORTAL_OUTER_RADIUS,
   PORTAL_FRAME_COUNT,
@@ -401,6 +403,14 @@ export class TronGameState {
     this.doorTick++;
     const doors = LEVELS[this.currentLevelIndex]?.doors;
     const frameOfDoors = doors ? doorFrame(this.doorTick) : 0;
+
+    // Level guns fire at random
+    const guns = LEVELS[this.currentLevelIndex]?.guns;
+    if (guns && guns.length > 0 && this.rng() < GUN_BURST_CHANCE) {
+      const gun = guns[Math.floor(this.rng() * guns.length)]!;
+      this.createPellets(gun.x * 1000, gun.y * 1000, gun.direction, NO_OWNER);
+      this.queueSound('explosion');
+    }
 
     // Decrement teleport cooldowns
     for (const player of this.players) {
@@ -797,11 +807,17 @@ export class TronGameState {
   // Create Shotgun pellets (30 pellets with spread on single shot)
   private createShotgunPellets(player: TronPlayer): void {
     const startOffset = 3000; // 3 pixels ahead in fixed-point
+    this.createPellets(player.x, player.y, player.direction, player.slotIndex, startOffset);
+  }
 
+  // A blast of pellets from a fixed-point position: the Shotgun, and the level's guns
+  private createPellets(
+    x: number, y: number, heading: number, ownerSlot: Projectile['ownerSlot'], startOffset = 0
+  ): void {
     for (let i = 0; i < this.SHOTGUN_PELLETS; i++) {
-      // Random direction within ±5° of player heading
+      // Random direction within ±5° of the heading
       const spreadAngle = (this.rng() * 2 - 1) * this.SHOTGUN_SPREAD_DEGREES;
-      const direction = player.direction + spreadAngle;
+      const direction = heading + spreadAngle;
       const dirRad = (direction * Math.PI) / 180;
 
       // Random speed between 10-30 pixels/frame
@@ -809,14 +825,14 @@ export class TronGameState {
 
       this.projectiles.push({
         id: this.nextProjectileId++,
-        x: player.x + Math.cos(dirRad) * startOffset,
-        y: player.y + Math.sin(dirRad) * startOffset,
+        x: x + Math.cos(dirRad) * startOffset,
+        y: y + Math.sin(dirRad) * startOffset,
         direction: direction,
-        ownerSlot: player.slotIndex,
+        ownerSlot,
         speed: speed,
         type: 'tracer',
         remainingFrames: this.SHOTGUN_PELLET_LIFESPAN,
-        ownerCooldown: this.PROJECTILE_OWNER_COOLDOWN,
+        ownerCooldown: ownerSlot === NO_OWNER ? 0 : this.PROJECTILE_OWNER_COOLDOWN,
       });
     }
   }
@@ -1214,7 +1230,7 @@ export class TronGameState {
   }
 
   // Handle projectile impact - explosion, clear area, kill nearby players
-  private projectileImpact(x: number, y: number, ownerSlot?: SlotIndex): void {
+  private projectileImpact(x: number, y: number, ownerSlot?: Projectile['ownerSlot']): void {
     // Create explosion animation
     this.explosions.push({
       id: this.nextExplosionId++,
@@ -1253,7 +1269,7 @@ export class TronGameState {
   }
 
   // Handle bomb impact - large explosion, clear area, kill nearby players
-  private bombImpact(x: number, y: number, ownerSlot?: SlotIndex): void {
+  private bombImpact(x: number, y: number, ownerSlot?: Projectile['ownerSlot']): void {
     // Create large explosion animation (150% scale)
     this.explosions.push({
       id: this.nextExplosionId++,

@@ -57,13 +57,16 @@ export interface DeathEvent {
 // Projectile type: 'bullet' = Glock (explodes on impact), 'tracer' = Rifle (clears trail, has lifespan), 'bomb' = heavy missile
 export type ProjectileType = 'bullet' | 'tracer' | 'bomb';
 
+/** `Projectile.ownerSlot` of projectiles fired by the level itself. */
+export const NO_OWNER = -1;
+
 // Projectile in flight (bullets from Glock, tracers from Rifle, bombs)
 export interface Projectile {
   id: number;
   x: number;           // Fixed-point ×1000
   y: number;           // Fixed-point ×1000
   direction: number;   // Angle in degrees
-  ownerSlot: SlotIndex;
+  ownerSlot: SlotIndex | typeof NO_OWNER;  // NO_OWNER: fired by the level
   speed: number;       // Speed in fixed-point (pixels × 1000)
   type: ProjectileType;          // Determines behavior on collision
   remainingFrames?: number;      // Lifespan for tracer bullets (undefined = infinite)
@@ -213,6 +216,9 @@ export const PORTAL_FRAME_COUNT = 30;  // Animation frames (portal_01 to portal_
 
 import type { DoorDefinition } from '../game/doors';
 export type { DoorDefinition } from '../game/doors';
+import { gunFromPoints } from '../game/guns';
+import type { GunDefinition } from '../game/guns';
+export type { GunDefinition } from '../game/guns';
 
 export interface LevelDefinition {
   id: string;
@@ -220,18 +226,24 @@ export interface LevelDefinition {
   imagePath: string;
   /** Automatic doors (design/level-hazards.md) */
   doors?: DoorDefinition[];
+  /** Guns that fire shell bursts at random (design/level-hazards.md) */
+  guns?: GunDefinition[];
 }
 
 // Level image filenames (relative to /assets/levels/)
 // The full path is constructed at runtime using import.meta.env.BASE_URL
-export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string; doors?: DoorDefinition[] }[] = [
+export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string; doors?: DoorDefinition[]; guns?: GunDefinition[] }[] = [
   { id: 'blank', name: 'Blank', imageFile: 'blank.png' },
   { id: 'pop-culture', name: 'Pop Culture', imageFile: 'pop-culture.png' },
   { id: 'selva', name: 'Selva', imageFile: 'selva.png' },
   { id: 'bricks', name: 'Bricks', imageFile: 'bricks.png' },
   { id: 'bus', name: 'Bus', imageFile: 'bus.png' },
   { id: 'dentistry', name: 'Dentistry', imageFile: 'dentistry.png' },
-  { id: 'warzone', name: 'Warzone', imageFile: 'warzone.png' },
+  {
+    id: 'warzone', name: 'Warzone', imageFile: 'warzone.png',
+    // Control points 1-4 of the original map 206: muzzle and aim of the tank and the cannon
+    guns: [gunFromPoints(385, 250, 413, 243), gunFromPoints(623, 264, 582, 270)],
+  },
   {
     id: 'portals', name: 'Portals', imageFile: 'portals.png',
     // Control points 1-4 and 6 of the original map 207
@@ -251,6 +263,7 @@ export const LEVELS: LevelDefinition[] = LEVEL_DEFINITIONS.map(def => ({
   name: def.name,
   imagePath: `${import.meta.env.BASE_URL}assets/levels/${def.imageFile}`,
   ...(def.doors && { doors: def.doors }),
+  ...(def.guns && { guns: def.guns }),
 }));
 
 // === Item Types ===

@@ -13,10 +13,13 @@ import type { TronGameState } from '../TronGameState';
 import type { TronPlayer } from '../TronPlayer';
 import { anyDoorSolidAt, doorFrame } from '../doors';
 import type { DoorDefinition } from '../doors';
+import { inFireZone } from '../guns';
+import type { GunDefinition } from '../guns';
 import { LEVELS } from '../../types/game';
 
 const TURN_DEG = 4;                  // Degrees per step at full lock (matches TronPlayer)
 const DEG = Math.PI / 180;
+const FIRE_ZONE_STEPS = 80;          // How far ahead bots mind the level guns' fire zones
 const DOOR_MARGIN_TICKS = 25;        // Doors must stay open this long after we pass
 
 export interface BotProfile {
@@ -94,6 +97,7 @@ interface PlanContext {
   portals: readonly TeleportPortal[];
   doors: readonly DoorDefinition[] | null;  // Automatic doors of the level, if any
   doorTick: number;
+  guns: readonly GunDefinition[] | null;    // Level guns whose fire zones are best avoided
 }
 
 // A point along a simulated path from which a rollout can (re)start
@@ -245,6 +249,7 @@ export class BotController {
       portals: game.portals,
       doors: LEVELS[game.currentLevelIndex]?.doors ?? null,
       doorTick: game.doorTick,
+      guns: this.profile.avoidsHazards ? LEVELS[game.currentLevelIndex]?.guns ?? null : null,
     };
   }
 
@@ -341,7 +346,7 @@ export class BotController {
     turn2At = Infinity, steer2 = 0, turn2Steps = 0,
     checkpoints: PathState[] | null = null
   ): Rollout {
-    const { pixels, me, hazards, ignoreSteps, crossingSteps, badItems, portals, doors, doorTick } = ctx;
+    const { pixels, me, hazards, ignoreSteps, crossingSteps, badItems, portals, doors, doorTick, guns } = ctx;
     const clearanceSteps = this.profile.clearanceSteps;
     let { x, y, dir } = start;
     let portalCooldown = start.portalCooldown;
@@ -427,6 +432,13 @@ export class BotController {
         }
       }
       if (hit) break;
+
+      // Loitering in front of a level gun is asking for it
+      if (guns !== null && step <= FIRE_ZONE_STEPS && step % 2 === 0) {
+        for (const gun of guns) {
+          if (inFireZone(gun, x, y)) narrow += 2;
+        }
+      }
 
       // Unwanted items on the way
       if (step <= 60 && !badItem) {

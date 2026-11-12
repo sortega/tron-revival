@@ -206,9 +206,11 @@ Design: `design/networking.md` (rewritten)
 - [x] Level 8 ("Portals"): automatic doors, as in the original (geometry, placement and
       timing taken from `TRON.FPG` / `TRON.PRG`); they kill on contact even through a shield,
       gate the wrap-around, and bots time their crossings. See `design/level-hazards.md`
-- [ ] The other two original map hazards are missing: the dentist's hand on level 6 and the
-      shell bursts on level 7. Both are specified in `design/level-hazards.md` (note: the
-      original hand does not kill, it only drills trails away)
+- [x] Level 7 ("Warzone"): the tank and the cannon fire shell bursts at random, as in the
+      original; bots keep out of the line of fire
+- [ ] Level 6 ("Dentistry"): the dentist's hand is missing. Specified in
+      `design/level-hazards.md` (note: the original hand does not kill, it only drills
+      trails away)
 - [ ] Items can spawn hidden under a closed door (faithful, but maybe not fun)
 
 ## Open reports
