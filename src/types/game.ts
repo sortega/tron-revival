@@ -171,6 +171,8 @@ export interface TronGameStateData {
   // Per-slot echo of the newest input timestamp (`TronInputMessage.t`) the host has
   // consumed, corrected for the time it waited on the host. RTT = now - pong.
   pongs?: Partial<Record<SlotIndex, number>>;
+  // Host tick this frame belongs to
+  tick?: number;
   // Last input sequence number consumed for each remote slot
   acks?: Partial<Record<SlotIndex, number>>;
 }

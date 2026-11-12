@@ -114,6 +114,30 @@ function packItem(i: GameItem): PackedItem {
   return [i.id, i.sprite, i.category === 'weapon', i.x, i.y, i.active, i.hp, i.mystery === true];
 }
 
+/** Full picture of a game in progress, for clients that join late. */
+export interface Snapshot {
+  tick: number;          // Host tick the snapshot was taken on
+  palette: string[];     // Collision grid colours
+  runs: number[];        // Run-length encoded grid: [paletteIndex, count, ...]
+  state: Uint8Array;     // Full serialized frame for that tick
+}
+
+export function encodeSnapshot(snapshot: Snapshot): Uint8Array {
+  return encode(snapshot);
+}
+
+/** Returns null if the data is not a usable snapshot. */
+export function decodeSnapshot(data: Uint8Array): Snapshot | null {
+  try {
+    const raw = decode(data) as Partial<Snapshot> | null;
+    if (!raw || typeof raw.tick !== 'number' || !Array.isArray(raw.palette) || !Array.isArray(raw.runs) ||
+        !(raw.state instanceof Uint8Array)) return null;
+    return raw as Snapshot;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * A state as sent over the network: slow-changing parts may be left out, in which
  * case the receiver keeps the last value it got.

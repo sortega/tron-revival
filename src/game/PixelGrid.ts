@@ -144,6 +144,56 @@ export class PixelGrid {
     this.coarse.set(other.coarse);
   }
 
+  /** Run-length encoding of the whole grid: palette + [paletteIndex, count, ...]. */
+  toRuns(): { palette: string[]; runs: number[] } {
+    const runs: number[] = [];
+    let current = this.cells[0]!;
+    let count = 0;
+    for (let i = 0; i < this.cells.length; i++) {
+      const value = this.cells[i]!;
+      if (value === current) {
+        count++;
+      } else {
+        runs.push(current, count);
+        current = value;
+        count = 1;
+      }
+    }
+    runs.push(current, count);
+    return { palette: [...this.palette], runs };
+  }
+
+  /** Inverse of `toRuns`. Malformed input yields a (partially) empty grid, never throws. */
+  static fromRuns(palette: readonly string[], runs: readonly number[]): PixelGrid {
+    const grid = new PixelGrid();
+    let i = 0;
+    for (let r = 0; r + 1 < runs.length && i < grid.cells.length; r += 2) {
+      const color = palette[runs[r]!];
+      const count = Math.max(0, Math.floor(runs[r + 1]!)) || 0;
+      const end = Math.min(grid.cells.length, i + count);
+      if (runs[r] !== 0 && typeof color === 'string' && color !== '') {
+        for (; i < end; i++) grid.set(i % PLAY_WIDTH, Math.floor(i / PLAY_WIDTH), color);
+      }
+      i = end;
+    }
+    return grid;
+  }
+
+  /** Visit every horizontal run of same-coloured occupied pixels. */
+  forEachRun(fn: (x: number, y: number, length: number, color: string) => void): void {
+    for (let y = 0; y < PLAY_HEIGHT; y++) {
+      const row = y * PLAY_WIDTH;
+      let x = 0;
+      while (x < PLAY_WIDTH) {
+        const value = this.cells[row + x]!;
+        let end = x + 1;
+        while (end < PLAY_WIDTH && this.cells[row + end] === value) end++;
+        if (value !== 0) fn(x, y, end - x, this.palette[value]!);
+        x = end;
+      }
+    }
+  }
+
   /** Number of occupied pixels (O(n); for tests and diagnostics). */
   count(): number {
     let n = 0;

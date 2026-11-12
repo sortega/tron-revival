@@ -1,18 +1,23 @@
-// Network lobby screen
+// Network lobby screen: seats, settings, chat, and the hand-over to the game.
+// The room logic lives in RoomConnection; see design/networking.md.
 
+import qrcode from 'qrcode-generator';
 import type { Screen, ScreenManager, LobbyOptions } from './ScreenManager';
-import { LobbyConnection } from '../network/LobbyConnection';
-import { GameConnection } from '../network/GameConnection';
+import { RoomConnection, generateRoomCode } from '../network/RoomConnection';
+import type { PeerDiagnostics, RoomStatus } from '../network/RoomConnection';
 import { DEBUG_LAG, LaggedTransport } from '../network/LaggedTransport';
-import type { LobbyState, PlayerSlot, SlotIndex, GameMode } from '../types/lobby';
-import { getSlotColor, canStartGame, getFilledSlotCount, findFirstOpenSlot } from '../types/lobby';
-import type { BotDifficulty, GameConfig, GamePlayer, PlayerControl } from '../types/game';
+import type { LobbyState, SlotIndex, GameMode } from '../types/lobby';
+import { getSlotColor, canStartGame, getFilledSlotCount } from '../types/lobby';
+import type { BotDifficulty } from '../types/game';
+import { LEVELS } from '../types/game';
 import type { GameSession } from '../game/session/GameSession';
 import { HostSession } from '../game/session/HostSession';
 import { GuestSession } from '../game/session/GuestSession';
 import { escapeHtml } from '../util/html';
-import { LEVELS } from '../types/game';
 import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
+
+const NICKNAME_KEY = 'teratron-nickname';
+const DIAGNOSTICS_INTERVAL_MS = 2000;
 
 function generateNickname(): string {
   return uniqueNamesGenerator({
@@ -23,676 +28,298 @@ function generateNickname(): string {
   });
 }
 
+// Shared inline styles
+const BTN = 'padding: 0.5rem; font-family: monospace; cursor: pointer;';
+const FIELD = 'padding: 0.5rem; font-family: monospace; background: #000; border: 1px solid #0ff; color: #0ff; box-sizing: border-box;';
+const LABEL = 'color: #888; display: block; margin-bottom: 0.5rem;';
+
+function toggleStyle(active: boolean, enabled: boolean): string {
+  const on = enabled ? ['#030', '#0f0'] : ['#020', '#0a0'];
+  const off = enabled ? ['#111', '#666'] : ['#111', '#444'];
+  const [bg, fg] = active ? on : off;
+  return `flex: 1; ${BTN} cursor: ${enabled ? 'pointer' : 'not-allowed'}; background: ${bg}; color: ${fg}; border: 1px solid ${active ? fg : '#333'};`;
+}
+
 export class NetworkLobby implements Screen {
   private container: HTMLElement;
   private screenManager: ScreenManager;
-  private options: LobbyOptions;
-  private connection: LobbyConnection;
+  private room: RoomConnection;
+  private readonly ownsNewRoom: boolean;
   private lobbyState: LobbyState | null = null;
-  private myNickname: string = '';
-  private connectionTimeoutId: number | null = null;
+  private myNickname: string;
+  private notice: string | null = null;
+  private diagnostics = new Map<string, PeerDiagnostics>();
+  private diagnosticsTimer: number | null = null;
+  private handedOver = false;   // The room now belongs to the game screen
 
   constructor(container: HTMLElement, screenManager: ScreenManager, options: LobbyOptions) {
     this.container = container;
     this.screenManager = screenManager;
-    this.options = options;
-    this.connection = new LobbyConnection(options.mode === 'host');
+    this.myNickname = localStorage.getItem(NICKNAME_KEY) || generateNickname();
+
+    if ('room' in options) {
+      // Coming back from a game: keep using the same room
+      this.room = options.room;
+      this.ownsNewRoom = false;
+    } else {
+      const create = options.mode === 'host';
+      const code = options.mode === 'host' ? generateRoomCode() : options.roomId;
+      this.room = new RoomConnection(code, { create, nickname: this.myNickname });
+      this.ownsNewRoom = true;
+    }
   }
 
   render(): void {
-    this.myNickname = localStorage.getItem('teratron-nickname') || generateNickname();
-
     this.container.innerHTML = `
       <style>
-        .lobby-container {
-          display: flex;
-          flex-direction: column;
-          min-height: 100vh;
-          padding: 1rem;
-        }
-        .lobby-title {
-          color: #0ff;
-          text-shadow: 0 0 10px #0ff;
-          margin-bottom: 1rem;
-          text-align: center;
-          font-size: 2rem;
-        }
-        .lobby-status {
-          text-align: center;
-          color: #ff0;
-          margin-bottom: 1rem;
-        }
+        .lobby-container { display: flex; flex-direction: column; min-height: 100vh; padding: 1rem; }
+        .lobby-title { color: #0ff; text-shadow: 0 0 10px #0ff; margin-bottom: 1rem; text-align: center; font-size: 2rem; }
+        .lobby-status { text-align: center; color: #ff0; margin-bottom: 0.5rem; }
+        .lobby-notice { text-align: center; color: #fa0; margin-bottom: 0.5rem; font-size: 0.85rem; min-height: 1.2em; }
         .lobby-grid {
-          display: none;
-          flex: 1;
-          display: grid;
-          grid-template-columns: 250px 350px 300px;
-          gap: 1rem;
-          max-width: 1200px;
-          margin: 0 auto;
-          width: 100%;
+          flex: 1; display: grid; grid-template-columns: 250px 350px 300px; gap: 1rem;
+          max-width: 1200px; margin: 0 auto; width: 100%;
         }
-        .lobby-panel {
-          background: #111;
-          padding: 1rem;
-          border-radius: 4px;
-          border: 1px solid #333;
-        }
-        .lobby-panel-chat {
-          display: flex;
-          flex-direction: column;
-        }
+        .lobby-panel { background: #111; padding: 1rem; border-radius: 4px; border: 1px solid #333; }
+        .lobby-panel-chat { display: flex; flex-direction: column; }
+        .lobby-qr svg { display: block; width: 100%; height: auto; }
         /* Tablet: 2 columns, chat below */
         @media (max-width: 950px) {
-          .lobby-grid {
-            grid-template-columns: 1fr 1fr;
-            grid-template-rows: auto auto;
-          }
-          .lobby-panel-chat {
-            grid-column: 1 / -1;
-          }
+          .lobby-grid { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; }
+          .lobby-panel-chat { grid-column: 1 / -1; }
         }
         /* Mobile: single column */
         @media (max-width: 600px) {
-          .lobby-container {
-            padding: 0.5rem;
-          }
-          .lobby-title {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-          }
-          .lobby-grid {
-            grid-template-columns: 1fr;
-            gap: 0.75rem;
-          }
-          .lobby-panel {
-            padding: 0.75rem;
-          }
-          .lobby-panel-chat {
-            grid-column: auto;
-            max-height: 300px;
-          }
-          /* Make buttons and inputs touch-friendly */
-          .lobby-panel button {
-            min-height: 44px;
-            font-size: 0.9rem;
-          }
-          .lobby-panel input {
-            min-height: 44px;
-            font-size: 16px; /* Prevents iOS zoom */
-          }
-          .lobby-panel h3 {
-            font-size: 1rem;
-          }
-          .lobby-panel label {
-            font-size: 0.8rem;
-          }
+          .lobby-container { padding: 0.5rem; }
+          .lobby-title { font-size: 1.5rem; margin-bottom: 0.5rem; }
+          .lobby-grid { grid-template-columns: 1fr; gap: 0.75rem; }
+          .lobby-panel { padding: 0.75rem; }
+          .lobby-panel-chat { grid-column: auto; max-height: 300px; }
+          .lobby-panel button { min-height: 44px; font-size: 0.9rem; }
+          .lobby-panel input { min-height: 44px; font-size: 16px; /* Prevents iOS zoom */ }
+          .lobby-panel h3 { font-size: 1rem; }
+          .lobby-panel label { font-size: 0.8rem; }
         }
       </style>
       <div class="lobby-container">
         <h1 class="lobby-title">LOBBY</h1>
-
-        <div id="connectionStatus" class="lobby-status">Connecting...</div>
-
-        <div id="lobbyContent" class="lobby-grid">
-          <!-- Left Panel: Settings/Info -->
+        <div id="connectionStatus" class="lobby-status"></div>
+        <div id="lobbyNotice" class="lobby-notice"></div>
+        <div class="lobby-grid">
           <div id="settingsPanel" class="lobby-panel"></div>
-
-          <!-- Center Panel: Player Slots -->
           <div id="playersPanel" class="lobby-panel"></div>
-
-          <!-- Right Panel: Chat -->
           <div id="chatPanel" class="lobby-panel lobby-panel-chat"></div>
         </div>
       </div>
     `;
 
-    this.setupConnection();
-  }
-
-  private setupConnection(): void {
-    this.connection.setCallbacks({
-      onStatusChange: (status) => {
-        console.log('[NetworkLobby] Status changed:', status);
-        const statusEl = document.getElementById('connectionStatus');
-        if (statusEl) {
-          if (status === 'connecting') {
-            statusEl.textContent = 'Connecting...';
-            statusEl.style.color = '#ff0';
-          } else if (status === 'connected') {
-            if (this.options.mode === 'host') {
-              statusEl.textContent = 'Room created - Waiting for players...';
-              statusEl.style.color = '#0f0';
-              document.getElementById('lobbyContent')!.style.display = 'grid';
-            } else {
-              // Guest: show lobby content immediately with connecting UI
-              statusEl.textContent = 'Connecting...';
-              statusEl.style.color = '#ff0';
-              document.getElementById('lobbyContent')!.style.display = 'grid';
-              this.updateUI();  // Render panels in connecting state
-            }
-          } else {
-            statusEl.textContent = 'Disconnected';
-            statusEl.style.color = '#f44';
-          }
-        }
-      },
-      onLobbyStateUpdate: (state) => {
-        console.log('[NetworkLobby] Received lobby state:', state);
-        const isFirstState = this.lobbyState === null;
+    this.room.setCallbacks({
+      onStatus: () => this.renderStatus(),
+      onLobbyUpdate: (state) => {
         this.lobbyState = state;
-        // Show lobby content now that we have state
-        const content = document.getElementById('lobbyContent');
-        if (content) content.style.display = 'grid';
-        const statusEl = document.getElementById('connectionStatus');
-        if (statusEl) {
-          statusEl.textContent = 'Connected';
-          statusEl.style.color = '#0f0';
-        }
-        // Guest announces themselves when first receiving state
-        if (isFirstState && this.options.mode === 'guest') {
-          // Clear the connection timeout since we received data
-          if (this.connectionTimeoutId !== null) {
-            clearTimeout(this.connectionTimeoutId);
-            this.connectionTimeoutId = null;
-          }
-          this.connection.announce(this.myNickname);
-          // Auto-join the first open slot
-          this.autoJoinFirstSlot();
-        }
         this.updateUI();
       },
-      onJoinAccepted: (_peerId, slotIndex) => {
-        console.log('[NetworkLobby] Joined as slot', slotIndex);
+      onPhase: (phase, { resume }) => {
+        if (phase === 'game') this.enterGame(resume);
       },
-      onJoinRejected: (reason) => {
-        this.connection.disconnect();
-        this.screenManager.showMainMenu(`Could not join: ${reason}`);
+      onHostPresence: () => this.renderStatus(),
+      onNotice: (text) => {
+        this.notice = text;
+        this.renderStatus();
       },
-      onGameStart: (_countdown) => {
-        // Transition to game
-        if (this.lobbyState) {
-          const { gameConfig, session } = this.createGameSession();
-          this.screenManager.showGame(gameConfig, session);
-        }
-      },
-      onHostDisconnected: () => {
-        this.connection.disconnect();
-        this.screenManager.showMainMenu('Host disconnected');
-      },
-      onError: (error) => {
-        console.error('[NetworkLobby] Error:', error);
-        alert(`Connection error: ${error}`);
-      },
+      onClosed: (reason) => this.screenManager.showMainMenu(reason),
     });
 
-    if (this.options.mode === 'host') {
-      const roomId = this.connection.createRoom(this.myNickname);
-      console.log('[NetworkLobby] Created room:', roomId);
-      // Host announces itself and joins first slot
-      this.connection.announce(this.myNickname);
-      this.autoJoinFirstSlot();
-    } else if (this.options.roomId) {
-      this.connection.joinRoom(this.options.roomId, this.myNickname);
-      // Guest will announce after receiving lobby state
+    this.lobbyState = this.room.getLobbyState();
+    this.updateUI();
+    this.diagnosticsTimer = window.setInterval(() => void this.refreshDiagnostics(), DIAGNOSTICS_INTERVAL_MS);
 
-      // Set timeout - if no lobby data arrives in 20 seconds, go back to menu
-      this.connectionTimeoutId = window.setTimeout(() => {
-        if (this.lobbyState === null) {
-          console.log('[NetworkLobby] Connection timeout - no lobby data received');
-          this.connection.disconnect();
-          this.screenManager.showMainMenu('Could not reach the room. Check the code, or the host may be behind a restrictive network.');
-        }
-      }, 20000);
+    if (this.ownsNewRoom) {
+      void this.room.connect();
+    } else if (this.room.getPhase() === 'game') {
+      // The game restarted while we were on our way back here
+      this.enterGame(true);
     }
   }
 
+  // === Rendering ===
+
   private updateUI(): void {
-    // Render all panels - they handle missing lobbyState gracefully
+    this.renderStatus();
     this.renderSettingsPanel();
     this.renderPlayersPanel();
     this.renderChatPanel();
+  }
+
+  private renderStatus(): void {
+    const statusEl = document.getElementById('connectionStatus');
+    const noticeEl = document.getElementById('lobbyNotice');
+    if (!statusEl || !noticeEl) return;
+
+    const status: RoomStatus = this.room.getStatus();
+    let text: string;
+    let color = '#ff0';
+    if (status === 'connecting') {
+      text = 'Connecting...';
+    } else if (status === 'searching') {
+      text = 'Looking for the room... (can take a few seconds)';
+    } else if (status === 'closed') {
+      text = 'Disconnected';
+      color = '#f44';
+    } else if (!this.room.isHost() && !this.room.isHostPresent()) {
+      text = 'Host disconnected — waiting for it to come back...';
+      color = '#fa0';
+    } else if (this.room.isHost() && this.lobbyState && getFilledSlotCount(this.lobbyState) < 2) {
+      text = 'Room created — share the code or add an AI player';
+      color = '#0f0';
+    } else {
+      text = 'Connected';
+      color = '#0f0';
+    }
+    statusEl.textContent = text;
+    statusEl.style.color = color;
+
+    const hints: string[] = [];
+    if (this.notice) hints.push(this.notice);
+    if (status === 'ready' && !this.room.hasTurn()) {
+      hints.push('No TURN relay configured: players on mobile data or strict networks may be unable to connect.');
+    }
+    noticeEl.textContent = hints.join(' ');
   }
 
   private renderSettingsPanel(): void {
     const panel = document.getElementById('settingsPanel');
     if (!panel) return;
 
-    const isHost = this.connection.isHostMode();
-    const isConnecting = !this.lobbyState;
-    const roomId = this.lobbyState?.roomId || this.options.roomId || '';
-    const levelMode = this.lobbyState?.levelMode || 'cycle';
-    const link = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+    const state = this.lobbyState;
+    const isHost = this.room.isHost();
+    const editable = isHost && state !== null;
+    const roomId = this.room.code;
+    const link = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(roomId)}`;
+    const gameMode = state?.gameMode ?? 'ffa';
+    const levelMode = state?.levelMode ?? 'cycle';
+    const canStart = state !== null && canStartGame(state);
 
-    // Guest connecting state (no lobby data yet)
-    if (isConnecting && !isHost) {
-      panel.innerHTML = `
-        <h3 style="color: #0ff; margin-bottom: 1rem;">Info</h3>
+    const levelOptions = editable
+      ? `<option value="cycle" ${levelMode === 'cycle' ? 'selected' : ''}>Cycle All</option>
+         ${LEVELS.map(l => `<option value="${l.id}" ${levelMode === l.id ? 'selected' : ''}>${escapeHtml(l.name)}</option>`).join('')}`
+      : `<option>${state ? escapeHtml(levelMode === 'cycle' ? 'Cycle All' : LEVELS.find(l => l.id === levelMode)?.name ?? levelMode) : 'Loading...'}</option>`;
 
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Game Mode:</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <button disabled style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">FFA</button>
-            <button disabled style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">TEAMS</button>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Level:</label>
-          <select disabled style="width: 100%; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333; cursor: not-allowed;">
-            <option>Loading...</option>
-          </select>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Your Nickname:</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <input id="nicknameInput" type="text" value="${escapeHtml(this.myNickname)}" disabled style="flex: 1; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333; box-sizing: border-box;" />
-            <button disabled style="padding: 0.5rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333; font-size: 1rem;">🎲</button>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Room Code:</label>
-          <div style="background: #000; padding: 0.5rem; border: 1px solid #333; color: #0f0; font-family: monospace; text-align: center; letter-spacing: 0.1em;">${escapeHtml(roomId)}</div>
-          <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-            <button id="copyCodeBtn" style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #002; color: #08f; border: 1px solid #08f;">📋 CODE</button>
-            <button id="copyLinkBtn" style="flex: 1; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #002; color: #08f; border: 1px solid #08f;">🔗 LINK</button>
-          </div>
-        </div>
-
-        <div style="background: #110; padding: 1rem; border: 1px solid #440; border-radius: 4px; color: #ff0; text-align: center; margin-bottom: 1rem;">
-          Connecting to room...
-        </div>
-
-        <button id="disconnectBtn" style="width: 100%; padding: 0.5rem; font-family: monospace; cursor: pointer; background: #200; color: #f44; border: 1px solid #f44;">DISCONNECT</button>
-      `;
-
-      this.setupCopyButtons(roomId, link);
-      document.getElementById('disconnectBtn')?.addEventListener('click', () => {
-        this.connection.disconnect();
-        this.screenManager.showMainMenu();
-      });
-      return;
+    let action: string;
+    if (!state) {
+      action = `<div style="background: #110; padding: 1rem; border: 1px solid #440; border-radius: 4px; color: #ff0; text-align: center; margin-bottom: 0.5rem;">Connecting to room...</div>`;
+    } else if (isHost) {
+      action = `
+        <button id="startGameBtn" ${canStart ? '' : 'disabled'} style="
+          width: 100%; padding: 1rem; font-size: 1.1rem; font-family: monospace; margin-bottom: 0.5rem;
+          cursor: ${canStart ? 'pointer' : 'not-allowed'};
+          background: ${canStart ? '#030' : '#111'}; color: ${canStart ? '#0f0' : '#666'};
+          border: 2px solid ${canStart ? '#0f0' : '#333'};">
+          START GAME
+          ${canStart ? '' : `<br><span style="font-size: 0.7rem;">(${gameMode === 'team' ? 'needs 4 players' : 'needs 2 players'})</span>`}
+        </button>`;
+    } else {
+      action = `<div style="background: #110; padding: 1rem; border: 1px solid #440; border-radius: 4px; color: #ff0; text-align: center; margin-bottom: 0.5rem;">Waiting for host to start...</div>`;
     }
 
-    // Need lobby state for host and connected guest views
-    if (!this.lobbyState) return;
+    const nicknameFocused = document.activeElement?.id === 'nicknameInput';
+    const nicknameDraft = (document.getElementById('nicknameInput') as HTMLInputElement | null)?.value;
 
-    if (isHost) {
-      panel.innerHTML = `
-        <h3 style="color: #0ff; margin-bottom: 1rem;">Settings</h3>
+    panel.innerHTML = `
+      <h3 style="color: #0ff; margin-bottom: 1rem;">${isHost ? 'Settings' : 'Info'}</h3>
 
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Game Mode:</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <button id="ffaBtn" style="
-              flex: 1;
-              padding: 0.5rem;
-              font-family: monospace;
-              cursor: pointer;
-              background: ${this.lobbyState.gameMode === 'ffa' ? '#030' : '#111'};
-              color: ${this.lobbyState.gameMode === 'ffa' ? '#0f0' : '#666'};
-              border: 1px solid ${this.lobbyState.gameMode === 'ffa' ? '#0f0' : '#333'};
-            ">FFA</button>
-            <button id="teamBtn" style="
-              flex: 1;
-              padding: 0.5rem;
-              font-family: monospace;
-              cursor: pointer;
-              background: ${this.lobbyState.gameMode === 'team' ? '#030' : '#111'};
-              color: ${this.lobbyState.gameMode === 'team' ? '#0f0' : '#666'};
-              border: 1px solid ${this.lobbyState.gameMode === 'team' ? '#0f0' : '#333'};
-            ">TEAMS</button>
-          </div>
+      <div style="margin-bottom: 1rem;">
+        <label style="${LABEL}">Game Mode:</label>
+        <div style="display: flex; gap: 0.5rem;">
+          <button id="ffaBtn" ${editable ? '' : 'disabled'} style="${toggleStyle(gameMode === 'ffa', editable)}">FFA</button>
+          <button id="teamBtn" ${editable ? '' : 'disabled'} style="${toggleStyle(gameMode === 'team', editable)}">TEAMS</button>
         </div>
+      </div>
 
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Level:</label>
-          <select id="levelSelect" style="
-            width: 100%;
-            padding: 0.5rem;
-            font-family: monospace;
-            background: #000;
-            color: #0ff;
-            border: 1px solid #0ff;
-            cursor: pointer;
-          ">
-            <option value="cycle" ${levelMode === 'cycle' ? 'selected' : ''}>Cycle All</option>
-            ${LEVELS.map(l => `<option value="${l.id}" ${levelMode === l.id ? 'selected' : ''}>${l.name}</option>`).join('')}
-          </select>
+      <div style="margin-bottom: 1rem;">
+        <label style="${LABEL}">Level:</label>
+        <select id="levelSelect" ${editable ? '' : 'disabled'} style="width: 100%; ${FIELD}
+          ${editable ? 'cursor: pointer;' : 'color: #666; border-color: #333; cursor: not-allowed;'}">${levelOptions}</select>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label style="${LABEL}">Your Nickname:</label>
+        <div style="display: flex; gap: 0.5rem;">
+          <input id="nicknameInput" type="text" maxlength="24" value="${escapeHtml(nicknameFocused && nicknameDraft !== undefined ? nicknameDraft : this.myNickname)}" style="flex: 1; min-width: 0; ${FIELD}" />
+          <button id="randomNicknameBtn" title="Generate random nickname" style="${BTN} background: #002; color: #08f; border: 1px solid #08f; font-size: 1rem;">🎲</button>
         </div>
+      </div>
 
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Your Nickname:</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <input id="nicknameInput" type="text" value="${escapeHtml(this.myNickname)}" style="
-              flex: 1;
-              padding: 0.5rem;
-              font-family: monospace;
-              background: #000;
-              color: #0ff;
-              border: 1px solid #0ff;
-              box-sizing: border-box;
-            " />
-            <button id="randomNicknameBtn" title="Generate random nickname" style="
-              padding: 0.5rem;
-              font-family: monospace;
-              cursor: pointer;
-              background: #002;
-              color: #08f;
-              border: 1px solid #08f;
-              font-size: 1rem;
-            ">🎲</button>
-          </div>
+      <div style="margin-bottom: 1rem;">
+        <label style="${LABEL}">Room Code:</label>
+        <div id="roomCode" style="background: #000; padding: 0.5rem; border: 1px solid #333; color: #0f0; font-family: monospace;
+          word-break: break-all; text-align: center; letter-spacing: 0.1em;">${escapeHtml(roomId)}</div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+          <button id="copyCodeBtn" style="flex: 1; ${BTN} background: #002; color: #08f; border: 1px solid #08f;">📋 CODE</button>
+          <button id="copyLinkBtn" style="flex: 1; ${BTN} background: #002; color: #08f; border: 1px solid #08f;">🔗 LINK</button>
         </div>
+        <div class="lobby-qr" title="Scan to join" style="background: #fff; padding: 6px; margin: 0.5rem auto 0; width: 150px; border-radius: 4px;">${this.qrSvg(link)}</div>
+        <div style="color: #666; font-size: 0.7rem; text-align: center; margin-top: 0.25rem;">Scan to join from a phone</div>
+      </div>
 
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Room Code:</label>
-          <div style="
-            background: #000;
-            padding: 0.5rem;
-            border: 1px solid #333;
-            color: #0f0;
-            font-family: monospace;
-            word-break: break-all;
-            text-align: center;
-            letter-spacing: 0.1em;
-          ">${escapeHtml(roomId)}</div>
-          <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-            <button id="copyCodeBtn" style="
-              flex: 1;
-              padding: 0.5rem;
-              font-family: monospace;
-              cursor: pointer;
-              background: #002;
-              color: #08f;
-              border: 1px solid #08f;
-            ">📋 CODE</button>
-            <button id="copyLinkBtn" style="
-              flex: 1;
-              padding: 0.5rem;
-              font-family: monospace;
-              cursor: pointer;
-              background: #002;
-              color: #08f;
-              border: 1px solid #08f;
-            ">🔗 LINK</button>
-          </div>
-        </div>
+      ${action}
 
-        <button id="startGameBtn" style="
-          width: 100%;
-          padding: 1rem;
-          font-size: 1.1rem;
-          font-family: monospace;
-          cursor: ${canStartGame(this.lobbyState) ? 'pointer' : 'not-allowed'};
-          background: ${canStartGame(this.lobbyState) ? '#030' : '#111'};
-          color: ${canStartGame(this.lobbyState) ? '#0f0' : '#666'};
-          border: 2px solid ${canStartGame(this.lobbyState) ? '#0f0' : '#333'};
-          margin-bottom: 0.5rem;
-        " ${canStartGame(this.lobbyState) ? '' : 'disabled'}>
-          START GAME
-          ${this.lobbyState.gameMode === 'team' && getFilledSlotCount(this.lobbyState) < 4 ? '<br><span style="font-size: 0.7rem;">(needs 4 players)</span>' : ''}
-        </button>
+      <button id="disconnectBtn" style="width: 100%; ${BTN} background: #200; color: #f44; border: 1px solid #f44;">LEAVE ROOM</button>
+    `;
 
-        <button id="disconnectBtn" style="
-          width: 100%;
-          padding: 0.5rem;
-          font-family: monospace;
-          cursor: pointer;
-          background: #200;
-          color: #f44;
-          border: 1px solid #f44;
-        ">DISCONNECT</button>
-      `;
+    if (nicknameFocused) (document.getElementById('nicknameInput') as HTMLInputElement | null)?.focus();
 
-      // Event listeners
-      document.getElementById('ffaBtn')?.addEventListener('click', () => {
-        this.connection.setGameMode('ffa');
-      });
+    document.getElementById('ffaBtn')?.addEventListener('click', () => this.room.setGameMode('ffa'));
+    document.getElementById('teamBtn')?.addEventListener('click', () => this.room.setGameMode('team'));
+    document.getElementById('levelSelect')?.addEventListener('change', (e) => {
+      this.room.setLevelMode((e.target as HTMLSelectElement).value);
+    });
+    document.getElementById('nicknameInput')?.addEventListener('change', (e) => {
+      const nickname = (e.target as HTMLInputElement).value.trim();
+      if (nickname) this.setNickname(nickname);
+    });
+    document.getElementById('randomNicknameBtn')?.addEventListener('click', () => {
+      const nickname = generateNickname();
+      this.setNickname(nickname);
+      const input = document.getElementById('nicknameInput') as HTMLInputElement | null;
+      if (input) input.value = nickname;
+    });
+    this.setupCopyButton('copyCodeBtn', roomId, '📋 CODE');
+    this.setupCopyButton('copyLinkBtn', link, '🔗 LINK');
+    document.getElementById('startGameBtn')?.addEventListener('click', () => this.room.startGame());
+    document.getElementById('disconnectBtn')?.addEventListener('click', () => {
+      this.room.leave();
+      this.screenManager.showMainMenu();
+    });
+  }
 
-      document.getElementById('teamBtn')?.addEventListener('click', () => {
-        this.connection.setGameMode('team');
-      });
+  private setNickname(nickname: string): void {
+    this.myNickname = nickname;
+    localStorage.setItem(NICKNAME_KEY, nickname);
+    this.room.setNickname(nickname);
+  }
 
-      document.getElementById('levelSelect')?.addEventListener('change', (e) => {
-        const levelMode = (e.target as HTMLSelectElement).value;
-        this.connection.setLevelMode(levelMode);
-      });
-
-      document.getElementById('nicknameInput')?.addEventListener('change', (e) => {
-        const newNickname = (e.target as HTMLInputElement).value.trim();
-        if (newNickname) {
-          this.myNickname = newNickname;
-          localStorage.setItem('teratron-nickname', newNickname);
-          this.connection.sendNicknameChange(newNickname);
-        }
-      });
-
-      document.getElementById('randomNicknameBtn')?.addEventListener('click', () => {
-        const newNickname = generateNickname();
-        this.myNickname = newNickname;
-        localStorage.setItem('teratron-nickname', newNickname);
-        this.connection.sendNicknameChange(newNickname);
-        const input = document.getElementById('nicknameInput') as HTMLInputElement;
-        if (input) input.value = newNickname;
-      });
-
-      document.getElementById('copyCodeBtn')?.addEventListener('click', () => {
-        navigator.clipboard.writeText(roomId).then(() => {
-          const btn = document.getElementById('copyCodeBtn');
-          if (btn) {
-            btn.textContent = '✓ COPIED';
-            setTimeout(() => { btn.textContent = '📋 CODE'; }, 2000);
-          }
-        });
-      });
-
-      document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
-        navigator.clipboard.writeText(link).then(() => {
-          const btn = document.getElementById('copyLinkBtn');
-          if (btn) {
-            btn.textContent = '✓ COPIED';
-            setTimeout(() => { btn.textContent = '🔗 LINK'; }, 2000);
-          }
-        });
-      });
-
-      document.getElementById('startGameBtn')?.addEventListener('click', () => {
-        if (canStartGame(this.lobbyState!)) {
-          this.connection.startGame();
-        }
-      });
-
-      document.getElementById('disconnectBtn')?.addEventListener('click', () => {
-        this.connection.disconnect();
-        this.screenManager.showMainMenu();
-      });
-
-    } else {
-      // Guest view
-      panel.innerHTML = `
-        <h3 style="color: #0ff; margin-bottom: 1rem;">Info</h3>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Game Mode:</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <button disabled style="
-              flex: 1;
-              padding: 0.5rem;
-              font-family: monospace;
-              cursor: not-allowed;
-              background: ${this.lobbyState.gameMode === 'ffa' ? '#020' : '#111'};
-              color: ${this.lobbyState.gameMode === 'ffa' ? '#0a0' : '#444'};
-              border: 1px solid ${this.lobbyState.gameMode === 'ffa' ? '#0a0' : '#333'};
-            ">FFA</button>
-            <button disabled style="
-              flex: 1;
-              padding: 0.5rem;
-              font-family: monospace;
-              cursor: not-allowed;
-              background: ${this.lobbyState.gameMode === 'team' ? '#020' : '#111'};
-              color: ${this.lobbyState.gameMode === 'team' ? '#0a0' : '#444'};
-              border: 1px solid ${this.lobbyState.gameMode === 'team' ? '#0a0' : '#333'};
-            ">TEAMS</button>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Level:</label>
-          <select disabled style="
-            width: 100%;
-            padding: 0.5rem;
-            font-family: monospace;
-            background: #000;
-            color: #666;
-            border: 1px solid #333;
-            cursor: not-allowed;
-          ">
-            <option>${levelMode === 'cycle' ? 'Cycle All' : LEVELS.find(l => l.id === levelMode)?.name || levelMode}</option>
-          </select>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Your Nickname:</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <input id="nicknameInput" type="text" value="${escapeHtml(this.myNickname)}" style="
-              flex: 1;
-              padding: 0.5rem;
-              font-family: monospace;
-              background: #000;
-              color: #0ff;
-              border: 1px solid #0ff;
-              box-sizing: border-box;
-            " />
-            <button id="randomNicknameBtn" title="Generate random nickname" style="
-              padding: 0.5rem;
-              font-family: monospace;
-              cursor: pointer;
-              background: #002;
-              color: #08f;
-              border: 1px solid #08f;
-              font-size: 1rem;
-            ">🎲</button>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="color: #888; display: block; margin-bottom: 0.5rem;">Room Code:</label>
-          <div style="
-            background: #000;
-            padding: 0.5rem;
-            border: 1px solid #333;
-            color: #0f0;
-            font-family: monospace;
-            word-break: break-all;
-            text-align: center;
-            letter-spacing: 0.1em;
-          ">${escapeHtml(roomId)}</div>
-          <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-            <button id="copyCodeBtn" style="
-              flex: 1;
-              padding: 0.5rem;
-              font-family: monospace;
-              cursor: pointer;
-              background: #002;
-              color: #08f;
-              border: 1px solid #08f;
-            ">📋 CODE</button>
-            <button id="copyLinkBtn" style="
-              flex: 1;
-              padding: 0.5rem;
-              font-family: monospace;
-              cursor: pointer;
-              background: #002;
-              color: #08f;
-              border: 1px solid #08f;
-            ">🔗 LINK</button>
-          </div>
-        </div>
-
-        <div style="
-          background: #110;
-          padding: 1rem;
-          border: 1px solid #440;
-          border-radius: 4px;
-          color: #ff0;
-          text-align: center;
-          margin-bottom: 1rem;
-        ">
-          Waiting for host to start...
-        </div>
-
-        <button id="disconnectBtn" style="
-          width: 100%;
-          padding: 0.5rem;
-          font-family: monospace;
-          cursor: pointer;
-          background: #200;
-          color: #f44;
-          border: 1px solid #f44;
-        ">DISCONNECT</button>
-      `;
-
-      document.getElementById('nicknameInput')?.addEventListener('change', (e) => {
-        const newNickname = (e.target as HTMLInputElement).value.trim();
-        if (newNickname) {
-          this.myNickname = newNickname;
-          localStorage.setItem('teratron-nickname', newNickname);
-          this.connection.sendNicknameChange(newNickname);
-        }
-      });
-
-      document.getElementById('randomNicknameBtn')?.addEventListener('click', () => {
-        const newNickname = generateNickname();
-        this.myNickname = newNickname;
-        localStorage.setItem('teratron-nickname', newNickname);
-        this.connection.sendNicknameChange(newNickname);
-        const input = document.getElementById('nicknameInput') as HTMLInputElement;
-        if (input) input.value = newNickname;
-      });
-
-      document.getElementById('copyCodeBtn')?.addEventListener('click', () => {
-        navigator.clipboard.writeText(roomId).then(() => {
-          const btn = document.getElementById('copyCodeBtn');
-          if (btn) {
-            btn.textContent = '✓ COPIED';
-            setTimeout(() => { btn.textContent = '📋 CODE'; }, 2000);
-          }
-        });
-      });
-
-      document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
-        navigator.clipboard.writeText(link).then(() => {
-          const btn = document.getElementById('copyLinkBtn');
-          if (btn) {
-            btn.textContent = '✓ COPIED';
-            setTimeout(() => { btn.textContent = '🔗 LINK'; }, 2000);
-          }
-        });
-      });
-
-      document.getElementById('disconnectBtn')?.addEventListener('click', () => {
-        this.connection.disconnect();
-        this.screenManager.showMainMenu();
-      });
+  private qrSvg(text: string): string {
+    try {
+      const qr = qrcode(0, 'M');
+      qr.addData(text);
+      qr.make();
+      return qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+    } catch {
+      return '';
     }
   }
 
-  // Helper to setup copy buttons (used in settings panel)
-  private setupCopyButtons(roomId: string, link: string): void {
-    document.getElementById('copyCodeBtn')?.addEventListener('click', () => {
-      navigator.clipboard.writeText(roomId).then(() => {
-        const btn = document.getElementById('copyCodeBtn');
-        if (btn) { btn.textContent = '✓ COPIED'; setTimeout(() => { btn.textContent = '📋 CODE'; }, 2000); }
-      });
-    });
-
-    document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
-      navigator.clipboard.writeText(link).then(() => {
-        const btn = document.getElementById('copyLinkBtn');
-        if (btn) { btn.textContent = '✓ COPIED'; setTimeout(() => { btn.textContent = '🔗 LINK'; }, 2000); }
+  private setupCopyButton(id: string, text: string, label: string): void {
+    document.getElementById(id)?.addEventListener('click', () => {
+      void navigator.clipboard?.writeText(text).then(() => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.textContent = '✓ COPIED';
+        setTimeout(() => {
+          const current = document.getElementById(id);
+          if (current) current.textContent = label;
+        }, 2000);
       });
     });
   }
@@ -701,106 +328,84 @@ export class NetworkLobby implements Screen {
     const panel = document.getElementById('playersPanel');
     if (!panel) return;
 
-    // Connecting state - show placeholder
-    if (!this.lobbyState) {
+    const state = this.lobbyState;
+    if (!state) {
       panel.innerHTML = `
         <h3 style="color: #0ff; margin-bottom: 1rem;">Players</h3>
-        <div style="color: #666; text-align: center; padding: 2rem;">
-          Waiting for lobby data...
-        </div>
+        <div style="color: #666; text-align: center; padding: 2rem;">Waiting for lobby data...</div>
       `;
       return;
     }
 
-    const isHost = this.connection.isHostMode();
-    const mySlotIndex = this.connection.getMySlotIndex();
-    const mode = this.lobbyState.gameMode;
+    const isHost = this.room.isHost();
+    const mySlotIndex = this.room.getMySlotIndex();
+    const mode = state.gameMode;
+    const slot = (i: SlotIndex) => this.renderSlot(i, mode, mySlotIndex, isHost);
 
-    let slotsHtml = '';
+    const slotsHtml = mode === 'team'
+      ? `<div style="margin-bottom: 1rem;">
+           <h4 style="color: ${getSlotColor('team', 0)}; margin-bottom: 0.5rem;">TEAM PURPLE</h4>
+           ${slot(0)}${slot(2)}
+         </div>
+         <hr style="border-color: #333; margin: 1rem 0;" />
+         <div>
+           <h4 style="color: ${getSlotColor('team', 1)}; margin-bottom: 0.5rem;">TEAM BROWN</h4>
+           ${slot(1)}${slot(3)}
+         </div>`
+      : `${slot(0)}${slot(1)}${slot(2)}${slot(3)}`;
 
-    if (mode === 'team') {
-      // Team mode: group by teams
-      slotsHtml = `
-        <div style="margin-bottom: 1rem;">
-          <h4 style="color: ${getSlotColor('team', 0)}; margin-bottom: 0.5rem;">TEAM PURPLE</h4>
-          ${this.renderSlot(0, mode, mySlotIndex, isHost)}
-          ${this.renderSlot(2, mode, mySlotIndex, isHost)}
-        </div>
-        <hr style="border-color: #333; margin: 1rem 0;" />
-        <div>
-          <h4 style="color: ${getSlotColor('team', 1)}; margin-bottom: 0.5rem;">TEAM BROWN</h4>
-          ${this.renderSlot(1, mode, mySlotIndex, isHost)}
-          ${this.renderSlot(3, mode, mySlotIndex, isHost)}
-        </div>
-      `;
-    } else {
-      // FFA mode: simple list
-      slotsHtml = `
-        ${this.renderSlot(0, mode, mySlotIndex, isHost)}
-        ${this.renderSlot(1, mode, mySlotIndex, isHost)}
-        ${this.renderSlot(2, mode, mySlotIndex, isHost)}
-        ${this.renderSlot(3, mode, mySlotIndex, isHost)}
-      `;
-    }
-
-    // Render unassigned peers (spectators)
-    const hostPeerId = this.lobbyState.hostPeerId;
-    const unassignedHtml = this.lobbyState.spectators.map(peer => {
-      const isPeerHost = peer.peerId === hostPeerId;
-      return `
-        <div style="
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          padding: 0.75rem;
-          margin-bottom: 0.5rem;
-          background: #0a0a0a;
-          border: 1px solid #333;
-          border-radius: 4px;
-        ">
-          <div style="flex: 1;">
-            <div style="color: #888;">${escapeHtml(peer.nickname)}${isPeerHost ? ' 🛠️' : ''}</div>
-          </div>
-        </div>
-      `;
-    }).join('');
+    const selfId = this.room.getSelfId();
+    const spectatorsHtml = state.spectators.map(peer => `
+      <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; margin-bottom: 0.5rem;
+        background: #0a0a0a; border: 1px solid #333; border-radius: 4px;">
+        <div style="flex: 1; color: #888;">${escapeHtml(peer.nickname)}${peer.peerId === selfId ? ' (You)' : ''}${peer.peerId === state.hostPeerId ? ' 🛠️' : ''}</div>
+        ${this.linkBadge(peer.peerId)}
+      </div>
+    `).join('');
 
     panel.innerHTML = `
       <h3 style="color: #0ff; margin-bottom: 1rem;">Players</h3>
       ${slotsHtml}
-      ${this.lobbyState.spectators.length > 0 ? `
+      ${state.spectators.length > 0 ? `
         <h3 style="color: #666; margin-top: 1.5rem; margin-bottom: 1rem;">Spectators</h3>
-        ${unassignedHtml}
+        ${spectatorsHtml}
       ` : ''}
     `;
 
-    // Add click handlers for slot joins and leaves
-    for (let i = 0; i < 4; i++) {
-      // Join button
-      document.getElementById(`joinSlot${i}`)?.addEventListener('click', () => {
-        const mySlotIndex = this.connection.getMySlotIndex();
-        if (mySlotIndex === null) {
-          // Not in any slot yet - join this slot
-          this.connection.joinSlot(i as SlotIndex, this.myNickname);
-        } else {
-          // Already in a slot - change to this slot
-          this.connection.changeSlot(i as SlotIndex);
-        }
-      });
-      // Leave button
-      document.getElementById(`leaveSlot${i}`)?.addEventListener('click', () => {
-        this.connection.leaveSlot();
-      });
+    for (const i of [0, 1, 2, 3] as SlotIndex[]) {
+      document.getElementById(`joinSlot${i}`)?.addEventListener('click', () => this.room.joinSlot(i));
+      document.getElementById(`leaveSlot${i}`)?.addEventListener('click', () => this.room.leaveSlot());
       // Bots (host only)
-      document.getElementById(`addBot${i}`)?.addEventListener('click', () => {
-        this.connection.addBot(i as SlotIndex, 'normal');
-      });
-      document.getElementById(`removeBot${i}`)?.addEventListener('click', () => {
-        this.connection.removeBot(i as SlotIndex);
-      });
+      document.getElementById(`addBot${i}`)?.addEventListener('click', () => this.room.addBot(i, 'normal'));
+      document.getElementById(`removeBot${i}`)?.addEventListener('click', () => this.room.removeBot(i));
       document.getElementById(`botLevel${i}`)?.addEventListener('change', (e) => {
-        this.connection.setBotDifficulty(i as SlotIndex, (e.target as HTMLSelectElement).value as BotDifficulty);
+        this.room.setBotDifficulty(i, (e.target as HTMLSelectElement).value as BotDifficulty);
       });
+    }
+  }
+
+  // Latency and path (direct / relayed) of our connection to a player
+  private linkBadge(peerId: string | null): string {
+    const info = peerId ? this.diagnostics.get(peerId) : undefined;
+    if (!info) return '';
+    const rtt = info.rttMs !== null ? `${info.rttMs}ms` : '';
+    const path = info.path === 'relay' ? 'relay' : info.path === 'direct' ? 'direct' : '';
+    const color = info.path === 'relay' ? '#fa0' : '#5a5';
+    return `<span class="link-badge" title="Connection to this player" style="color: ${color}; font-size: 0.7rem; white-space: nowrap;">${[rtt, path].filter(Boolean).join(' · ')}</span>`;
+  }
+
+  private async refreshDiagnostics(): Promise<void> {
+    const list = await this.room.getDiagnostics();
+    const next = new Map(list.map(d => [d.userId, d]));
+    const changed = next.size !== this.diagnostics.size ||
+      [...next].some(([id, d]) => {
+        const old = this.diagnostics.get(id);
+        return !old || old.path !== d.path || old.rttMs !== d.rttMs;
+      });
+    this.diagnostics = next;
+    // Avoid re-rendering while the user is using a control in the panel
+    if (changed && !document.getElementById('playersPanel')?.contains(document.activeElement)) {
+      this.renderPlayersPanel();
     }
   }
 
@@ -810,24 +415,18 @@ export class NetworkLobby implements Screen {
     const isOccupied = slot.peerId !== null;
     const isMe = slot.slotIndex === mySlotIndex;
     const smallBtn = (id: string, label: string, fg: string, bg: string) => `<button id="${id}" style="
-          padding: 0.25rem 0.5rem;
-          font-size: 0.8rem;
-          font-family: monospace;
-          cursor: pointer;
-          background: ${bg};
-          color: ${fg};
-          border: 1px solid ${fg};
-        ">${label}</button>`;
+      padding: 0.25rem 0.5rem; font-size: 0.8rem; font-family: monospace; cursor: pointer;
+      background: ${bg}; color: ${fg}; border: 1px solid ${fg};">${label}</button>`;
 
     let statusText: string;
-    let actionBtn = '';
+    let actions = '';
 
     if (slot.ai) {
       statusText = `${escapeHtml(slot.nickname)} 🤖`;
       if (isHost) {
         const options = (['easy', 'normal', 'hard'] as const)
           .map(d => `<option value="${d}" ${slot.ai === d ? 'selected' : ''}>${d}</option>`).join('');
-        actionBtn = `<select id="botLevel${index}" style="padding: 0.2rem; font-family: monospace; font-size: 0.8rem;
+        actions = `<select id="botLevel${index}" style="padding: 0.2rem; font-family: monospace; font-size: 0.8rem;
           background: #000; color: #0ff; border: 1px solid #0ff;">${options}</select>
           ${smallBtn(`removeBot${index}`, '✕', '#f44', '#200')}`;
       } else {
@@ -837,35 +436,20 @@ export class NetworkLobby implements Screen {
       statusText = escapeHtml(slot.nickname || 'Player');
       if (isMe) statusText += ' (You)';
       if (slot.isHost) statusText += ' 🛠️';
-      if (isMe) actionBtn = smallBtn(`leaveSlot${index}`, 'LEAVE', '#f44', '#200');
+      actions = isMe ? smallBtn(`leaveSlot${index}`, 'LEAVE', '#f44', '#200') : this.linkBadge(slot.peerId);
     } else {
       statusText = 'Open';
-      actionBtn = smallBtn(`joinSlot${index}`, 'JOIN', '#08f', '#002');
-      if (isHost) actionBtn += smallBtn(`addBot${index}`, '+ AI', '#0c8', '#021');
+      actions = smallBtn(`joinSlot${index}`, 'JOIN', '#08f', '#002');
+      if (isHost) actions += smallBtn(`addBot${index}`, '+ AI', '#0c8', '#021');
     }
 
     return `
-      <div style="
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 0.75rem;
-        margin-bottom: 0.5rem;
-        background: ${isMe ? '#112' : '#0a0a0a'};
-        border: 1px solid ${isMe ? '#08f' : '#333'};
-        border-radius: 4px;
-      ">
-        <div style="
-          width: 20px;
-          height: 20px;
-          background: ${color};
-          border-radius: 50%;
-          box-shadow: ${isOccupied ? `0 0 8px ${color}` : 'none'};
-        "></div>
-        <div style="flex: 1;">
-          <div style="color: ${isOccupied ? '#fff' : '#666'};">${statusText}</div>
-        </div>
-        ${actionBtn}
+      <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; margin-bottom: 0.5rem;
+        background: ${isMe ? '#112' : '#0a0a0a'}; border: 1px solid ${isMe ? '#08f' : '#333'}; border-radius: 4px;">
+        <div style="width: 20px; height: 20px; flex: none; background: ${color}; border-radius: 50%;
+          box-shadow: ${isOccupied ? `0 0 8px ${color}` : 'none'};"></div>
+        <div style="flex: 1; min-width: 0; color: ${isOccupied ? '#fff' : '#666'}; overflow: hidden; text-overflow: ellipsis;">${statusText}</div>
+        ${actions}
       </div>
     `;
   }
@@ -874,155 +458,116 @@ export class NetworkLobby implements Screen {
     const panel = document.getElementById('chatPanel');
     if (!panel) return;
 
-    // Connecting state - show placeholder
-    if (!this.lobbyState) {
-      panel.innerHTML = `
-        <h3 style="color: #0ff; margin-bottom: 0.5rem;">Chat</h3>
-        <div style="flex: 1; overflow-y: auto; background: #000; padding: 0.5rem; border: 1px solid #333; border-radius: 4px; margin-bottom: 0.5rem; min-height: 200px;">
-          <div style="color: #666; font-style: italic;">Connecting...</div>
-        </div>
-        <div style="display: flex; gap: 0.5rem;">
-          <input disabled type="text" placeholder="Type a message..." style="flex: 1; padding: 0.5rem; font-family: monospace; background: #000; color: #666; border: 1px solid #333;" />
-          <button disabled style="padding: 0.5rem 1rem; font-family: monospace; cursor: not-allowed; background: #111; color: #444; border: 1px solid #333;">SEND</button>
-        </div>
-      `;
-      return;
-    }
+    const state = this.lobbyState;
+    const mode = state?.gameMode ?? 'ffa';
+    const messages = state?.chatMessages ?? [];
+    const enabled = state !== null;
 
-    const mode = this.lobbyState.gameMode;
-    const messages = this.lobbyState.chatMessages;
+    // Keep what is being typed across re-renders
+    const previous = document.getElementById('chatInput') as HTMLInputElement | null;
+    const draft = previous?.value ?? '';
+    const hadFocus = document.activeElement === previous && previous !== null;
 
-    let messagesHtml = messages.map(msg => {
-      // Use white for non-players (null slot), otherwise use slot color
-      const color = msg.senderSlotIndex !== null ? getSlotColor(mode, msg.senderSlotIndex) : '#fff';
-      return `
-        <div style="margin-bottom: 0.5rem;">
+    const messagesHtml = messages.length === 0
+      ? `<div style="color: #666; font-style: italic;">${enabled ? 'No messages yet...' : 'Connecting...'}</div>`
+      : messages.map(msg => {
+        // White for non-players (null slot), otherwise the slot colour
+        const color = msg.senderSlotIndex !== null ? getSlotColor(mode, msg.senderSlotIndex) : '#fff';
+        return `<div style="margin-bottom: 0.5rem;">
           <span style="color: ${color};">${escapeHtml(msg.senderNickname)}:</span>
           <span style="color: #fff;"> ${escapeHtml(msg.text)}</span>
-        </div>
-      `;
-    }).join('');
-
-    if (messages.length === 0) {
-      messagesHtml = '<div style="color: #666; font-style: italic;">No messages yet...</div>';
-    }
+        </div>`;
+      }).join('');
 
     panel.innerHTML = `
       <h3 style="color: #0ff; margin-bottom: 0.5rem;">Chat</h3>
-      <div id="chatMessages" class="lobby-chat-messages" style="
-        flex: 1;
-        overflow-y: auto;
-        background: #000;
-        padding: 0.5rem;
-        border: 1px solid #333;
-        border-radius: 4px;
-        margin-bottom: 0.5rem;
-        min-height: 150px;
-        max-height: 300px;
-      ">${messagesHtml}</div>
+      <div id="chatMessages" style="flex: 1; overflow-y: auto; background: #000; padding: 0.5rem; border: 1px solid #333;
+        border-radius: 4px; margin-bottom: 0.5rem; min-height: 150px; max-height: 300px;">${messagesHtml}</div>
       <div style="display: flex; gap: 0.5rem;">
-        <input id="chatInput" type="text" placeholder="Type a message..." style="
-          flex: 1;
-          padding: 0.5rem;
-          font-family: monospace;
-          background: #000;
-          color: #fff;
-          border: 1px solid #333;
-        " />
-        <button id="chatSendBtn" style="
-          padding: 0.5rem 1rem;
-          font-family: monospace;
-          cursor: pointer;
-          background: #020;
-          color: #0f0;
-          border: 1px solid #0f0;
-        ">SEND</button>
+        <input id="chatInput" type="text" maxlength="300" placeholder="Type a message..." ${enabled ? '' : 'disabled'}
+          style="flex: 1; min-width: 0; padding: 0.5rem; font-family: monospace; background: #000; color: #fff; border: 1px solid #333;" />
+        <button id="chatSendBtn" ${enabled ? '' : 'disabled'} style="padding: 0.5rem 1rem; font-family: monospace; cursor: pointer;
+          background: #020; color: #0f0; border: 1px solid #0f0;">SEND</button>
       </div>
     `;
 
-    // Scroll to bottom
     const chatMessages = document.getElementById('chatMessages');
-    if (chatMessages) {
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
+    if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
 
-    // Event listeners
     const chatInput = document.getElementById('chatInput') as HTMLInputElement;
+    chatInput.value = draft;
+    if (hadFocus) chatInput.focus();
+
     const sendChat = () => {
       const text = chatInput.value.trim();
       if (text) {
-        this.connection.sendChat(text);
         chatInput.value = '';
+        this.room.sendChat(text);
       }
     };
-
     document.getElementById('chatSendBtn')?.addEventListener('click', sendChat);
-    chatInput?.addEventListener('keypress', (e) => {
+    chatInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendChat();
     });
   }
 
-  private createGameSession(): { gameConfig: GameConfig; session: GameSession } {
-    const lobbyState = this.lobbyState!;
-    const mySlot = this.connection.getMySlotIndex();
+  // === Game hand-over ===
 
-    // Build players from filled slots
-    const players: GamePlayer[] = lobbyState.slots
-      .filter(slot => slot.peerId !== null)
-      .map(slot => ({
-        slotIndex: slot.slotIndex,
-        nickname: slot.nickname,
-        color: getSlotColor(lobbyState.gameMode, slot.slotIndex),
-        control: this.controlFor(slot, mySlot),
-      }));
+  // Open the game screen. `resume`: the game was already running when we arrived
+  // (reload, late join), so we need a snapshot of it.
+  private enterGame(resume: boolean): void {
+    const config = this.room.getGameConfig();
+    if (!config || this.handedOver) return;
+    this.handedOver = true;
 
-    // Build peer-to-slot mapping for GameConnection
-    const slotByPeerId = new Map<string, SlotIndex>();
-    for (const slot of lobbyState.slots) {
-      if (slot.peerId !== null) {
-        slotByPeerId.set(slot.peerId, slot.slotIndex);
-      }
-    }
-
-    const gameConfig: GameConfig = {
-      players,
-      gameMode: lobbyState.gameMode,
-      levelMode: lobbyState.levelMode,
-    };
-
-    const connection = new GameConnection(this.connection, slotByPeerId);
+    const room = this.room;
+    const screenManager = this.screenManager;
+    const base = room.createTransport();
     // `?lag=<ms>` adds artificial latency, to test the netcode on one machine
-    const transport = DEBUG_LAG ? new LaggedTransport(connection, DEBUG_LAG) : connection;
-    const session = this.connection.isHostMode()
-      ? new HostSession(gameConfig, { transport })
-      : new GuestSession(transport, mySlot, gameConfig.players);
+    const transport = DEBUG_LAG ? new LaggedTransport(base, DEBUG_LAG) : base;
 
-    return { gameConfig, session };
-  }
-
-  // How a lobby slot is controlled from this machine's point of view
-  private controlFor(slot: PlayerSlot, mySlot: SlotIndex | null): PlayerControl {
-    if (slot.slotIndex === mySlot) return { type: 'local', scheme: 'solo' };
-    // Bots are simulated by the host; for guests they are just remote players
-    if (slot.ai && this.connection.isHostMode()) return { type: 'ai', difficulty: slot.ai };
-    return { type: 'remote' };
-  }
-
-  private autoJoinFirstSlot(): void {
-    if (!this.lobbyState) return;
-    const openSlot = findFirstOpenSlot(this.lobbyState);
-    if (openSlot !== null) {
-      this.connection.joinSlot(openSlot, this.myNickname);
+    let session: GameSession;
+    if (room.isHost()) {
+      const host = new HostSession(config, { transport });
+      room.setSnapshotProvider(() => host.makeSnapshot());
+      session = host;
+    } else {
+      const guest = new GuestSession(transport, room.getMySlotIndex(), config.players, { awaitSnapshot: resume });
+      if (resume) {
+        void room.requestSnapshot().then(data => (data ? guest.loadSnapshot(data) : guest.skipSnapshot()));
+      }
+      session = guest;
     }
+
+    // From here on the room reports to the game, not to this (discarded) screen
+    room.setCallbacks({
+      onPhase: (phase) => {
+        if (phase === 'lobby') {
+          room.setSnapshotProvider(null);
+          screenManager.showNetworkLobby({ room });
+        }
+      },
+      onHostPresence: (present) => {
+        if (!present) console.info('[room] host disconnected; waiting for it to return');
+      },
+      onClosed: (reason) => screenManager.showMainMenu(reason),
+    });
+
+    screenManager.showGame(config, session, {
+      onBackToLobby: room.isHost() ? () => room.setPhase('lobby') : undefined,
+      onLeave: () => room.leave(),
+    });
   }
 
   cleanup(): void {
-    // Clear connection timeout if pending
-    if (this.connectionTimeoutId !== null) {
-      clearTimeout(this.connectionTimeoutId);
-      this.connectionTimeoutId = null;
+    if (this.diagnosticsTimer !== null) {
+      clearInterval(this.diagnosticsTimer);
+      this.diagnosticsTimer = null;
     }
-    // Don't disconnect here - the connection is passed to the game screen
-    // Disconnection happens via the Disconnect button or when leaving the game
+    // The room stays open when it has been handed to the game screen; leaving
+    // the room happens through the LEAVE button or the game's menu button
+    if (!this.handedOver && this.room.getStatus() !== 'closed') {
+      this.room.setCallbacks({});
+    }
   }
 }

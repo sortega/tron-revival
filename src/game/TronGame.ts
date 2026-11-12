@@ -1,7 +1,7 @@
 // TronGame - Game screen: layout, input, rendering, sound.
 // All game logic lives behind the GameSession it is given.
 
-import type { Screen, ScreenManager } from '../screens/ScreenManager';
+import type { GameScreenOptions, Screen, ScreenManager } from '../screens/ScreenManager';
 import type { GameConfig, TronGameStateData, SoundEvent, RoundPhase } from '../types/game';
 import { LEVELS } from '../types/game';
 import { TICK_RATE } from './constants';
@@ -19,6 +19,7 @@ export class TronGame implements Screen {
   private screenManager: ScreenManager;
   private config: GameConfig;
   private session: GameSession;
+  private options: GameScreenOptions;
 
   private renderer: TronRenderer | null = null;
   private input: InputManager | null = null;
@@ -45,8 +46,10 @@ export class TronGame implements Screen {
     container: HTMLElement,
     screenManager: ScreenManager,
     config: GameConfig,
-    session: GameSession
+    session: GameSession,
+    options: GameScreenOptions = {}
   ) {
+    this.options = options;
     this.container = container;
     this.screenManager = screenManager;
     this.config = config;
@@ -96,12 +99,17 @@ export class TronGame implements Screen {
     }
 
     this.session.onFrame = (frame) => this.applyFrameEvents(frame);
+    this.session.onSnapshot = (arena) => this.renderer?.paintArena(arena);
     this.session.onEnded = (reason) => {
       this.screenManager.showMainMenu(reason);
     };
 
     document.getElementById('backBtn')?.addEventListener('click', () => {
+      this.options.onLeave?.();
       this.screenManager.showMainMenu();
+    });
+    document.getElementById('lobbyBtn')?.addEventListener('click', () => {
+      this.options.onBackToLobby?.();
     });
 
     // Mute button
@@ -237,6 +245,14 @@ export class TronGame implements Screen {
               color: #0ff;
               border: 1px solid #0ff;
             ">${soundManager.isMuted() ? '🔇 MUTED' : '🔊 SOUND'}</button>
+            ${this.options.onBackToLobby ? `<button id="lobbyBtn" title="Send everyone back to the lobby" style="
+              padding: 0.5rem 1rem;
+              font-family: monospace;
+              cursor: pointer;
+              background: #220;
+              color: #fc4;
+              border: 1px solid #fc4;
+            ">LOBBY</button>` : ''}
             <button id="backBtn" style="
               padding: 0.5rem 1rem;
               font-family: monospace;
@@ -491,6 +507,7 @@ export class TronGame implements Screen {
         <div class="mobile-game-layout">
           <!-- Top buttons -->
           <button id="backBtn" class="back-button-mobile">✕</button>
+          ${this.options.onBackToLobby ? '<button id="lobbyBtn" class="back-button-mobile" style="left: 42px; color: #fc4; border-color: #fc4;" title="Back to lobby">⌂</button>' : ''}
           <button id="muteBtn" class="top-button mute-button">${soundManager.isMuted() ? '🔇' : '🔊'}</button>
           <button id="fullscreenBtn" class="top-button fullscreen-button">⛶</button>
 
@@ -673,6 +690,7 @@ export class TronGame implements Screen {
     this.renderer = null;
 
     this.session.onFrame = null;
+    this.session.onSnapshot = null;
     this.session.onEnded = null;
     this.session.destroy();
   }

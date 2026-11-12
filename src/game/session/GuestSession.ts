@@ -4,7 +4,8 @@
 
 import type { SlotIndex } from '../../types/lobby';
 import type { TrailSegment, TronGameStateData, TronInput, TronPlayerState } from '../../types/game';
-import { deserializeState } from '../../network/serialization';
+import { decodeSnapshot, deserializeState } from '../../network/serialization';
+import { PixelGrid } from '../PixelGrid';
 import type { PlayerIdentity } from '../../network/serialization';
 import { ByteRate } from './GameSession';
 import type { GameSession, GuestTransport, NetworkStats, ViewState } from './GameSession';
@@ -22,6 +23,11 @@ export interface GuestSessionOptions {
   predict?: boolean;
   /** Extrapolate remote players (default true). */
   extrapolate?: boolean;
+  /**
+   * Joining a game in progress: hold incoming frames until `loadSnapshot` is
+   * called (or `skipSnapshot`, if none could be obtained).
+   */
+  awaitSnapshot?: boolean;
 }
 
 interface PendingInput extends TronInput {
@@ -31,6 +37,7 @@ interface PendingInput extends TronInput {
 export class GuestSession implements GameSession {
   onFrame: ((frame: TronGameStateData) => void) | null = null;
   onEnded: ((reason: string) => void) | null = null;
+  onSnapshot: ((arena: PixelGrid) => void) | null = null;
   readonly runsInBackground = false;
 
   private readonly transport: GuestTransport;
@@ -44,6 +51,10 @@ export class GuestSession implements GameSession {
   private seq = 0;
   private pending: PendingInput[] = [];
   private view: ViewState | null = null;   // Cached; rebuilt when inputs or state change
+
+  // Frames received while waiting for a snapshot (null = not waiting)
+  private held: Uint8Array[] | null = null;
+  private minTick = -1;
 
   private readonly bytesIn = new ByteRate();
   private lagSamples: number[] = [];
@@ -59,13 +70,14 @@ export class GuestSession implements GameSession {
     this.now = options.now ?? (() => performance.now());
     this.predict = options.predict ?? true;
     this.extrapolate = options.extrapolate ?? true;
+    if (options.awaitSnapshot) this.held = [];
 
     transport.onState = (data) => this.handleState(data);
     transport.onHostDisconnected = () => this.onEnded?.('Host disconnected');
   }
 
   step(localInputs: ReadonlyMap<SlotIndex, TronInput>): void {
-    if (this.mySlot === null) return; // Spectator
+    if (this.mySlot === null || this.held) return; // Spectating, or not in sync yet
     const input = localInputs.get(this.mySlot) ?? { steer: 0, action: false };
     const seq = ++this.seq;
     this.transport.sendInput({ steer: input.steer, action: input.action, seq, t: this.now() });
@@ -75,8 +87,40 @@ export class GuestSession implements GameSession {
     this.view = null;
   }
 
+  /** Start from a snapshot of a game in progress, then apply the frames that followed it. */
+  loadSnapshot(data: Uint8Array): void {
+    const snapshot = decodeSnapshot(data);
+    if (!snapshot) {
+      this.skipSnapshot();
+      return;
+    }
+    const held = this.held ?? [];
+    this.held = null;
+    this.onSnapshot?.(PixelGrid.fromRuns(snapshot.palette, snapshot.runs));
+    this.handleState(snapshot.state);
+    // Continue the host's input numbering so stale acks cannot confuse prediction
+    const ack = this.mySlot !== null ? this.latest?.acks?.[this.mySlot] : undefined;
+    if (ack !== undefined) this.seq = Math.max(this.seq, ack);
+    this.pending = [];
+    this.minTick = snapshot.tick;
+    for (const frame of held) this.handleState(frame);
+  }
+
+  /** Give up waiting for a snapshot: show the game without the arena so far. */
+  skipSnapshot(): void {
+    const held = this.held ?? [];
+    this.held = null;
+    for (const frame of held) this.handleState(frame);
+  }
+
   private handleState(data: Uint8Array): void {
+    if (this.held) {
+      // Keep only a bounded backlog while waiting
+      if (this.held.length < 2000) this.held.push(data);
+      return;
+    }
     const state = deserializeState(data, this.players, this.latest);
+    if (state.tick !== undefined && state.tick <= this.minTick) return; // Already in the snapshot
     const now = this.now();
     this.bytesIn.add(data.length, now);
     this.latest = state;

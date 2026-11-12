@@ -256,3 +256,61 @@ describe('event delivery', () => {
     expect(maxBytes).toBeLessThan(6000);
   }, 120_000);
 });
+
+describe('joining a game in progress', () => {
+  it('a snapshot plus the frames after it reproduce the arena exactly', () => {
+    const rig = makeRig({ delayMs: 40, jitterMs: 30 }, { seed: 5, hostControl: { type: 'ai', difficulty: 'normal' }, level: 'pop-culture' });
+    let guestTick = 0;
+    rig.onGuestTick = () => { rig.guestInput = { steer: wavy(guestTick++, 220), action: guestTick % 90 < 8 }; };
+    rig.net.runUntil(9000);
+
+    // A second client arrives mid-game: frames flow before its snapshot does
+    const cfg = config({ type: 'remote' }, 'pop-culture');
+    const late = new GuestSession(rig.net.addGuest(2 as SlotIndex, { delayMs: 70, jitterMs: 50 }), null, cfg.players, { now: rig.net.now, awaitSnapshot: true });
+    let mirror: PixelGrid | null = null;
+    let framesBeforeSnapshot = 0;
+    late.onSnapshot = (arena) => { mirror = arena; };
+    late.onFrame = (f) => {
+      if (!mirror) { framesBeforeSnapshot++; return; }
+      for (const { slotIndex, segments } of f.newTrailSegments) for (const seg of segments) mirror.set(seg.x, seg.y, FFA_COLORS[slotIndex]);
+      for (const { color, segments } of f.borderSegments ?? []) for (const seg of segments) mirror.set(seg.x, seg.y, color);
+      const lines = f.clearedLines ?? [];
+      for (let i = 0; i + 3 < lines.length; i += 4) mirror.clearLine(lines[i]!, lines[i + 1]!, lines[i + 2]!, lines[i + 3]!);
+      for (const r of f.clearedAreas ?? []) mirror.clearRect(r.x, r.y, r.w, r.h);
+    };
+    expect(late.getViewState()).toBeNull();
+    rig.net.runUntil(9400);
+    expect(late.getViewState()).toBeNull(); // Still waiting for the snapshot
+
+    // The snapshot is taken now but arrives later than frames sent after it
+    const snapshot = rig.host.makeSnapshot();
+    rig.net.schedule(rig.net.time + 300, () => late.loadSnapshot(snapshot));
+    const roundAtSnapshot = rig.host.game.currentRound;
+    rig.net.runUntil(11_000);
+
+    const hostGrid = new PixelGrid();
+    hostGrid.copyFrom(rig.host.game.pixels);
+    rig.host.step = () => {};
+    rig.net.runUntil(12_000);
+
+    expect(rig.host.game.currentRound).toBe(roundAtSnapshot); // Same round: the comparison is meaningful
+    expect(framesBeforeSnapshot).toBe(0);
+    expect(mirror).not.toBeNull();
+    expect(late.getViewState()!.round.players.length).toBe(2);
+    expect(late.getViewState()!.match.levelMode).toBe('pop-culture');
+    let diff = 0;
+    for (let y = 0; y < 600; y++) for (let x = 0; x < 750; x++) if (mirror!.get(x, y) !== hostGrid.get(x, y)) diff++;
+    expect(diff).toBe(0);
+    expect(hostGrid.count()).toBeGreaterThan(1000);
+  });
+
+  it('survives a corrupt snapshot', () => {
+    const rig = makeRig({ delayMs: 10 });
+    const cfg = config({ type: 'remote' });
+    const late = new GuestSession(rig.net.addGuest(2 as SlotIndex, { delayMs: 10 }), null, cfg.players, { now: rig.net.now, awaitSnapshot: true });
+    rig.net.runUntil(500);
+    late.loadSnapshot(new Uint8Array([1, 2, 3]));
+    rig.net.runUntil(1000);
+    expect(late.getViewState()).not.toBeNull();
+  });
+});

@@ -25,6 +25,11 @@ export interface GameSession {
   step(localInputs: ReadonlyMap<SlotIndex, TronInput>): void;
   /** Called exactly once per simulated frame, in order, with its one-shot events. */
   onFrame: ((frame: TronGameStateData) => void) | null;
+  /**
+   * Called when joining a game in progress, before any frame: the arena as it is
+   * now (trails, level damage). Only guests ever call this.
+   */
+  onSnapshot: ((arena: PixelGrid) => void) | null;
   /** What to draw right now; null until a guest has received its first state. */
   getViewState(): ViewState | null;
   /** Level obstacles for the level being played (ignored by guests). */

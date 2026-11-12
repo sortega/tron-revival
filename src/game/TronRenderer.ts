@@ -28,6 +28,7 @@ export class TronRenderer {
   private readonly levelCanvas: HTMLCanvasElement;
   private levelCtx: CanvasRenderingContext2D;
   private currentLevelImage: HTMLImageElement | null = null;
+  private levelHidden = false;  // True while a snapshot stands in for the level image
 
   // Player configs for rendering
   private players: GamePlayer[];
@@ -354,6 +355,18 @@ export class TronRenderer {
     });
   }
 
+  // Paint a whole arena (joining a game in progress). The level image stays hidden
+  // until the next round / eraser: the snapshot already contains what is left of it.
+  paintArena(arena: PixelGrid): void {
+    this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    this.levelCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    this.levelHidden = true;
+    arena.forEachRun((x, y, length, color) => {
+      this.trailCtx.fillStyle = color;
+      this.trailCtx.fillRect(x, y, length, 1);
+    });
+  }
+
   // Trigger ridiculous death display for a player
   triggerRidiculousDeath(slotIndex: SlotIndex): void {
     this.ridiculousDeathSlots.add(slotIndex);
@@ -389,13 +402,18 @@ export class TronRenderer {
 
     // Store the image for restoration (new round, eraser)
     this.currentLevelImage = img;
-    this.drawLevelImage();
 
-    const imageData = this.levelCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    // Read the obstacles from a scratch canvas (the level canvas may be showing a
+    // damaged level, or be hidden behind a snapshot)
+    this.tintCtx.globalCompositeOperation = 'copy';
+    this.tintCtx.drawImage(img, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    const imageData = this.tintCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    if (!this.levelHidden) this.drawLevelImage();
     return PixelGrid.fromRgba(imageData.data);
   }
 
   private drawLevelImage(): void {
+    this.levelHidden = false;
     this.levelCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     if (this.currentLevelImage) {
       this.levelCtx.drawImage(this.currentLevelImage, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);

@@ -2,6 +2,7 @@
 
 import type { Screen, ScreenManager } from './ScreenManager';
 import { escapeHtml } from '../util/html';
+import { normalizeRoomCode } from '../network/roomCode';
 
 export class MainMenu implements Screen {
   private container: HTMLElement;
@@ -264,15 +265,13 @@ export class MainMenu implements Screen {
     if (input.includes('?room=') || input.includes('&room=')) {
       try {
         const url = new URL(input.startsWith('http') ? input : `https://example.com${input}`);
-        return url.searchParams.get('room');
+        return normalizeRoomCode(url.searchParams.get('room') ?? '') || null;
       } catch {
         return null;
       }
     }
 
-    // Normalize: lowercase, replace spaces with hyphens, collapse multiple hyphens
-    const normalized = input.toLowerCase().replace(/\s+/g, '-').replace(/-+/g, '-');
-    return normalized.length > 0 ? normalized : null;
+    return normalizeRoomCode(input) || null;
   }
 
   cleanup(): void {

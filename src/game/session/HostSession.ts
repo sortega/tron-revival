@@ -6,7 +6,7 @@ import type { GameConfig, TronGameStateData, TronInput } from '../../types/game'
 import { TronGameState } from '../TronGameState';
 import type { PixelGrid } from '../PixelGrid';
 import type { Rng } from '../rng';
-import { serializeState } from '../../network/serialization';
+import { encodeSnapshot, serializeState } from '../../network/serialization';
 import type { WireState } from '../../network/serialization';
 import { TICK_RATE } from '../constants';
 import { BotController } from '../ai/BotController';
@@ -25,6 +25,7 @@ export class HostSession implements GameSession {
   readonly game: TronGameState;
   onFrame: ((frame: TronGameStateData) => void) | null = null;
   onEnded: ((reason: string) => void) | null = null;
+  onSnapshot: ((arena: PixelGrid) => void) | null = null;
 
   private readonly transport: HostTransport | null;
   private readonly now: () => number;
@@ -38,6 +39,7 @@ export class HostSession implements GameSession {
   private readonly acks: Partial<Record<SlotIndex, number>> = {};
   private readonly lastSent = new Map<string, string>();
   private framesSent = 0;
+  private tick = 0;
 
   constructor(config: GameConfig, options: HostSessionOptions = {}) {
     this.transport = options.transport ?? null;
@@ -123,6 +125,7 @@ export class HostSession implements GameSession {
   // Deliver a frame to the local view and to every guest
   private emit(frame: TronGameStateData): void {
     this.onFrame?.(frame);
+    const tick = this.tick++;
 
     if (this.transport) {
       // Echo each guest's newest timestamp, advanced by the time it waited here
@@ -132,7 +135,7 @@ export class HostSession implements GameSession {
       // Slow-changing parts are only sent when they change (and once a second, as a
       // safety net); guests keep the last value they received
       const refresh = this.framesSent++ % TICK_RATE === 0;
-      const wire: WireState = { ...frame, pongs, acks: this.acks };
+      const wire: WireState = { ...frame, tick, pongs, acks: this.acks };
       const round: WireState['round'] = { ...frame.round };
       wire.round = round;
       if (!this.changed('match', frame.match) && !refresh) delete wire.match;
@@ -147,6 +150,24 @@ export class HostSession implements GameSession {
   /** Sequence number of the last input consumed for a remote slot. */
   getAck(slot: SlotIndex): number | undefined {
     return this.acks[slot];
+  }
+
+  /**
+   * Everything a client needs to join the game in progress: the arena and a full
+   * frame (without one-shot events, which are already reflected in the arena).
+   */
+  makeSnapshot(): Uint8Array {
+    const frame = this.lastFrame;
+    const state = serializeState({
+      round: frame.round,
+      match: frame.match,
+      newTrailSegments: [],
+      soundEvents: [],
+      colorBlindnessFrames: frame.colorBlindnessFrames,
+      whiteFlashFrames: frame.whiteFlashFrames,
+      acks: this.acks,
+    });
+    return encodeSnapshot({ tick: this.tick - 1, ...this.game.pixels.toRuns(), state });
   }
 
   // True if `value` differs from what was last recorded under `key`

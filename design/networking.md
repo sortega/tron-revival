@@ -1,419 +1,170 @@
-# Networking Design - Multiplayer with Trystero
+# Networking Design
 
-This document details the multiplayer networking architecture for Teratron Web, using pure peer-to-peer connections with Trystero.
+Multiplayer for Teratron Web: peer-to-peer over WebRTC with one player's browser acting as
+the authoritative host. No game server; static hosting only.
 
-## Table of Contents
+Related: [architecture.md](./architecture.md), [local-and-ai.md](./local-and-ai.md).
+
+## Contents
 
 1. [Overview](#overview)
-2. [Trystero Architecture](#trystero-architecture)
-3. [Connection Model](#connection-model)
-4. [Room System](#room-system)
-5. [Lobby Design](#lobby-design)
-6. [Network Protocol](#network-protocol)
-7. [State Synchronization](#state-synchronization)
-8. [Implementation Structure](#implementation-structure)
-9. [Technical Considerations](#technical-considerations)
+2. [Connectivity: what it takes to work across networks](#connectivity-what-it-takes-to-work-across-networks)
+3. [Rooms](#rooms)
+4. [Lobby](#lobby)
+5. [Game phase](#game-phase)
+6. [Netcode: Prediction and Reconciliation](#netcode-prediction-and-reconciliation)
+7. [Resilience: reloads, late joins, host loss](#resilience-reloads-late-joins-host-loss)
+8. [Diagnostics and testing](#diagnostics-and-testing)
+9. [Security](#security)
 
 ## Overview
 
-**Pure Peer-to-Peer with Host Authority**
-
-Teratron uses a pure P2P architecture with one client acting as the authoritative host. This provides:
-
-- **Zero infrastructure costs**: No game servers needed
-- **Low latency**: Direct connections between players
-- **Simple deployment**: Just static file hosting
-- **Ideal for 2-4 players**: WebRTC mesh scales perfectly at this size
-
-**Core Principles:**
-- Host runs authoritative game logic
-- Guests send inputs only
-- Host broadcasts game state to all guests
-- All players see identical game state
-- Room creation/joining via shareable links
-
-## Trystero Architecture
-
-### Why Trystero?
-
-**Trystero provides:**
-- Truly serverless signaling via decentralized networks
-- No single point of failure - multiple fallback strategies
-- Simple WebRTC abstraction (no manual offer/answer/ICE handling)
-- Room-based peer discovery built-in
-- Automatic connection management
-- End-to-end encryption
-
-**What we write:** Client-side TypeScript only
-**What we deploy:** Static HTML/CSS/JS files
-**Cost:** $0 (uses public relays/brokers)
-
-### Signaling Strategy
-
-**Current implementation uses MQTT** for peer discovery via public MQTT brokers.
-
-```typescript
-import { joinRoom } from 'trystero/mqtt';
-
-const room = joinRoom(
-  {
-    appId: 'teratron-lobby',
-    rtcConfig: { iceServers: ICE_SERVERS },
-  },
-  roomId
-);
-```
-
-**ICE servers for NAT traversal:**
-```typescript
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-];
-```
-
-### How It Works
+- **Host authority.** The player who creates the room runs the simulation (`HostSession`).
+  Guests send inputs and receive state (`GuestSession`). Bots run on the host.
+- **Transport.** [Trystero](https://github.com/dmotz/trystero) 0.27: WebRTC data channels
+  (reliable, ordered) with serverless signaling over public Nostr relays.
+- **Identity.** Every browser tab has a persistent, cryptographically verified `userId`
+  (ECDSA key kept in `sessionStorage`). Slots, host role and inputs are tied to `userId`,
+  never to the transient WebRTC peer id. This is what makes reload/rejoin possible.
+- **State.** Lobby data lives in Trystero's synchronised state primitives, so late joiners
+  get it from whoever is in the room without bespoke handshakes.
 
 ```
-┌─────────────────────────────┐
-│      MQTT Public Brokers    │
-│    (Peer discovery only)    │
-└───────────┬─────────────────┘
-            │
-   ┌────────┼────────────┐
-   │        │            │
-   ▼        ▼            ▼
-┌──────┐ ┌──────┐ ┌──────┐
-│ Host │◄┤Guest │ │Guest │
-│      │◄┼──────┼►│      │
-└──────┘ └──────┘ └──────┘
-    WebRTC P2P Mesh
+            public Nostr relays (signaling only: encrypted offers/answers)
+                          ▲            ▲
+                          │            │
+   STUN / TURN ──►  ┌─────┴────┐  ┌────┴─────┐
+   (NAT traversal)  │   Host   │◄─┤  Guest   │   WebRTC data channel
+                    │ sim+bots │─►│ predict  │   inputs ► / ◄ state
+                    └──────────┘  └──────────┘
 ```
 
-**Connection Flow:**
-1. Host joins a Trystero room with unique app+room ID
-2. Host shares room link: `https://teratron.com/?room=red-bear-moon`
-3. Guests open link and extract room ID from URL
-4. Guests join the same Trystero room
-5. Trystero handles peer discovery via MQTT brokers
-6. Direct P2P connections established via WebRTC
-7. URL is cleared after connecting to avoid stale rejoins on refresh
+## Connectivity: what it takes to work across networks
 
-## Connection Model
+A WebRTC connection needs three things, and the game must be robust in all three:
 
-### LobbyConnection Class
+| Step | What | Failure looks like | What we do |
+|------|------|--------------------|------------|
+| Signaling | Peers find each other and exchange encrypted offers | "Connecting…" forever for everyone | Trystero's default strategy uses ~20 public Nostr relays with redundancy; a `relay-failed` error is shown in the lobby |
+| STUN | Each peer learns its public address; works for most home routers | — | Built in (Google + Cloudflare STUN) |
+| TURN | Relays packets when direct hole punching is impossible | Works on the same Wi-Fi, fails between e.g. a phone on 4G/5G (carrier-grade NAT) and a laptop | **Must be configured** (below). Without it roughly 10–15 % of pairs cannot connect |
 
-A unified class that handles both host and guest roles, determined by the `isHost` flag at construction.
+The previous implementation relied on the public `openrelay.metered.ca` credentials, which no
+longer work, so any pair needing TURN silently failed. That is the root cause of "does not
+work across networks".
 
-```typescript
-class LobbyConnection {
-  private room: Room | null = null;
-  private isHost: boolean;
-  private myPeerId: string | null = null;
-  private lobbyState: LobbyState | null = null;
-  private mySlotIndex: SlotIndex | null = null;
+### TURN configuration
 
-  // Action senders for different channels
-  private sendLobbyMsg: ((msg, target?) => void) | null = null;
-  private sendGameState: ((msg, target?) => void) | null = null;
-  private sendGameInput: ((msg, target?) => void) | null = null;
+TURN costs bandwidth, so there is no dependable anonymous service; a free tier with an
+account is needed. Options evaluated:
 
-  // Connection lifecycle
-  createRoom(nickname: string): string;  // Host only
-  joinRoom(roomId: string, nickname: string): void;
-  disconnect(): void;
+| Option | Cost | Setup | Notes |
+|--------|------|-------|-------|
+| **Cloudflare Realtime TURN** | 1 000 GB/month free | Cloudflare account + a ~20-line Worker that mints short-lived credentials | Recommended. Global anycast, credentials not exposed |
+| **Metered.ca** | 500 MB–20 GB/month free | Account; REST endpoint returns ICE servers given an API key | Easiest; the API key is visible in the client (quota can be abused) |
+| Self-hosted coturn | VPS (~$5/month) | Run coturn, open UDP ports | Full control |
+| WebSocket relay fallback (e.g. PartyKit / Durable Objects) | Free tiers | Custom server code | Not P2P; only worth it if TURN proves insufficient |
 
-  // Lobby actions (work for both host and guest)
-  announce(nickname: string): void;
-  joinSlot(slotIndex: SlotIndex, nickname: string): void;
-  leaveSlot(): void;
-  changeSlot(targetSlot: SlotIndex): void;
-  sendNicknameChange(nickname: string): void;
-  sendChat(text: string): void;
-
-  // Game phase
-  startGame(): void;  // Host only
-  broadcastGameState(positions: PlayerPosition[]): void;  // Host only
-  sendInput(input: GameInput): void;  // Guest only
-}
-```
-
-### GameConnection Class
-
-A clean wrapper that hides lobby details from the game phase:
-
-```typescript
-class GameConnection {
-  constructor(
-    connection: LobbyConnection,
-    slotByPeerId: Map<string, SlotIndex>,
-    mySlotIndex: SlotIndex | null
-  );
-
-  isHost(): boolean;
-  getMySlotIndex(): SlotIndex | null;
-
-  // Game state (host broadcasts, guests receive)
-  broadcastTronState(state: TronGameStateData): void;
-  setCallbacks(callbacks: GameConnectionCallbacks): void;
-
-  // Input (guests send to host)
-  sendInput(input: TronInput): void;
-
-  disconnect(): void;
-}
-```
-
-### Why Host Authority?
-
-**Benefits:**
-- Prevents cheating (host validates all inputs)
-- Ensures consistency (single source of truth)
-- Simpler than full P2P consensus
-- No split-brain scenarios
-- Single physics simulation
-
-**Tradeoffs:**
-- Host has slight advantage (zero latency for own inputs)
-- Host disconnection ends the game
-- Host could theoretically cheat (acceptable for friendly games)
-
-## Room System
-
-### Room Code Generation
-
-Room codes use three random words for easy verbal sharing:
-
-```typescript
-const ROOM_WORDS = [
-  'red', 'blue', 'gold', 'jade', 'pink', 'gray', 'lime', 'plum', 'rose', 'teal',
-  'bear', 'bird', 'crab', 'deer', 'duck', 'fish', 'frog', 'goat', 'hawk', 'lion',
-  'moon', 'star', 'rain', 'snow', 'wind', 'fire', 'lake', 'rock', 'sand', 'wave',
-  // ... more words
-];
-
-function generateRoomCode(): string {
-  const words: string[] = [];
-  for (let i = 0; i < 3; i++) {
-    const index = Math.floor(Math.random() * ROOM_WORDS.length);
-    words.push(ROOM_WORDS[index]);
-  }
-  return words.join('-');  // e.g., "red-bear-moon"
-}
-```
-
-**Room Link Format:**
-```
-https://teratron.com/?room=red-bear-moon
-```
-
-### URL Handling
-
-- When opening a link with `?room=xxx`, the app auto-joins as guest
-- After successfully connecting, the URL is cleared via `history.replaceState()`
-- This prevents stale rejoin attempts on page refresh or dev server restart
-
-### Room Lifecycle
+The client supports any of them through build-time environment variables (`.env.local`,
+see `.env.example`):
 
 ```
-[Created] → [Lobby] → [Game] → [Round End] → [Lobby] → ...
-                                    ↓
-                              [Disconnect]
+# Either static credentials...
+VITE_TURN_URLS=turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349?transport=tcp
+VITE_TURN_USERNAME=user
+VITE_TURN_CREDENTIAL=secret
+# ...or an endpoint returning a JSON array of RTCIceServer objects
+# (Cloudflare Worker, Metered credentials URL)
+VITE_ICE_SERVERS_URL=https://example.workers.dev/ice
 ```
 
-**Capacity:**
-- Minimum: 2 players for FFA mode
-- Maximum: 4 players
-- Team mode requires exactly 4 players
+`src/network/ice.ts` resolves these (fetching the URL when given, with a timeout and a
+fallback to STUN-only) before joining a room. If no TURN is configured the lobby says so,
+and a failed peer connection reports whether TURN was available
+(`peer-connect-failed`, `turnConfigured`).
 
-## Lobby Design
+`?relay=1` forces `iceTransportPolicy: 'relay'`, so the TURN path can be verified with two
+tabs on one machine — if the game connects with `?relay=1` on both sides, it will connect
+across any pair of networks that can reach the TURN server.
 
-### Lobby State
+### Why keep WebRTC P2P instead of a relay server?
 
-The host maintains authoritative lobby state, broadcast to all guests:
+Latency (direct path), zero running cost and no server code to operate. With TURN configured
+the remaining failure modes are networks that block UDP *and* TCP/TLS to the TURN server,
+which also block most online games.
 
-```typescript
-interface LobbyState {
-  roomId: string;
-  hostPeerId: string;
-  gameMode: GameMode;        // 'ffa' | 'team'
-  levelMode: LevelMode;      // 'cycle' | specific level id
-  slots: [PlayerSlot, PlayerSlot, PlayerSlot, PlayerSlot];
-  chatMessages: ChatMessage[];
-  spectators: Spectator[];   // Connected peers not in a slot
+## Rooms
+
+- Room codes are three short words (`red-bear-moon`); the shareable link is
+  `…/?room=red-bear-moon`. The lobby shows the code, copy buttons and a **QR code** of the
+  link for phones.
+- The room code stays in the URL while the player is in the room, so **a reload rejoins the
+  same room** with the same identity. It is removed when the player leaves deliberately.
+- `appId` includes a protocol version (`teratron/v2`) so incompatible builds never meet.
+- Rooms are open to anyone with the code. Extra players are spectators.
+
+## Lobby
+
+### Shared state
+
+Two Trystero state primitives hold everything:
+
+```ts
+// room.makeUserState('profile') — one per user, writable only by that user
+interface Profile {
+  name: string;
+  want: number | null;   // desired slot (0-3), -1 = any free slot, null = spectate
 }
 
-interface PlayerSlot {
-  slotIndex: SlotIndex;      // 0 | 1 | 2 | 3
-  peerId: string | null;     // null = slot is open
-  nickname: string;
-  isHost: boolean;
+// room.makeState('room') — one per room, written only by the host
+interface SharedRoom {
+  hostId: string;                       // userId of the host
+  gameMode: 'ffa' | 'team';
+  levelMode: string;                    // 'cycle' or a level id
+  slots: (SlotEntry | null)[];          // 4 entries
+  phase: 'lobby' | 'game';
+  gameId: number;                       // incremented on every game start
 }
-
-interface ChatMessage {
-  id: string;
-  senderSlotIndex: SlotIndex | null;
-  senderNickname: string;
-  text: string;
-  timestamp: number;
-}
+interface SlotEntry { userId?: string; ai?: BotDifficulty; name: string; }
 ```
 
-### Slot System
+- A `validate` hook rejects writes to `room` from anyone but `hostId` (the first writer
+  becomes host), so a guest cannot seat itself or start the game.
+- Guests *request* seats by changing their own profile; the host **reconciles** profiles into
+  slots (same code path for the host's own seat). There are no request/response lobby
+  messages and no join handshake: a newcomer receives `room` and all profiles automatically.
+- Seats belong to a `userId`. While a game is running a seat is kept even if its owner
+  disconnects, so they can come back; in the lobby, seats of absent users are freed.
+- Chat is an ephemeral broadcast action (not stored; late joiners don't see history).
+- Bots: the host fills a slot with `{ ai: difficulty, name }`.
 
-- 4 fixed slots (0-3) with associated colors:
-  - FFA: Red, Green, Blue, Yellow
-  - Team: Purple (0,2), Brown (1,3)
-- Players choose which slot to join
-- Host can be in any slot (or no slot as spectator)
-- Spectators can watch without playing
+### Starting and ending games
 
-### Features
+- Host sets `phase: 'game'` (and bumps `gameId`). Every client that observes the change
+  builds the same `GameConfig` from `slots` and opens the game screen.
+- **Back to lobby**: the host sets `phase: 'lobby'`; everyone returns to the lobby of the
+  same room, where settings and seats can be changed before starting again.
 
-**Player List:**
-- Shows all 4 slots with status (filled/open)
-- Each slot shows color, nickname, "(Host)" marker
-- Spectators shown separately
+## Game phase
 
-**Chat:**
-- Text chat in lobby
-- Messages capped at 100
-- Shows sender nickname and slot color
+Three actions on the same room:
 
-**Game Start (Host only):**
-- Enabled when 2+ players in FFA, 4 players in Team mode
-- Broadcasts `game_start` to all peers
+| Action | Direction | Payload |
+|--------|-----------|---------|
+| `i` | guest → host (targeted) | `TronInputMessage` |
+| `s` | host → everyone | compact binary game state, one per tick |
+| `sync` (request) | guest → host | reply: full snapshot, for joining a game in progress |
 
-## Network Protocol
+Inputs are mapped to slots by the sender's verified `userId`; state is accepted only from
+`hostId`.
 
-### Message Channels
-
-Three separate Trystero action channels:
-
-1. **`lobby`** - Lobby management messages
-2. **`gameState`** - Host broadcasts game state
-3. **`gameInput`** - Guests send inputs to host
-
-### Guest → Host Messages
-
-```typescript
-type GuestToHostMessage =
-  | { type: 'announce'; nickname: string }
-  | { type: 'join_request'; nickname: string; preferredSlot?: SlotIndex }
-  | { type: 'slot_change'; targetSlot: SlotIndex }
-  | { type: 'nickname_change'; nickname: string }
-  | { type: 'chat_send'; text: string }
-  | { type: 'leave' };
-```
-
-### Host → Guest Messages
-
-```typescript
-type HostToGuestMessage =
-  | { type: 'lobby_state'; state: LobbyState }
-  | { type: 'join_accepted'; yourPeerId: string; assignedSlot: SlotIndex }
-  | { type: 'join_rejected'; reason: 'room_full' | 'game_in_progress' | 'invalid_request' }
-  | { type: 'game_start'; countdown: number }
-  | { type: 'host_disconnected' };
-```
-
-### Game Phase Messages
-
-```typescript
-// Host → Guests (via gameState channel)
-interface TronStateMessage {
-  type: 'tron_state';
-  state: TronGameStateData;
-  timestamp: number;
-}
-
-// Guest → Host (via gameInput channel)
-interface TronInputMessage {
-  type: 'tron_input';
-  input: TronInput;  // { left, right, action }
-}
-```
-
-## State Synchronization
-
-### Tron Game State
-
-The host broadcasts complete game state every tick:
-
-```typescript
-interface TronGameStateData {
-  round: TronRoundState;
-  match: TronMatchState;
-  newTrailSegments: { slotIndex: SlotIndex; segments: TrailSegment[] }[];
-  borderSegments?: { color: string; segments: TrailSegment[] }[];
-  soundEvents: SoundEvent[];
-  eraserUsed?: boolean;
-  ridiculousDeathSlots?: SlotIndex[];
-  clearedAreas?: { x: number; y: number; radius: number }[];
-  colorBlindnessFrames?: number;
-}
-
-interface TronRoundState {
-  phase: 'countdown' | 'playing' | 'waiting_ready';
-  players: TronPlayerState[];
-  countdown: number;
-  roundWinner: SlotIndex | 'draw' | null;
-  portals: TeleportPortal[];
-  items: GameItem[];
-  projectiles: Projectile[];
-  explosions: Explosion[];
-  bodyguards: Bodyguard[];
-}
-
-interface TronMatchState {
-  scores: Partial<Record<SlotIndex, number>>;
-  currentRound: number;
-  currentLevelIndex: number;
-  playersReady: SlotIndex[];
-  gameMode: GameMode;
-  levelMode: LevelMode;
-  ridiculousDeath: Partial<Record<SlotIndex, number>>;
-}
-```
-
-### Trail Synchronization
-
-**Incremental approach:**
-- Host sends only new trail segments each tick
-- Guests accumulate segments locally
-- Eraser clears all trails (signaled via `eraserUsed` flag)
-- Cleared areas from bullet impacts sent as coordinates
-
-### Sound Synchronization
-
-Sound events included in state for guests to play locally:
-
-```typescript
-interface SoundEvent {
-  sound: string;
-  loop?: boolean;
-  loopKey?: string;
-  stopLoop?: string;
-}
-```
-
-### Input Handling, Prediction and Reconciliation
+## Netcode: Prediction and Reconciliation
 
 Guests must not wait a network round trip to see their own steering: at 280°/s a 100 ms
 round trip is 28° of overshoot, which makes the game feel uncontrollable. The netcode
 therefore uses client-side prediction with server (host) reconciliation.
 
-#### Wire messages
+### Wire messages
 
 ```typescript
 // Guest → host, one per guest simulation tick (70 Hz)
@@ -435,7 +186,7 @@ interface TronGameStateData {
 Player states on the wire also carry what a guest needs to reproduce movement exactly:
 `speedFactor`, `moveFrameCounter`, `teleportCooldown` and the `steer` applied on that tick.
 
-#### Host: input queue
+### Host: input queue
 
 - Each remote slot has a FIFO of received inputs. Every host tick consumes **one** input per
   slot, so that each guest tick maps to exactly one host tick.
@@ -444,7 +195,7 @@ Player states on the wire also carry what a guest needs to reproduce movement ex
   the added latency when a guest runs slightly fast or delivers a burst.
 - Inputs are sanitised (`steer` clamped to [-1, 1], `action` coerced to boolean).
 
-#### Guest: prediction
+### Guest: prediction
 
 The guest keeps `pending`: every input it has sent that the host has not acked yet.
 
@@ -467,14 +218,14 @@ caused by another player's Slow weapon, death) step 2 snaps the player to the tr
 Guests never predict collisions or death: the host decides. A predicted player can therefore
 appear to drive a few pixels into a wall before the host's verdict arrives.
 
-#### Predicted trail
+### Predicted trail
 
 The authoritative trail (drawn permanently on the trail canvas) ends where the host last saw
 the player, a few pixels behind the predicted head. The pixels travelled while replaying
 `pending` are exposed as a *provisional trail* and drawn every frame on top of the trail
 canvas without being stored, so the trail visually reaches the head.
 
-#### Dead reckoning for remote players
+### Dead reckoning for remote players
 
 Remote players arrive `lag` old. The local player is shown ahead of the host (by the inputs
 in flight), so to show a mutually consistent picture the guest extrapolates every other
@@ -487,19 +238,19 @@ Everything else (projectiles, items, portals, explosions, scores) is shown as re
 projectile impacts are decided in host time, and an extrapolated bullet would appear to fly
 through obstacles before vanishing.
 
-#### One-shot events
+### One-shot events
 
 Trail growth, cleared pixels, sounds, round start, etc. are attached to the state of the
 tick they happened on. The guest applies the events of **every** state as it arrives (several
 may arrive between two rendered frames) and only uses the latest state for drawing.
 
-#### Latency measurement
+### Latency measurement
 
 `pongs[slot] = t + (time the input waited on the host)`, so `RTT = guestNow - pong` is
 independent of clock offsets and of host frame timing. The debug overlay (key `F`) shows the
 median one-way lag, bitrate, and the number of predicted ticks.
 
-#### Wire format
+### Wire format
 
 A frame is MessagePack with positional arrays for the hot parts (`network/serialization.ts`):
 
@@ -514,13 +265,13 @@ A frame is MessagePack with positional arrays for the hot parts (`network/serial
 Typical bitrate is 15–25 KB/s per guest (it was 70+ KB/s, with spikes of several hundred
 during Uzi fire).
 
-#### Testing with artificial latency
+### Testing with artificial latency
 
 Opening the game with `?lag=120` (and optionally `&jitter=40`) delays every game message
 that client sends and receives by that many milliseconds, so prediction can be felt and
 tested with two tabs on one machine. The debug overlay (`F`) shows lag and predicted ticks.
 
-#### Validation
+### Validation
 
 `tests/netcode.test.ts` wires a `HostSession` and a `GuestSession` through a simulated link
 (`tests/netsim.ts`) with configurable latency and jitter on a virtual clock and asserts that
@@ -530,78 +281,48 @@ tested with two tabs on one machine. The debug overlay (`F`) shows lag and predi
 - no event is lost or duplicated (guest trail canvas equals host trail grid),
 - dead reckoning reduces the position error of remote players versus no extrapolation.
 
-## Implementation Structure
+## Resilience: reloads, late joins, host loss
 
-### File Structure
+| Event | Behaviour |
+|-------|-----------|
+| Guest reloads in the lobby | Rejoins with the same `userId`; keeps its seat |
+| Guest reloads / reconnects during a game | Seat was kept. The client sees `phase: 'game'`, requests a **snapshot** from the host and resumes. Meanwhile its player keeps going straight (last input held) |
+| Someone new joins during a game | Becomes a spectator with a snapshot; can take a seat when the room is back in the lobby |
+| Host reloads in the lobby | Comes back as host (`hostId` matches); guests see "host reconnecting…" meanwhile |
+| Host reloads during a game | The simulation is lost: the host returns and puts the room back in the lobby (scores reset). *Host migration is a possible later improvement* |
+| Host gone | Guests wait 25 s for it to return, then leave to the menu with a message |
+| Room empty, host reloads | No peer holds the room state; the host recreates it (remembered in `sessionStorage`) |
 
-```
-src/
-├── network/
-│   ├── LobbyConnection.ts    # Unified host/guest connection
-│   ├── GameConnection.ts     # Game-phase wrapper
-│   └── protocol.ts           # Message type definitions
-│
-├── screens/
-│   ├── ScreenManager.ts      # Screen transitions, URL handling
-│   ├── MainMenu.ts           # Main menu UI
-│   ├── NetworkLobby.ts       # Lobby UI (host + guest views)
-│   └── PlaceholderGame.ts    # Game screen wrapper
-│
-├── types/
-│   ├── lobby.ts              # LobbyState, PlayerSlot, etc.
-│   └── game.ts               # TronGameStateData, TronInput, etc.
-│
-├── game/
-│   ├── TronGameState.ts      # Authoritative game logic (host)
-│   ├── TronRenderer.ts       # Rendering (all clients)
-│   └── ...
-│
-└── main.ts                   # Entry point, initialization
-```
+### Snapshot
 
-### Dependencies
-
-```json
-{
-  "dependencies": {
-    "trystero": "^0.21.0",
-    "nanoid": "^5.0.0"
-  }
+```ts
+interface Snapshot {
+  tick: number;          // Host tick the snapshot was taken on
+  palette: string[];     // Collision grid colours
+  runs: number[];        // Run-length encoded grid: [paletteIndex, count, ...]
+  state: Uint8Array;     // Full serialized frame for that tick
 }
 ```
 
-## Technical Considerations
+Every state frame carries its `tick`. A joining guest buffers frames until the snapshot
+arrives, paints the grid, then applies only frames with `tick > snapshot.tick`.
 
-### Connection Quality
+## Diagnostics and testing
 
-**Monitoring (via Trystero):**
-- `room.getPeers()` returns connected peer IDs
-- `onPeerJoin` / `onPeerLeave` callbacks
+- Lobby shows, per connected player, the round-trip time and whether the path is **direct**
+  or **relayed** (TURN), from `RTCPeerConnection.getStats()`.
+- In game, `F` toggles an overlay with lag, predicted ticks and bitrate.
+- `?lag=120&jitter=40`: artificial latency. `?relay=1`: force TURN.
+- Headless tests: `tests/netcode.test.ts` (simulated links), `tests/room.test.ts` (lobby
+  reconciliation logic), and `npm run test:e2e` (two real headless browsers through the
+  public signaling relays, including reload-rejoin and back-to-lobby).
 
-**Handling disconnections:**
-- Guest disconnect: Host removes from lobby, broadcasts update
-- Host disconnect: Guests receive `host_disconnected`, return to menu
+## Security
 
-### Error Handling
+Acceptable for games among friends:
 
-**Connection errors:**
-- Room full → `join_rejected` with reason
-- Connection timeout → Return to menu with error
-- Host disconnect → Notify guests, end game
-
-### Security Considerations
-
-**P2P limitations (acceptable for friendly games):**
-- Host sees guest IP addresses (WebRTC limitation)
-- Host could modify game state maliciously
-- No server-side validation
-
-**Mitigations:**
-- Target audience: Friends playing together
-- Social deterrent against cheating
-
-### Browser Compatibility
-
-**Target browsers:** Chrome, Firefox, Safari, Edge (all with WebRTC support)
-
-**Fallback:** Detect WebRTC support on load, show error if unsupported.
+- The host can cheat (it runs the simulation) and sees guests' IP addresses (WebRTC).
+- Room codes are guessable in principle; anyone with the code can join as a spectator.
+- Signaling payloads are encrypted by Trystero; game traffic is DTLS-encrypted end to end,
+  also through TURN.
+- All peer-supplied strings (nicknames, chat) are HTML-escaped; inputs are clamped.

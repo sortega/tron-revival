@@ -30,24 +30,31 @@ mkdir -p .certs && cd .certs && mkcert localhost 127.0.0.1 ::1
 ### Development
 
 ```bash
-# Install dependencies
-npm install
+npm install          # Install dependencies
+npm run dev          # Start development server (https://localhost:3000/tron-revival/)
+npm run build        # Type-check and build for production
+npm run preview      # Preview production build
 
-# Start development server
-npm run dev
+npm test             # Unit, bot and netcode tests (headless, ~1 min)
+npm run test:e2e     # Two headless Chromes playing a network game (needs Chrome + internet)
+npm run sim          # Bot statistics per level (for tuning the AI)
 
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
-
-# Rebuild sprite sheet (after adding/modifying sprites in public/assets/sprites/items/)
-npm run sprites
-
-# Deploy to GitHub Pages
-npm run deploy
+npm run sprites      # Rebuild sprite sheet (after changing sprites-source/)
+npm run deploy       # Deploy to GitHub Pages
 ```
+
+The HTTPS certificates are optional: without `.certs/` the dev server uses plain HTTP
+(fine on localhost; phones on the LAN need HTTPS for WebRTC).
+
+### Multiplayer across networks (TURN)
+
+Direct peer-to-peer connections fail for roughly 10–15 % of player pairs (mobile data,
+strict firewalls). To cover them, configure a TURN relay at build time — copy
+`.env.example` to `.env.local` and see [design/networking.md](./design/networking.md).
+The lobby warns when no TURN server is configured.
+
+Debug switches (URL parameters): `?lag=120&jitter=40` adds artificial latency,
+`?relay=1` forces all traffic through TURN. Press `F` in game for the debug overlay.
 
 ## 🌐 Deployment
 
@@ -82,6 +89,9 @@ tron-revival/
 
 - [CLAUDE.md](./CLAUDE.md) - Development methodology
 - [design/architecture.md](./design/architecture.md) - Technical architecture
+- [design/networking.md](./design/networking.md) - Multiplayer: connectivity, lobby, netcode
+- [design/local-and-ai.md](./design/local-and-ai.md) - Local play, sessions and AI players
+- [TODO.md](./TODO.md) - Backlog
 - [design/old-tron-design.md](./design/old-tron-design.md) - Original game mechanics
 
 

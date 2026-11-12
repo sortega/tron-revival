@@ -2,15 +2,25 @@
 
 import type { GameConfig } from '../types/game';
 import type { GameSession } from '../game/session/GameSession';
+import type { RoomConnection } from '../network/RoomConnection';
+import { normalizeRoomCode } from '../network/roomCode';
 
 export interface Screen {
   render(): void;
   cleanup(): void;
 }
 
-export interface LobbyOptions {
-  mode: 'host' | 'guest';
-  roomId?: string; // Required for guest mode
+export type LobbyOptions =
+  | { mode: 'host' }
+  | { mode: 'guest'; roomId: string }
+  | { room: RoomConnection };   // Return to the lobby of a room we are already in
+
+/** Hooks a game screen gets from whoever started the game. */
+export interface GameScreenOptions {
+  /** Host of a network game: send everybody back to the lobby. */
+  onBackToLobby?: () => void;
+  /** Called when the player leaves the game for the main menu. */
+  onLeave?: () => void;
 }
 
 export class ScreenManager {
@@ -21,7 +31,7 @@ export class ScreenManager {
   private mainMenuFactory: ((message?: string) => Screen) | null = null;
   private localSetupFactory: (() => Screen) | null = null;
   private networkLobbyFactory: ((options: LobbyOptions) => Screen) | null = null;
-  private gameFactory: ((config: GameConfig, session: GameSession) => Screen) | null = null;
+  private gameFactory: ((config: GameConfig, session: GameSession, options: GameScreenOptions) => Screen) | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -31,7 +41,7 @@ export class ScreenManager {
     mainMenu: (message?: string) => Screen;
     localSetup: () => Screen;
     networkLobby: (options: LobbyOptions) => Screen;
-    game: (config: GameConfig, session: GameSession) => Screen;
+    game: (config: GameConfig, session: GameSession, options: GameScreenOptions) => Screen;
   }): void {
     this.mainMenuFactory = factories.mainMenu;
     this.localSetupFactory = factories.localSetup;
@@ -44,9 +54,10 @@ export class ScreenManager {
     const urlParams = new URLSearchParams(window.location.search);
     const roomId = urlParams.get('room');
 
-    if (roomId) {
-      // Auto-join as guest (lowercase for case-insensitivity)
-      this.showNetworkLobby({ mode: 'guest', roomId: roomId.toLowerCase() });
+    const code = roomId ? normalizeRoomCode(roomId) : '';
+    if (code) {
+      // Shared link, or a reload while in a room: (re)join it
+      this.showNetworkLobby({ mode: 'guest', roomId: code });
     } else {
       this.showMainMenu();
     }
@@ -59,8 +70,6 @@ export class ScreenManager {
       return;
     }
     this.transition(this.mainMenuFactory(message));
-    // Clear URL params without adding a history entry
-    window.history.replaceState({}, '', window.location.pathname);
   }
 
   showLocalSetup(): void {
@@ -79,12 +88,12 @@ export class ScreenManager {
     this.transition(this.networkLobbyFactory(options));
   }
 
-  showGame(config: GameConfig, session: GameSession): void {
+  showGame(config: GameConfig, session: GameSession, options: GameScreenOptions = {}): void {
     if (!this.gameFactory) {
       console.error('Game factory not set');
       return;
     }
-    this.transition(this.gameFactory(config, session));
+    this.transition(this.gameFactory(config, session, options));
   }
 
   getContainer(): HTMLElement {

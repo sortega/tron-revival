@@ -143,18 +143,31 @@ Design: `design/networking.md` (Input Handling, Prediction and Reconciliation)
 - [ ] Unreliable/unordered channel for state (needs transport support) to avoid
       head-of-line blocking on lossy links
 
-## Iteration 5 — P2P that works across networks
+## Iteration 5 — P2P that works across networks  ✅ (one manual step left)
 
-Design: update `design/networking.md` (connectivity section)
+Design: `design/networking.md` (rewritten)
 
-- [ ] Evaluate & document options (signaling strategy, TURN providers, relay fallback)
-- [ ] Upgrade Trystero; redundant signaling
-- [ ] Configurable TURN (env-provided static creds or credentials endpoint) (B3)
-- [ ] Use real peer ids; detect host loss; send `host_disconnected` on leave (B2)
-- [ ] Target messages to the host; ignore host-only messages from non-hosts (B12)
-- [ ] Handshake instead of the 500 ms timer (B13); reject mid-game joins (B15)
-- [ ] Connection diagnostics in the lobby (signaling state, ICE candidate type: direct/relay, RTT)
-- [ ] `?relay=1` debug switch forcing TURN-only, so the cross-network path can be tested on one machine
+- [x] Evaluate & document options (signaling, TURN providers, relay fallback)
+- [x] Upgrade Trystero 0.21 → 0.27 (Nostr relays; guests now appear in ~0.5 s instead of 10–30 s)
+- [x] Configurable TURN: static credentials or a credentials endpoint (`.env.example`,
+      `tools/cloudflare-turn-worker.js`) (B3)
+- [x] Stable per-tab identity; seats/host/inputs keyed by verified `userId` (B2)
+- [x] Lobby on synchronised state: host reconciles profiles into seats; no join handshake or
+      timers (B13); only the host can write the room; state accepted only from the host (B12)
+- [x] Host loss detected (25 s grace for reloads); immediate goodbye when the host leaves (B2)
+- [x] Mid-game joiners spectate with a snapshot instead of corrupting the lobby (B15)
+- [x] Lobby diagnostics: RTT and direct/relay per player; TURN-missing warning; error notices
+- [x] `?relay=1` forces TURN-only
+- [x] `npm run test:e2e`: two headless Chromes through the real signaling relays;
+      `E2E_RELAY=1` runs it with everything forced through a local TURN server
+- [ ] **Manual: provision a TURN service and set the env vars for the deployed build**
+      (Cloudflare Realtime TURN recommended; see networking.md). Until then players behind
+      carrier-grade NAT still cannot connect, and the lobby says so.
+- [ ] Verify on real devices across networks (phone on mobile data ↔ laptop on Wi-Fi)
+- [ ] Optional alternative signaling strategy (MQTT / own relay) if Nostr relays are blocked
+      on some network
+- [ ] Show "host disconnected, waiting…" overlay inside the game (currently only in the lobby
+      and the console)
 
 ## Iteration 6 — Tooling & dependencies
 
@@ -163,15 +176,17 @@ Design: update `design/networking.md` (connectivity section)
 - [ ] GitHub Actions: typecheck + test + build on PR; Pages deploy on main
 - [ ] Refresh `architecture.md` and README (T9)
 
-## Room & session robustness (requested)
+## Room & session robustness (requested)  ✅
 
-- [ ] Rejoin after a page reload: keep the room code in the URL / sessionStorage plus a stable
-      player id, so a reloaded guest gets its slot back and resumes the running game (needs a
-      full-state snapshot for late joiners: trails, level damage, scores)
-- [ ] Host reload: either restore the room from saved state or migrate the host
-- [ ] Back to lobby from a game without creating a new room (host returns everyone to the
-      lobby; settings can be changed; scores optionally kept)
-- [ ] Share the room as a QR code that can be scanned from a phone
+- [x] Rejoin after a page reload: room code stays in the URL, identity in `sessionStorage`;
+      a reloaded guest gets its seat back and resumes the running game from a snapshot
+      (trails, level damage, scores)
+- [x] Host reload: the host comes back as host; a game in progress is lost and the room
+      returns to the lobby
+- [x] Back to lobby from a game without creating a new room (host's LOBBY button)
+- [x] Share the room as a QR code
+- [ ] Host migration, so a host reload/drop does not end the game in progress
+- [ ] Keep scores across "back to lobby" (optional setting)
 
 ## Gameplay fidelity (requested)
 

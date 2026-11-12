@@ -14,7 +14,7 @@ screenManager.setScreenFactories({
   mainMenu: (message) => new MainMenu(app, screenManager, message),
   localSetup: () => new LocalSetup(app, screenManager),
   networkLobby: (options) => new NetworkLobby(app, screenManager, options),
-  game: (config, session) => new TronGame(app, screenManager, config, session),
+  game: (config, session, options) => new TronGame(app, screenManager, config, session, options),
 });
 
 // Start the app
