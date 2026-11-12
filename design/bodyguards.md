@@ -28,7 +28,7 @@ Every `playing` tick each satellite gets a job, in this order of priority:
    In team mode team-mates are neither attacked nor harmed.
 3. **Orbit.**
 
-A satellite moves at up to 8 px per tick and never leaves the area of action (targets are
+A satellite moves at up to 10 px per tick and never leaves the area of action (targets are
 clamped to it). Satellites freeze when the round ends and disappear with their owner.
 
 ## Contact
@@ -51,20 +51,20 @@ wears (`Bodyguard.hp` travels to guests with the rest of the round state). But 1
 on one satellite is far more than a shotgun's 20 blasts normally land; hit points do not
 regenerate, and at 0 it would be destroyed with a small explosion.
 
-What beats a satellite is **volume and speed of fire**. At 8 px per tick it cannot always
+What beats a satellite is **volume and speed of fire**. At 10 px per tick it cannot always
 get from the far side of its orbit into the line of fire before fast pellets arrive, and
 while it deals with one blast the next one comes. Shotgun blasts from 95 px, one every 4
 ticks, over 24 directions and orbit positions:
 
 | Blasts in a row | 1 satellite | 2 satellites | 3 satellites |
 |-----------------|-------------|--------------|--------------|
-| 1 | owner dies 10/24 | 8/24 | 4/24 |
-| 4 | 16/24 | 8/24 | 4/24 |
-| 6 | 22/24 | 8/24 | 4/24 |
-| 10 | 22/24 | 10/24 | 4/24 |
+| 1 | owner dies 8/24 | 2/24 | 0/24 |
+| 6 | 24/24 | 4/24 | 0/24 |
+
+(At 8 px per tick the first blast got through 10, 8 and 4 times; at 12, 6, 2 and 0.)
 
 No satellite was destroyed in any of these. A single Glock bullet or a rifle burst is
-stopped every time (48 of 48 set-ups each).
+stopped in every set-up of the tests.
 
 ## Bots
 

@@ -241,7 +241,7 @@ export class TronGameState {
   private readonly BODYGUARD_LOOKAHEAD = 6;          // Ticks of projectile flight considered
   private readonly BODYGUARD_DEADLY_MISS = 10;       // A course passing this close to the owner comes first
   private readonly BODYGUARD_STANDOFF = 12;          // Block at least this far from the owner (bullets explode)
-  private readonly BODYGUARD_SPEED = 8000;           // 8 pixels/tick
+  private readonly BODYGUARD_SPEED = 10000;          // 10 pixels/tick
 
   // Bodyguard state
   private bodyguards: Bodyguard[] = [];
