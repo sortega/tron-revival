@@ -203,16 +203,13 @@ Design: `design/networking.md` (rewritten)
 - [x] Sidebar: desaturate a player's panel halfway to black-and-white while they are dead, and
       fully black-and-white for slots that are not playing
 - [x] Round summary shows how each player died
-- [ ] Level 8 ("Portals", original map 207 *Bandas*): automatic doors are not implemented.
-      Original behaviour (`old-tron/TRON.PRG`, `PROCESS Banda`): up to 6 doors at the map's
-      control points, even-numbered ones rotated 90°; cycle closed 200 frames → opening 30 →
-      open 200 → closing 30 (graphs 30–39 of the map FPG); touching a door kills. Needs: the
-      door sprites and control points extracted from `TRON.FPG`, a design doc section, sim
-      support (deterministic, in snapshots), bots treating doors as hazards
-- [ ] The other two original map hazards are missing too: the dentist's hand on level 6
-      (*Mano*: chases to control points, kills on contact, drill sound; sprite already in
-      `sprites-source/dentist_hand.png`) and random shell bursts on level 7 (*Guerra*: 1/200
-      chance per frame of 30 pellets between two control points)
+- [x] Level 8 ("Portals"): automatic doors, as in the original (geometry, placement and
+      timing taken from `TRON.FPG` / `TRON.PRG`); they kill on contact even through a shield,
+      gate the wrap-around, and bots time their crossings. See `design/level-hazards.md`
+- [ ] The other two original map hazards are missing: the dentist's hand on level 6 and the
+      shell bursts on level 7. Both are specified in `design/level-hazards.md` (note: the
+      original hand does not kill, it only drills trails away)
+- [ ] Items can spawn hidden under a closed door (faithful, but maybe not fun)
 
 ## Open reports
 

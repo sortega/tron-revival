@@ -91,6 +91,7 @@ tron-revival/
 - [design/architecture.md](./design/architecture.md) - Technical architecture
 - [design/networking.md](./design/networking.md) - Multiplayer: connectivity, lobby, netcode
 - [design/local-and-ai.md](./design/local-and-ai.md) - Local play, sessions and AI players
+- [design/level-hazards.md](./design/level-hazards.md) - Level hazards (automatic doors)
 - [TODO.md](./TODO.md) - Backlog
 - [design/old-tron-design.md](./design/old-tron-design.md) - Original game mechanics
 

@@ -11,9 +11,13 @@ import type { PixelGrid } from '../PixelGrid';
 import type { Rng } from '../rng';
 import type { TronGameState } from '../TronGameState';
 import type { TronPlayer } from '../TronPlayer';
+import { anyDoorSolidAt, doorFrame } from '../doors';
+import type { DoorDefinition } from '../doors';
+import { LEVELS } from '../../types/game';
 
 const TURN_DEG = 4;                  // Degrees per step at full lock (matches TronPlayer)
 const DEG = Math.PI / 180;
+const DOOR_MARGIN_TICKS = 25;        // Doors must stay open this long after we pass
 
 export interface BotProfile {
   lookahead: number;        // Max rollout length in pixels
@@ -88,6 +92,8 @@ interface PlanContext {
   crossingSteps: number;   // Steps during which our own colour is passable (crossing)
   badItems: GameItem[];
   portals: readonly TeleportPortal[];
+  doors: readonly DoorDefinition[] | null;  // Automatic doors of the level, if any
+  doorTick: number;
 }
 
 // A point along a simulated path from which a rollout can (re)start
@@ -237,6 +243,8 @@ export class BotController {
       crossingSteps: crossing ? Math.max(0, crossing.remainingFrames - 30) : 0,
       badItems: game.items.filter(i => i.active && !i.mystery && BAD_ITEMS.has(i.sprite)),
       portals: game.portals,
+      doors: LEVELS[game.currentLevelIndex]?.doors ?? null,
+      doorTick: game.doorTick,
     };
   }
 
@@ -333,7 +341,7 @@ export class BotController {
     turn2At = Infinity, steer2 = 0, turn2Steps = 0,
     checkpoints: PathState[] | null = null
   ): Rollout {
-    const { pixels, me, hazards, ignoreSteps, crossingSteps, badItems, portals } = ctx;
+    const { pixels, me, hazards, ignoreSteps, crossingSteps, badItems, portals, doors, doorTick } = ctx;
     const clearanceSteps = this.profile.clearanceSteps;
     let { x, y, dir } = start;
     let portalCooldown = start.portalCooldown;
@@ -349,7 +357,15 @@ export class BotController {
     let cos = Math.cos(dir * DEG);
     let sin = Math.sin(dir * DEG);
 
+    // A door pixel counts if it is solid when we get there or shortly after (we may be
+    // slower than one step per tick, and should not cut it fine)
+    const doorBlocked = (bx: number, by: number): boolean =>
+      doors !== null && (
+        anyDoorSolidAt(doors, doorFrame(doorTick + step), bx, by) ||
+        anyDoorSolidAt(doors, doorFrame(doorTick + step + DOOR_MARGIN_TICKS), bx, by));
+
     const blocked = (bx: number, by: number): boolean => {
+      if (doorBlocked(bx, by)) return true;
       if (!pixels.has(bx, by)) return false;
       return !(step < crossingSteps && pixels.get(bx, by) === me.color);
     };
@@ -371,6 +387,7 @@ export class BotController {
       const ny = Math.floor(y);
 
       if (nx !== px || ny !== py) {
+        if (step <= ignoreSteps && doorBlocked(nx, ny)) break; // No shield against doors
         if (step > ignoreSteps) {
           if (blocked(nx, ny)) break;
           const dx = nx - px;

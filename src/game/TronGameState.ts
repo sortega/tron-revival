@@ -19,6 +19,7 @@ import type {
   DeathEvent,
 } from '../types/game';
 import type { GamePlayer } from '../types/game';
+import { anyDoorSolidAt, doorFrame } from './doors';
 import {
   LEVELS,
   PORTAL_RADIUS,
@@ -82,6 +83,8 @@ export class TronGameState {
   scores: Map<SlotIndex, number> = new Map();
   currentRound: number = 1;
   currentLevelIndex: number = 0;
+  /** Playing ticks elapsed this round; drives the level's automatic doors */
+  doorTick = 0;
   playersReady: Set<SlotIndex> = new Set();
   gameMode: GameMode;
   levelMode: LevelMode;
@@ -324,6 +327,7 @@ export class TronGameState {
     this.bodyguards = [];
     this.nextBodyguardId = 0;
     this.bodyguardBaseAngle = 0;
+    this.doorTick = 0;
 
     const playerCount = this.playerConfigs.length;
 
@@ -393,6 +397,10 @@ export class TronGameState {
   }
 
   private tickPlaying(inputs: Map<SlotIndex, TronInput>): void {
+    // Level doors: one shared clock, sampled once per tick
+    this.doorTick++;
+    const doors = LEVELS[this.currentLevelIndex]?.doors;
+    const frameOfDoors = doors ? doorFrame(this.doorTick) : 0;
 
     // Decrement teleport cooldowns
     for (const player of this.players) {
@@ -453,6 +461,12 @@ export class TronGameState {
               isOwnColor ? 'own-trail' : this.players.some(p => p.color === pixelOwner) ? 'trail' : 'level');
             continue;
           }
+        }
+
+        // Doors kill on contact, shield or not
+        if (doors && anyDoorSolidAt(doors, frameOfDoors, player.getScreenX(), player.getScreenY())) {
+          this.killPlayerWithSound(player, false, 'door');
+          continue;
         }
 
         // Add trail segments to collision map
@@ -1946,6 +1960,7 @@ export class TronGameState {
       projectiles: this.projectiles,
       explosions: this.explosions,
       bodyguards: this.bodyguards,
+      doorTick: this.doorTick,
     };
 
     const matchState: TronMatchState = {
@@ -2015,6 +2030,7 @@ export class TronGameState {
     this.roundWinner = state.round.roundWinner;
     this.portals = state.round.portals;
     this.items = state.round.items || [];
+    this.doorTick = state.round.doorTick ?? 0;
 
     // Update player states
     for (const playerState of state.round.players) {

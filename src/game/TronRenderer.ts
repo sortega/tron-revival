@@ -10,6 +10,8 @@ import { SpriteAtlas } from '../sprites';
 import { SPRITE_HASH } from './spriteHash';
 
 import type { NetworkStats } from './session/GameSession';
+import { DOOR_LENGTH, DOOR_THICKNESS, doorFrame } from './doors';
+import type { DoorDefinition } from './doors';
 
 const DEATH_LABELS: Record<DeathCause, string> = {
   'trail': 'crashed into a trail',
@@ -20,6 +22,7 @@ const DEATH_LABELS: Record<DeathCause, string> = {
   'tracer': 'shot',
   'bomb': 'bombed',
   'bodyguard': 'killed by a satellite',
+  'door': 'crushed by a door',
 };
 
 const CANVAS_WIDTH = 800;
@@ -40,6 +43,10 @@ export class TronRenderer {
   private levelCtx: CanvasRenderingContext2D;
   private currentLevelImage: HTMLImageElement | null = null;
   private levelHidden = false;  // True while a snapshot stands in for the level image
+
+  // Automatic doors of the current level and their sprite strip (10 frames, stacked)
+  private doors: readonly DoorDefinition[] = [];
+  private doorImage: HTMLImageElement | null = null;
 
   // Player configs for rendering
   private players: GamePlayer[];
@@ -185,6 +192,9 @@ export class TronRenderer {
         for (const seg of segments) this.ctx.fillRect(seg.x, seg.y, 1, 1);
       }
     }
+
+    // Level doors cover the trails underneath
+    if (this.doors.length > 0) this.drawDoors(doorFrame(round.doorTick ?? 0));
 
     // Draw teleport portals
     for (const portal of round.portals) {
@@ -423,6 +433,13 @@ export class TronRenderer {
     // Store the image for restoration (new round, eraser)
     this.currentLevelImage = img;
 
+    this.doors = level.doors ?? [];
+    if (this.doors.length > 0 && !this.doorImage) {
+      const doorImage = new Image();
+      doorImage.src = `${import.meta.env.BASE_URL}assets/levels/doors.png`;
+      this.doorImage = doorImage;
+    }
+
     // Read the obstacles from a scratch canvas (the level canvas may be showing a
     // damaged level, or be hidden behind a snapshot)
     this.tintCtx.globalCompositeOperation = 'copy';
@@ -430,6 +447,27 @@ export class TronRenderer {
     const imageData = this.tintCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     if (!this.levelHidden) this.drawLevelImage();
     return PixelGrid.fromRgba(imageData.data);
+  }
+
+  private drawDoors(frame: number): void {
+    const img = this.doorImage;
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    const ctx = this.ctx;
+    ctx.save();
+    // Edge doors are half outside the play area
+    ctx.beginPath();
+    ctx.rect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    ctx.clip();
+    for (const door of this.doors) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.translate(door.x, door.y);
+      if (door.vertical) ctx.transform(0, 1, 1, 0, 0, 0); // Swap axes: the sprite is symmetric
+      ctx.drawImage(
+        img, 0, frame * DOOR_THICKNESS, DOOR_LENGTH, DOOR_THICKNESS,
+        -DOOR_LENGTH / 2, -DOOR_THICKNESS / 2, DOOR_LENGTH, DOOR_THICKNESS
+      );
+    }
+    ctx.restore();
   }
 
   private drawLevelImage(): void {

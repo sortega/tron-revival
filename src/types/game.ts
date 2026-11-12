@@ -44,7 +44,8 @@ export type DeathCause =
   | 'own-trail'   // Own colour ("ridiculous death")
   | 'level'       // Level obstacle
   | 'crossing'    // Head-on / diagonal crossing with another player
-  | 'bullet' | 'tracer' | 'bomb' | 'bodyguard';
+  | 'bullet' | 'tracer' | 'bomb' | 'bodyguard'
+  | 'door';       // Automatic door (level hazard)
 
 export interface DeathEvent {
   slotIndex: SlotIndex;
@@ -120,6 +121,7 @@ export interface TronRoundState {
   projectiles: Projectile[];   // Bullets in flight
   explosions: Explosion[];     // Active explosion animations
   bodyguards: Bodyguard[];     // Active bodyguards
+  doorTick: number;            // Playing ticks elapsed this round (clock of the level's doors)
 }
 
 // Match state (scores, ready status)
@@ -209,15 +211,20 @@ export const PORTAL_FRAME_COUNT = 30;  // Animation frames (portal_01 to portal_
 
 // === Level Types ===
 
+import type { DoorDefinition } from '../game/doors';
+export type { DoorDefinition } from '../game/doors';
+
 export interface LevelDefinition {
   id: string;
   name: string;
   imagePath: string;
+  /** Automatic doors (design/level-hazards.md) */
+  doors?: DoorDefinition[];
 }
 
 // Level image filenames (relative to /assets/levels/)
 // The full path is constructed at runtime using import.meta.env.BASE_URL
-export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string }[] = [
+export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string; doors?: DoorDefinition[] }[] = [
   { id: 'blank', name: 'Blank', imageFile: 'blank.png' },
   { id: 'pop-culture', name: 'Pop Culture', imageFile: 'pop-culture.png' },
   { id: 'selva', name: 'Selva', imageFile: 'selva.png' },
@@ -225,7 +232,17 @@ export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string }[
   { id: 'bus', name: 'Bus', imageFile: 'bus.png' },
   { id: 'dentistry', name: 'Dentistry', imageFile: 'dentistry.png' },
   { id: 'warzone', name: 'Warzone', imageFile: 'warzone.png' },
-  { id: 'portals', name: 'Portals', imageFile: 'portals.png' },
+  {
+    id: 'portals', name: 'Portals', imageFile: 'portals.png',
+    // Control points 1-4 and 6 of the original map 207
+    doors: [
+      { x: 384, y: 0, vertical: false },
+      { x: 749, y: 285, vertical: true },
+      { x: 381, y: 599, vertical: false },
+      { x: 0, y: 287, vertical: true },
+      { x: 385, y: 290, vertical: true },
+    ],
+  },
 ];
 
 // Level order (cycles after last level) - constructed with full paths
@@ -233,6 +250,7 @@ export const LEVELS: LevelDefinition[] = LEVEL_DEFINITIONS.map(def => ({
   id: def.id,
   name: def.name,
   imagePath: `${import.meta.env.BASE_URL}assets/levels/${def.imageFile}`,
+  ...(def.doors && { doors: def.doors }),
 }));
 
 // === Item Types ===
