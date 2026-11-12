@@ -16,6 +16,8 @@ import type { DoorDefinition } from '../doors';
 import { inFireZone } from '../guns';
 import type { GunDefinition } from '../guns';
 import { LEVELS } from '../../types/game';
+import { firesTracers, lineOfFire, stance, worthFiringAt } from './matchups';
+import type { Fighter, Stance } from './matchups';
 
 const TURN_DEG = 4;                  // Degrees per step at full lock (matches TronPlayer)
 const DEG = Math.PI / 180;
@@ -23,6 +25,8 @@ const DEG = Math.PI / 180;
 const GUARDED_RADIUS = 56;
 const FIRE_ZONE_STEPS = 80;          // How far ahead bots mind the level guns' fire zones
 const DOOR_MARGIN_TICKS = 25;        // Doors must stay open this long after we pass
+const FLEE_RANGE = 180;              // Run from an enemy we should avoid when it is this close
+const FLEE_DISTANCE = 150;           // ...towards a point this far away, directly opposite
 
 export interface BotProfile {
   lookahead: number;        // Max rollout length in pixels
@@ -36,21 +40,22 @@ export interface BotProfile {
   avoidsHazards: boolean;   // Enemy heads and bodyguards
   hunts: boolean;           // Chases enemies when there is nothing better to do
   usesTurbo: boolean;
+  knowsMatchups: boolean;   // Seeks, avoids and holds fire according to weapons and satellites
   reverseReactionTicks: number; // Ticks needed to adapt to Control Reversal
 }
 
 export const BOT_PROFILES: Record<BotDifficulty, BotProfile> = {
   easy: {
     lookahead: 60, replanTicks: 6, clearanceSteps: 0, areaAware: false, escapes: false, mistakeChance: 0.04, itemInterest: 0.4,
-    weapons: 'panic', avoidsHazards: false, hunts: false, usesTurbo: false, reverseReactionTicks: 25,
+    weapons: 'panic', avoidsHazards: false, hunts: false, usesTurbo: false, knowsMatchups: false, reverseReactionTicks: 25,
   },
   normal: {
     lookahead: 130, replanTicks: 3, clearanceSteps: 60, areaAware: true, escapes: true, mistakeChance: 0.003, itemInterest: 1,
-    weapons: 'full', avoidsHazards: true, hunts: false, usesTurbo: false, reverseReactionTicks: 6,
+    weapons: 'full', avoidsHazards: true, hunts: false, usesTurbo: false, knowsMatchups: true, reverseReactionTicks: 6,
   },
   hard: {
     lookahead: 180, replanTicks: 2, clearanceSteps: 110, areaAware: true, escapes: true, mistakeChance: 0, itemInterest: 1,
-    weapons: 'full', avoidsHazards: true, hunts: true, usesTurbo: true, reverseReactionTicks: 0,
+    weapons: 'full', avoidsHazards: true, hunts: true, usesTurbo: true, knowsMatchups: true, reverseReactionTicks: 0,
   },
 };
 
@@ -88,6 +93,26 @@ interface Hazard {
   maxStep: number; // Only relevant for the first N steps
 }
 
+// The cone in front of an armed enemy
+interface LineOfFire {
+  x: number;
+  y: number;
+  direction: number;  // Degrees
+  range: number;
+  halfAngle: number;
+  weight: number;     // Penalty per sampled step inside it
+}
+
+// An enemy as the bot sees it
+interface EnemyView {
+  player: TronPlayer;
+  dx: number;         // Shortest way to it (the arena wraps)
+  dy: number;
+  dist: number;
+  fighter: Fighter;
+  stance: Stance;
+}
+
 // Everything a rollout needs to know about the world, gathered once per decision
 interface PlanContext {
   pixels: PixelGrid;
@@ -100,6 +125,7 @@ interface PlanContext {
   doors: readonly DoorDefinition[] | null;  // Automatic doors of the level, if any
   doorTick: number;
   guns: readonly GunDefinition[] | null;    // Level guns whose fire zones are best avoided
+  linesOfFire: LineOfFire[];                // Armed enemies' cones, likewise
 }
 
 // A point along a simulated path from which a rollout can (re)start
@@ -160,6 +186,7 @@ export class BotController {
   private weaponHeldTicks = 0;   // How long the current weapon has been carried
   private lastWeapon: string | null = null;
   private goalItemId: number | null = null;
+  private enemies: EnemyView[] = [];  // Refreshed every decision
 
   // Scratch buffers for flood fills
   private floodGen = 0;
@@ -168,6 +195,9 @@ export class BotController {
 
   /** Set to an array to collect a per-candidate breakdown of each plan (debugging). */
   trace: string[] | null = null;
+
+  /** What the last plan was heading for, for tests and tuning. */
+  goalKind: 'item' | 'seek' | 'flee' | null = null;
 
   /** Details of the last plan, for tests and tuning. */
   debug = { score: 0, dist: 0, steer: 0, turnSteps: 0, straightFree: 0 };
@@ -196,6 +226,7 @@ export class BotController {
 
     const x = me.x / 1000;
     const y = me.y / 1000;
+    this.enemies = this.lookAround(game, me, x, y);
     const ctx = this.makeContext(game, me);
     const start: PathState = { x, y, dir: me.direction, step: 0, portalCooldown: 0, cells: null };
 
@@ -252,7 +283,43 @@ export class BotController {
       doors: LEVELS[game.currentLevelIndex]?.doors ?? null,
       doorTick: game.doorTick,
       guns: this.profile.avoidsHazards ? LEVELS[game.currentLevelIndex]?.guns ?? null : null,
+      linesOfFire: this.linesOfFire(),
     };
+  }
+
+  // The enemies, with what each carries and how to treat it (design/local-and-ai.md)
+  private lookAround(game: TronGameState, me: TronPlayer, x: number, y: number): EnemyView[] {
+    const satellites = new Map<number, number>();
+    for (const bg of game.getBodyguards()) satellites.set(bg.ownerSlot, (satellites.get(bg.ownerSlot) ?? 0) + 1);
+    const mine: Fighter = { weapon: me.equippedWeapon?.sprite ?? null, satellites: satellites.get(me.slotIndex) ?? 0 };
+    const team = game.gameMode === 'team';
+    const enemies: EnemyView[] = [];
+    for (const p of game.players) {
+      if (!p.alive || p.slotIndex === me.slotIndex) continue;
+      if (team && p.slotIndex % 2 === me.slotIndex % 2) continue;
+      const dx = wrapDelta(p.x / 1000 - x, PLAY_WIDTH);
+      const dy = wrapDelta(p.y / 1000 - y, PLAY_HEIGHT);
+      const fighter: Fighter = { weapon: p.equippedWeapon?.sprite ?? null, satellites: satellites.get(p.slotIndex) ?? 0 };
+      enemies.push({
+        player: p, dx, dy, dist: Math.hypot(dx, dy), fighter,
+        stance: this.profile.knowsMatchups ? stance(mine, fighter) : 'neutral',
+      });
+    }
+    return enemies.sort((a, b) => a.dist - b.dist);
+  }
+
+  private linesOfFire(): LineOfFire[] {
+    if (!this.profile.knowsMatchups) return [];
+    const lines: LineOfFire[] = [];
+    for (const enemy of this.enemies) {
+      const cone = lineOfFire(enemy.fighter.weapon);
+      if (!cone) continue;
+      lines.push({
+        x: enemy.player.x / 1000, y: enemy.player.y / 1000, direction: enemy.player.direction,
+        ...cone, weight: enemy.stance === 'avoid' ? 4 : 2,
+      });
+    }
+    return lines;
   }
 
   /** Choose `this.steer`. Returns the free distance straight ahead. */
@@ -348,7 +415,7 @@ export class BotController {
     turn2At = Infinity, steer2 = 0, turn2Steps = 0,
     checkpoints: PathState[] | null = null
   ): Rollout {
-    const { pixels, me, hazards, ignoreSteps, crossingSteps, badItems, portals, doors, doorTick, guns } = ctx;
+    const { pixels, me, hazards, ignoreSteps, crossingSteps, badItems, portals, doors, doorTick, guns, linesOfFire } = ctx;
     const clearanceSteps = this.profile.clearanceSteps;
     let { x, y, dir } = start;
     let portalCooldown = start.portalCooldown;
@@ -439,6 +506,15 @@ export class BotController {
       if (guns !== null && step <= FIRE_ZONE_STEPS && step % 2 === 0) {
         for (const gun of guns) {
           if (inFireZone(gun, x, y)) narrow += 2;
+        }
+      }
+      // ...and so is loitering in front of an armed enemy
+      if (linesOfFire.length > 0 && step <= FIRE_ZONE_STEPS && step % 2 === 0) {
+        for (const line of linesOfFire) {
+          const dx = wrapDelta(x - line.x, PLAY_WIDTH);
+          const dy = wrapDelta(y - line.y, PLAY_HEIGHT);
+          if (dx * dx + dy * dy > line.range * line.range) continue;
+          if (Math.abs(angleDiff(line.direction, Math.atan2(dy, dx) / DEG)) <= line.halfAngle) narrow += line.weight;
         }
       }
 
@@ -608,7 +684,9 @@ export class BotController {
       this.goalItemId = target?.id ?? null;
     }
 
+    this.goalKind = null;
     if (target) {
+      this.goalKind = 'item';
       // Aim at the nearest wrapped image of the item
       return {
         x: x + wrapDelta(target.x - x, PLAY_WIDTH),
@@ -616,34 +694,45 @@ export class BotController {
       };
     }
 
-    if (this.profile.hunts) {
-      const enemy = this.nearestEnemy(game, me, x, y);
-      if (enemy) {
-        // With a gun: face the enemy. Without: aim ahead of them to cut them off.
-        const lead = me.equippedWeapon ? 0 : 45;
-        const rad = enemy.player.direction * DEG;
-        return {
-          x: x + enemy.dx + Math.cos(rad) * lead,
-          y: y + enemy.dy + Math.sin(rad) * lead,
-        };
-      }
+    // Keep away from an enemy that has the upper hand
+    const threat = this.enemies.find(e => e.stance === 'avoid');
+    if (threat && threat.dist < FLEE_RANGE && threat.dist > 0) {
+      this.goalKind = 'flee';
+      return {
+        x: x - (threat.dx / threat.dist) * FLEE_DISTANCE,
+        y: y - (threat.dy / threat.dist) * FLEE_DISTANCE,
+      };
+    }
+
+    // Go after one we have the upper hand over; hunters also go after the rest
+    const prey = this.enemies.find(e => e.stance === 'seek' || (this.profile.hunts && e.stance === 'neutral'));
+    if (prey) {
+      this.goalKind = 'seek';
+      // With a gun: face the enemy. Without: aim ahead of them to cut them off.
+      const lead = me.equippedWeapon ? 0 : 45;
+      const rad = prey.player.direction * DEG;
+      return {
+        x: x + prey.dx + Math.cos(rad) * lead,
+        y: y + prey.dy + Math.sin(rad) * lead,
+      };
     }
     return null;
   }
 
-  private nearestEnemy(game: TronGameState, me: TronPlayer, x: number, y: number):
-    { player: TronPlayer; dx: number; dy: number; dist: number } | null {
-    let best: { player: TronPlayer; dx: number; dy: number; dist: number } | null = null;
-    const team = game.gameMode === 'team';
-    for (const p of game.players) {
-      if (!p.alive || p.slotIndex === me.slotIndex) continue;
-      if (team && p.slotIndex % 2 === me.slotIndex % 2) continue;
-      const dx = wrapDelta(p.x / 1000 - x, PLAY_WIDTH);
-      const dy = wrapDelta(p.y / 1000 - y, PLAY_HEIGHT);
+  // Is an enemy bullet, or an H-bomb still far enough to set off safely, coming at us
+  // from inside the cone ahead?
+  private incomingShot(game: TronGameState, me: TronPlayer, x: number, y: number, halfAngle: number, range: number): boolean {
+    for (const proj of game.getProjectiles()) {
+      if (proj.type === 'tracer' || proj.ownerSlot === me.slotIndex) continue;
+      const dx = wrapDelta(proj.x / 1000 - x, PLAY_WIDTH);
+      const dy = wrapDelta(proj.y / 1000 - y, PLAY_HEIGHT);
       const dist = Math.hypot(dx, dy);
-      if (!best || dist < best.dist) best = { player: p, dx, dy, dist };
+      if (dist > range || (proj.type === 'bomb' && dist < 75)) continue;
+      if (Math.abs(angleDiff(me.direction, Math.atan2(dy, dx) / DEG)) > halfAngle) continue;
+      // Heading our way?
+      if (Math.abs(angleDiff(proj.direction, Math.atan2(-dy, -dx) / DEG)) <= 25) return true;
     }
-    return best;
+    return false;
   }
 
   // === Weapons ===
@@ -661,7 +750,12 @@ export class BotController {
     }
     this.weaponHeldTicks++;
 
-    const enemy = this.nearestEnemy(game, me, x, y);
+    // The nearest enemy it makes sense to shoot at with this weapon
+    const knows = this.profile.knowsMatchups;
+    const enemy = this.enemies.find(e => !knows || worthFiringAt(weapon.sprite, e.fighter)) ?? null;
+    // Tracers shoot down bullets and bombs coming our way
+    const shootDown = (halfAngle: number, range: number): boolean =>
+      knows && firesTracers(weapon.sprite) && this.incomingShot(game, me, x, y, halfAngle, range);
     const bearing = enemy ? Math.abs(angleDiff(me.direction, Math.atan2(enemy.dy, enemy.dx) / DEG)) : 180;
     const inCone = (halfAngle: number, range: number): boolean =>
       enemy !== null && bearing <= halfAngle && enemy.dist <= range;
@@ -675,11 +769,12 @@ export class BotController {
       case 'glock':
         return ((full && inCone(6, 300)) || boxedIn) && pulse;
       case 'shotgun':
-        return ((full && inCone(8, 220)) || boxedIn) && pulse;
+        return ((full && inCone(8, 220)) || boxedIn || shootDown(8, 240)) && pulse;
       case 'rifle':
-        return (full && inCone(5, 350)) || straightFree < 35;
+        return (full && inCone(5, 350)) || straightFree < 35 || shootDown(5, 350);
       case 'uzi':
-        return (full && inCone(25, 200)) || straightFree < 35;
+        // (it only reaches 50 px)
+        return (full && inCone(28, 70)) || straightFree < 35 || shootDown(28, 55);
       case 'bomb':
         // The blast kills within 50px: only with a long clear path ahead
         if (straightFree < 110) return false;
@@ -691,7 +786,7 @@ export class BotController {
       case 'turbo':
         return this.profile.usesTurbo && straightFree >= this.profile.lookahead;
       case 'slow':
-        return full && enemy !== null;
+        return full && this.enemies.length > 0;
       default:
         return false;
     }

@@ -12,7 +12,8 @@ import { loadLevelGrid, makePlayers } from './helpers';
 
 // `calm-*`: same driving skill, but no hunting and no offensive weapon use. Used to
 // measure how well a bot stays alive without the noise of combat.
-export type DriverSpec = BotDifficulty | `calm-${BotDifficulty}` | 'straight' | 'random';
+// `calm-*`: does not hunt or shoot at enemies. `naive-*`: does not know the weapon match-ups.
+export type DriverSpec = BotDifficulty | `calm-${BotDifficulty}` | `naive-${BotDifficulty}` | 'straight' | 'random';
 
 interface Driver {
   decide(game: TronGameState): TronInput;
@@ -31,6 +32,9 @@ function makeDriver(spec: DriverSpec, slot: SlotIndex, rng: Rng): Driver {
         return { steer, action };
       },
     };
+  }
+  if (spec.startsWith('naive-')) {
+    return new BotController(slot, { ...BOT_PROFILES[spec.slice(6) as BotDifficulty], knowsMatchups: false }, rng);
   }
   if (spec.startsWith('calm-')) {
     const base = BOT_PROFILES[spec.slice(5) as BotDifficulty];

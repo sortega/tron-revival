@@ -189,6 +189,47 @@ When the best path is comfortably long, the bot picks a target and adds the goal
 | Turbo | Hold on long clear straights (`hard` only) |
 | Slow | Hold while any enemy is alive |
 
+### Match-ups
+
+`normal` and `hard` bots know which weapon beats which, and how satellites change things
+([projectiles.md](./projectiles.md), [bodyguards.md](./bodyguards.md)). `easy` bots do not.
+Everything they use is on screen: who holds what is shown in the side panel.
+
+For every enemy the bot takes a **stance** (`src/game/ai/matchups.ts`), the first rule
+that applies:
+
+| Situation | Stance |
+|-----------|--------|
+| The enemy has satellites and I hold the H-bomb (the only thing that destroys them) | seek |
+| The enemy has one satellite and I hold the shotgun (sustained fire gets past it) | neutral |
+| The enemy has satellites, anything else | avoid |
+| I have satellites, the enemy has none and no H-bomb | seek (the satellites do the killing) |
+| The enemy holds the H-bomb and I hold a tracer weapon (which can set it off at a distance) | neutral |
+| The enemy holds the H-bomb, otherwise | avoid |
+| I hold the H-bomb | seek |
+| My gun beats theirs: Uzi or shotgun against Glock (tracers stop bullets), shotgun or rifle against Uzi, rifle against shotgun (range) | seek |
+| Their gun beats mine (the same pairs reversed) | avoid |
+| I hold a gun and the enemy holds none | seek |
+| The enemy holds a gun and I hold none | avoid |
+| Otherwise (same gun, Glock against rifle, nobody armed) | neutral |
+
+What the stance does:
+
+- **Seek**: with no item to fetch, the bot heads for the nearest enemy it has the
+  advantage over. `normal` bots only go after such enemies; `hard` bots also hunt neutral
+  ones, as before. Nobody hunts an enemy they should avoid.
+- **Avoid**: with no item to fetch and such an enemy within 180 px, the bot's goal is a
+  point directly away from it.
+- **Lines of fire**: the cone in front of every enemy holding a gun or the H-bomb counts
+  like the fire zone of a level gun, making paths through it less attractive — twice as
+  much when the stance is *avoid*. Cones: Glock 300 px ± 7°, rifle 400 px ± 6°, shotgun
+  260 px ± 9°, Uzi 60 px ± 32°, H-bomb 220 px ± 12°.
+- **Firing**: a bot does not waste shots that cannot work. It never fires the Glock at a
+  guarded enemy (the bullet would bounce back), nor the rifle or Uzi; the shotgun only at
+  an enemy with a single satellite. The target is the nearest enemy worth shooting at.
+- **Shooting things down**: with the Uzi, shotgun or rifle, a bot fires at an enemy bullet
+  coming its way, and at an H-bomb coming its way while it is still more than 75 px off.
+
 ### Round flow
 
 During `waiting_ready` a bot presses action once (after a short delay) if it is not marked
@@ -205,7 +246,8 @@ ready. Under *Control Reversal*, `normal`/`hard` bots compensate by inverting th
 | Seeks items | sometimes | yes | yes |
 | Uses weapons | boxed-in only | yes | yes, + turbo |
 | Avoids enemy heads / bodyguards | no | yes | yes |
-| Hunts enemies | no | no | yes |
+| Hunts enemies | no | when it has the advantage | yes, except when at a disadvantage |
+| Knows the weapon and satellite match-ups | no | yes | yes |
 
 ### Bots in network games
 
