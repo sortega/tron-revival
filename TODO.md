@@ -239,8 +239,8 @@ Rules: `design/projectiles.md`.
 - [x] A tracer hitting something on the tick it wraps erased a line across the whole arena
 - [x] H-bomb blast is a circle (cleared area, players, items, satellites)
 - [x] Satellites (`design/bodyguards.md`): intercept shots on their course instead of
-      chasing them, attack players who enter their area, wear out (300 HP) so repeated
-      shotgun blasts overwhelm them; contact tests are swept and wrap-aware
+      chasing them, attack players who enter their area; 8 px/tick and 1500 HP, so they can
+      be overwhelmed by volume of fire but only an H-bomb destroys them
 
 ## Open reports
 

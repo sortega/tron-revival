@@ -28,6 +28,24 @@ that row or column — typically its own shooter.)
 | Tracer (Rifle, Uzi, Shotgun, level guns) | 5–50 | 1 px of the path | Kills that player (a shield protects) |
 | H-bomb | 2 | its body, see below | Blast: kills everyone within 50 px |
 
+## Weapon match-ups
+
+The firearms keep the original's rock-paper-scissors, which follows from four numbers
+taken from `PROCESS Weapon` / `Traya` / `Disparo`:
+
+| Weapon | Shots | Speed (px/tick) | Reach | Hits a player within |
+|--------|-------|-----------------|-------|----------------------|
+| Glock | 1 bullet per press, 20 | 5 | until it hits something | 6 px (explosion) |
+| Rifle (AK-47) | bursts of 5 tracers, dead straight, 200 | 5 | 600 px | 1 px |
+| Shotgun | 30 pellets per press, ±5°, 20 blasts | 10–30 | 100–300 px | 1 px |
+| Uzi | 20 tracers per tick while held, ±30°, 10 s | 5–25 for 2 ticks (original: 10–50 for 1) | 10–50 px | 1 px |
+
+- **Uzi beats Glock**: its cloud of tracers sets off incoming bullets (below). It loses to
+  the shotgun and the rifle, which kill from far outside its 50 px.
+- **Shotgun beats Glock** the same way, and is outranged by the rifle.
+- **Rifle** has the longest reach but must touch the target to the pixel; a Glock bullet
+  only has to pass within 6 px, so the Glock is the easier one to aim.
+
 ## Bullets against tracers
 
 A Glock bullet that crosses a tracer — rifle, Uzi, shotgun pellet or level gun — **explodes
@@ -93,6 +111,9 @@ strips in `clearedAreas`.
 - A bullet fired into Uzi fire from 8 directions and 3 distances never reaches the Uzi's
   owner; one meeting a rifle tracer head-on explodes half-way; a shooter's own tracers do
   not set off their bullet.
+- Match-ups: Uzi reach ≤ 55 px < shotgun ≤ 310 px < rifle; shotgun fire stops a bullet
+  from 8 directions; a shot passing 4 px beside a player kills with the Glock and misses
+  with the rifle.
 - A single fast tracer whose path crosses a bomb sets it off; one passing beside it does
   nothing; rifle fire sets off an oncoming bomb in mid-flight, far from the shooter.
 - The blast erases a disc: pixels 57 px away diagonally go, pixels in the corners of the

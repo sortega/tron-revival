@@ -28,9 +28,8 @@ Every `playing` tick each satellite gets a job, in this order of priority:
    In team mode team-mates are neither attacked nor harmed.
 3. **Orbit.**
 
-A satellite moves at up to 16 px per tick — fast enough to get from the far side of its
-orbit into the line of fire before all but the fastest point-blank shotgun pellets — and
-never leaves the area of action (targets are clamped to it). Satellites freeze when the round ends and disappear with their owner.
+A satellite moves at up to 8 px per tick and never leaves the area of action (targets are
+clamped to it). Satellites freeze when the round ends and disappear with their owner.
 
 ## Contact
 
@@ -42,29 +41,30 @@ never leaves the area of action (targets are clamped to it). Satellites freeze w
 - **Players.** An enemy whose head comes within 5 px of a satellite (or of the path it
   travelled in the tick) dies, shield or not, with death cause `bodyguard`.
 
-## Wear: satellites can be overwhelmed
+## Overwhelming a satellite
 
-A satellite has **300 hit points**. Every projectile it blocks costs the same damage that
-projectile does to items: 10 for a tracer (rifle, Uzi, shotgun pellet, level
-gun), 50 for a Glock bullet. At 0 it is destroyed with a small explosion.
+A satellite is practically indestructible: **only an H-bomb blast destroys it** (every
+satellite within 50 px of the blast goes). It does wear — it has **1500 hit points** and
+every projectile it blocks costs what that projectile does to items, 10 for a tracer
+(rifle, Uzi, shotgun pellet, level gun) and 50 for a Glock bullet — and it fades as it
+wears (`Bodyguard.hp` travels to guests with the rest of the round state). But 150 pellets
+on one satellite is far more than a shotgun's 20 blasts normally land; hit points do not
+regenerate, and at 0 it would be destroyed with a small explosion.
 
-A shotgun blast is 30 pellets, and a satellite in the line of fire stops roughly half of
-them (the rest of the spread goes around it and misses the owner too). Measured from 95 px,
-over 24 directions and orbit positions:
+What beats a satellite is **volume and speed of fire**. At 8 px per tick it cannot always
+get from the far side of its orbit into the line of fire before fast pellets arrive, and
+while it deals with one blast the next one comes. Shotgun blasts from 95 px, one every 4
+ticks, over 24 directions and orbit positions:
 
 | Blasts in a row | 1 satellite | 2 satellites | 3 satellites |
 |-----------------|-------------|--------------|--------------|
-| 1 | owner dies 2/24 | 0/24 | 0/24 |
-| 2 | 14/24 | 2/24 | 0/24 |
-| 3 | 24/24 | 12/24 | 0/24 |
-| 4 | 24/24 | 24/24 | 15/24 |
-| 6 | 24/24 | 24/24 | 24/24 |
+| 1 | owner dies 10/24 | 8/24 | 4/24 |
+| 4 | 16/24 | 8/24 | 4/24 |
+| 6 | 22/24 | 8/24 | 4/24 |
+| 10 | 22/24 | 10/24 | 4/24 |
 
-Six Glock bullets or a long rifle burst also destroy a satellite. Hit points do not
-regenerate. A satellite fades as it wears down (`Bodyguard.hp` travels to guests with the
-rest of the round state).
-
-An H-bomb blast destroys every satellite in its kill area outright, as before.
+No satellite was destroyed in any of these. A single Glock bullet or a rifle burst is
+stopped every time (48 of 48 set-ups each).
 
 ## Bots
 
@@ -79,6 +79,7 @@ while that enemy has satellites, instead of only the satellites themselves.
   wherever on the orbit the satellite happened to be.
 - An enemy driving into the area is killed by the satellite before reaching the owner; one
   passing outside it is left alone; a team-mate is not harmed.
-- One shotgun blast rarely kills the owner; repeated blasts destroy the satellite and
-  then do; more satellites take more blasts.
+- Shotgun: one blast is stopped more often than not; six in a row overwhelm a lone
+  satellite without destroying it; three satellites hold out; each pellet stopped costs
+  10 points.
 - With two satellites and two simultaneous threats, each takes one.

@@ -202,6 +202,69 @@ describe('bullets against tracers', () => {
   });
 });
 
+describe('weapon match-ups', () => {
+  /** How far from the muzzle the shots of a weapon get in open space. */
+  function reach(weapon: string): number {
+    const g = arena();
+    place(g, 0, 100, 300, 0);
+    place(g, 1, 100, 500, 0);
+    if (weapon === 'uzi') g.players[0]!.equipWeapon('uzi', undefined, 700);
+    else g.players[0]!.equipWeapon(weapon, 200);
+    let far = 0;
+    for (let i = 0; i < 140; i++) {
+      g.tick(inputs({ action: i < 3 }, {}));
+      g.items.length = 0;
+      g.serialize();
+      const shooter = g.players[0]!;
+      for (const p of g.getProjectiles()) far = Math.max(far, (p.x - shooter.x) / 1000);
+    }
+    return far;
+  }
+
+  it('Uzi is outranged by the shotgun, and the shotgun by the rifle', () => {
+    const uzi = reach('uzi');
+    const shotgun = reach('shotgun');
+    const rifle = reach('rifle');
+    expect(uzi).toBeGreaterThan(25);
+    expect(uzi).toBeLessThanOrEqual(55);
+    expect(shotgun).toBeGreaterThan(200);
+    expect(shotgun).toBeLessThanOrEqual(310);
+    expect(rifle).toBeGreaterThan(450);
+  });
+
+  it('shotgun fire stops a Glock bullet', () => {
+    for (let k = 0; k < 8; k++) {
+      const from = (k * Math.PI) / 4 + 0.1;
+      const g = arena(k + 1);
+      place(g, 1, 375, 300, (from * 180) / Math.PI);
+      place(g, 0, 375 + Math.cos(from) * 220, 300 + Math.sin(from) * 220, ((from * 180) / Math.PI + 180) % 360);
+      g.players[1]!.equipWeapon('shotgun', 20);
+      g.players[0]!.equipWeapon('glock', 20);
+      const deaths: string[] = [];
+      for (let i = 0; i < 50 && g.phase === 'playing'; i++) {
+        // The bullet is fired first; the shotgun answers
+        g.tick(inputs({ action: i === 0 }, { action: i === 4 }));
+        g.items.length = 0;
+        for (const d of g.serialize().deaths ?? []) deaths.push(`${d.slotIndex}:${d.cause}`);
+      }
+      expect(deaths, `direction ${k}`).not.toContain('1:bullet');
+    }
+  });
+
+  it('a rifle tracer must touch the target, a Glock bullet only has to come close', () => {
+    // Both fired along a line passing 4 px beside a player crossing ahead
+    const outcome = (weapon: string): string[] => {
+      const g = arena();
+      place(g, 0, 200, 300, 0);
+      // 104 px ahead, 4 px off the line, moving along it so the offset stays
+      place(g, 1, 304, 304, 0);
+      return fireAndWatch(g, weapon, 60);
+    };
+    expect(outcome('glock')).toContain('1:bullet');
+    expect(outcome('rifle')).toEqual([]);
+  });
+});
+
 describe('shooting down an H-bomb', () => {
   /** Player 0 launches a bomb to the right and gets well clear of it. */
   function bombInFlight(): { g: ReturnType<typeof arena>; bomb: () => { x: number; y: number } | undefined } {

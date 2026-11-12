@@ -93,7 +93,7 @@ export interface Bodyguard {
   hp: number;          // Worn down by the projectiles it blocks (design/bodyguards.md)
 }
 
-export const BODYGUARD_HP = 300;
+export const BODYGUARD_HP = 1500;
 
 // Player state during gameplay (serializable for network)
 export interface TronPlayerState {

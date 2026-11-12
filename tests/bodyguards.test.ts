@@ -148,44 +148,69 @@ describe('satellites attack intruders', () => {
   });
 });
 
-describe('satellites wear out', () => {
-  /** How often the owner dies to `blasts` shotgun blasts from 95 px, over all directions. */
-  function shotgunKills(satellites: number, blasts: number): { kills: number; cases: number; satellitesLeft: number } {
+describe('satellites under shotgun fire', () => {
+  /**
+   * `blasts` shotgun blasts from 95 px, over all directions: how often the owner dies,
+   * and how often a satellite is destroyed while its owner is still alive.
+   */
+  function shotgun(satellites: number, blasts: number): { kills: number; cases: number; destroyed: number } {
     let kills = 0;
     let cases = 0;
-    let satellitesLeft = 0;
+    let destroyed = 0;
     for (const from of DIRECTIONS) {
       for (const settle of [20, 90]) {
         const g = arena();
         const owner = guardedOwner(g, satellites, settle);
         aimAtOwner(g, 0, owner, from, 95, 'shotgun');
-        const deaths = run(g, 40, (slot, i) => slot === 0 && i % 4 === 0 && i < blasts * 4);
         cases++;
-        if (deaths.includes(`${OWNER}:tracer`)) kills++;
-        satellitesLeft += g.getBodyguards().length;
+        let lost = false;
+        for (let i = 0; i < 40 && g.phase === 'playing'; i++) {
+          g.tick(new Map<SlotIndex, TronInput>([[0, { steer: 0, action: i % 4 === 0 && i < blasts * 4 }]]));
+          g.items.length = 0;
+          const deaths = (g.serialize().deaths ?? []).map(d => `${d.slotIndex}:${d.cause}`);
+          if (deaths.includes(`${OWNER}:tracer`)) {
+            kills++;
+            break;
+          }
+          if (g.players[OWNER]!.alive && g.getBodyguards().length < satellites) lost = true;
+        }
+        if (lost) destroyed++;
       }
     }
-    return { kills, cases, satellitesLeft };
+    return { kills, cases, destroyed };
   }
 
-  it('one shotgun blast is absorbed, at a cost', () => {
-    const { kills, cases, satellitesLeft } = shotgunKills(1, 1);
-    expect(kills).toBeLessThanOrEqual(cases * 0.15);
-    expect(satellitesLeft).toBeGreaterThanOrEqual(cases - kills);
+  it('one blast is stopped more often than not', () => {
+    const { kills, cases } = shotgun(1, 1);
+    expect(kills).toBeLessThan(cases / 2);
   });
 
-  it('repeated blasts overwhelm a satellite', () => {
-    const two = shotgunKills(1, 2);
-    expect(two.kills).toBeGreaterThan(two.cases * 0.3);
-    const three = shotgunKills(1, 3);
-    expect(three.kills).toBe(three.cases);
+  it('sustained fire overwhelms a lone satellite without destroying it', () => {
+    const { kills, cases, destroyed } = shotgun(1, 6);
+    expect(kills).toBeGreaterThan(cases * 0.75);
+    expect(destroyed).toBe(0);
   });
 
-  it('more satellites take more blasts', () => {
-    const three = shotgunKills(3, 3);
-    expect(three.kills).toBeLessThanOrEqual(three.cases * 0.15);
-    const six = shotgunKills(3, 6);
-    expect(six.kills).toBe(six.cases);
-    expect(six.satellitesLeft).toBeLessThan(six.cases); // most were destroyed on the way
+  it('three satellites hold out', () => {
+    const { kills, cases, destroyed } = shotgun(3, 6);
+    expect(kills).toBeLessThan(cases / 4);
+    expect(destroyed).toBe(0);
+  });
+
+  it('wears a satellite down by 10 points per pellet', () => {
+    let measured = 0;
+    for (const from of DIRECTIONS) {
+      const g = arena();
+      const owner = guardedOwner(g, 1, 20);
+      aimAtOwner(g, 0, owner, from, 95, 'shotgun');
+      run(g, 20, (slot, i) => slot === 0 && i === 0);
+      const satellite = g.getBodyguards()[0];
+      if (!satellite) continue; // The blast got through and the satellite went with its owner
+      measured++;
+      expect(satellite.hp).toBeLessThan(BODYGUARD_HP);
+      expect(satellite.hp).toBeGreaterThanOrEqual(BODYGUARD_HP - 300);
+      expect((BODYGUARD_HP - satellite.hp) % 10).toBe(0);
+    }
+    expect(measured).toBeGreaterThan(DIRECTIONS.length / 2);
   });
 });
