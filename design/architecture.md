@@ -1,699 +1,98 @@
 # Teratron Web - Architecture
 
-This document outlines the high-level architecture for the modern web implementation of Teratron.
+High-level architecture of the web revival of Teratron. Detailed designs:
 
-## Design Principles
+- [old-tron-design.md](./old-tron-design.md) — the original game (the reference for gameplay)
+- [local-and-ai.md](./local-and-ai.md) — sessions, local play, AI players, automated validation
+- [networking.md](./networking.md) — connectivity, rooms and lobby, netcode, resilience
+- [refactoring-proposal-effects-weapons.md](./refactoring-proposal-effects-weapons.md) — pending
+  proposal to split weapons/effects out of the simulation class
 
-1. **Faithful gameplay**: Preserve the core mechanics documented in [old-tron-design.md](./old-tron-design.md)
-2. **Multiplayer-first**: Network architecture designed from the ground up
-3. **Performance**: Maintain 60+ FPS in typical browsers
-4. **Simplicity**: Avoid over-engineering, focus on what's needed
-5. **Web-native**: Embrace modern web standards and practices
+## Principles
 
-## Technology Stack
+1. **Faithful gameplay**: mechanics follow the original (70 ticks/s, 750×600 arena, pixel
+   collisions, same items and weapons).
+2. **One simulation, many front ends**: the rules run identically in a local game, on a
+   network host, and headless in tests.
+3. **Static hosting only**: no game server. Multiplayer is peer-to-peer with host authority.
+4. **Simplicity**: vanilla TypeScript + Canvas 2D, a handful of small dependencies.
 
-### Core Technologies
+## Technology
 
-- **Language**: TypeScript
-  - Type safety for game state and network messages
-  - Better tooling and refactoring support
-  - Compiles to efficient JavaScript
+| Concern | Choice |
+|---------|--------|
+| Language / build | TypeScript (strict), Vite |
+| Rendering | Canvas 2D: off-screen level + trail canvases composited every frame |
+| Multiplayer transport | Trystero (WebRTC data channels, Nostr signaling), optional TURN |
+| Wire format | MessagePack with compact positional encodings |
+| Touch input | nipplejs joystick |
+| Tests | Vitest (headless simulation, bots, simulated network), Playwright-driven Chrome for e2e |
 
-- **Runtime**: Modern browsers (client-only, pure P2P)
-  - Use ES2020+ features
-  - Target evergreen browsers (Chrome, Firefox, Safari, Edge)
-
-### Rendering
-
-- **Canvas 2D API**
-  - Perfect for pixel-perfect 2D graphics
-  - Direct pixel manipulation for trails
-  - Good performance for our needs
-  - Simple API, no framework overhead
-
-**Why not WebGL?**
-- Canvas 2D is enough for pixel-based rendering
-- Simpler to implement pixel-perfect collision
-- Lower complexity, better maintainability
-- WebGL would be over-engineering for this use case
-
-### Frontend Framework
-
-**Recommendation: Minimal or no framework**
-- Use vanilla TypeScript + Canvas for game rendering
-- Optional: Lightweight library for UI (menu screens, lobby)
-  - Options: Preact, Lit, or vanilla Web Components
-  - Not critical path - can decide during implementation
-
-**Why minimal?**
-- Game loop doesn't benefit from React-style reactivity
-- Direct DOM manipulation is fine for menus
-- Reduces bundle size and complexity
-- Easier to optimize performance
-
-### Networking
-
-**Pure Peer-to-Peer with Trystero**
-
-Teratron uses a pure P2P architecture with Trystero for zero-cost, truly serverless multiplayer:
-- **Host-authority model**: One client runs authoritative game loop
-- **WebRTC direct connections**: Low latency P2P between players
-- **Decentralized signaling**: Uses Nostr/BitTorrent/MQTT for peer discovery (no single point of failure)
-- **Shareable room links**: Create/join rooms via URLs
-- **No servers at all**: Not even for signaling
-- **Cost:** $0/month
-- **Testing:** Two browser windows or two devices on the same network
-
-### Build Tools
-
-- **Vite**: Fast dev server and production builds
-  - Native ESM support
-  - TypeScript out of the box
-  - Fast HMR for development
-  - Simple configuration
-
-- **Package Manager**: npm
-  - Universal, comes with Node.js
-  - Simple setup for single-package project
-
-## System Architecture
-
-### High-Level Overview
+## Layers
 
 ```
-                    ┌──────────────────────────┐
-                    │ Server with static files │
-                    └───────────┬──────────────┘
-                                │ 
-                   ┌────────────┼────────────┐
-                   │            │            │
-                   ▼            ▼            ▼
-         ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-         │ Host Client │ │  Client 2   │ │  Client 3   │
-         │             │◄┼────────────►│ │             │
-         │ - Game Loop │ │ WebRTC P2P  │◄┤ WebRTC P2P  │
-         │ - Authority │ │             │ │             │
-         │ - Rendering │ │ - Rendering │ │ - Rendering │
-         └─────────────┘ └─────────────┘ └─────────────┘
-
-         All communication is direct P2P
-         No custom server needed - just static file hosting!
+screens/            MainMenu · LocalSetup · NetworkLobby          (DOM)
+game/TronGame       game screen: layout, InputManager, TronRenderer, sound, Ticker
+        │  GameSession interface
+game/session/       HostSession (authoritative; local games + network host, runs bots)
+                    GuestSession (prediction, dead reckoning, snapshots)
+        │  HostTransport / GuestTransport
+network/            RoomConnection (Trystero) · roomLogic (pure lobby rules)
+                    serialization · ice (TURN config) · LaggedTransport (debug)
+game/               TronGameState · TronPlayer · movement · PixelGrid · ItemLauncher
+game/ai/            BotController
 ```
 
-### Peer-to-Peer Model with Host Authority
-
-**Host Client (Authoritative)**
-- One client (first to create room) acts as authoritative host
-- Runs complete game logic locally
-- Broadcasts game state to all connected peers via WebRTC
-- Processes all inputs (own + received from peers)
-- Source of truth for game state
-
-**Guest Clients**
-- Connect to host via WebRTC
-- Send inputs to host
-- Receive state updates from host
-- Render game state locally
-
-**Why peer-to-peer with host authority?**
-- **Zero server costs**: No dedicated game servers needed
-- **Low latency**: Direct connections, no server hop for game data
-- **Perfect for 2–4 players**: WebRTC mesh scales well at this size
-- **Still authoritative**: Host prevents cheating, ensures consistency
-
-### Network Architecture
-
-**For detailed networking design, see: [networking.md](./networking.md)**
-
-Key features:
-- Room-based matchmaking with shareable links
-- Menu system for local vs networked games
-- Pre-game lobby with player management
-- Full protocol specification
-- State synchronization approach
-
-## Code Organization
-
-### Project Structure (Simplified!)
-
-```
-tron-revival/
-├── src/            # All TypeScript code (client-side only!)
-├── public/         # Static assets
-│   ├── assets/     # Graphics, sounds, fonts
-│   └── index.html
-│
-├── design/         # Design documents
-├── old-tron/       # Original game reference
-├── CLAUDE.md
-├── package.json    # Single package!
-├── tsconfig.json
-├── vite.config.ts
-└── README.md
-```
-
-### Key Modules
-
-See detailed designs:
-- [networking.md](./networking.md) - networking, menu system, and multiplayer protocol
-- [game-state.md](./game-state.md) *(to be created)* - State management
-- [rendering.md](./rendering.md) *(to be created)* - Canvas rendering approach
-- [collision.md](./collision.md) *(to be created)* - Pixel-perfect collision
-
-## Game Loop Architecture
-
-### Host Client Game Loop
-
-```typescript
-// Authoritative game loop runs on host client
-const TICK_RATE = 60; // Game updates per second
-const TICK_INTERVAL = 1000 / TICK_RATE;
-
-function hostGameTick() {
-  // 1. Process all player inputs (own + received from peers)
-  processAllInputs();
-
-  // 2. Update game state (authoritative)
-  updatePlayers();
-  updateProjectiles();
-  updateItems();
-  checkCollisions();
-
-  // 3. Broadcast state to all connected peers via WebRTC
-  broadcastGameStateToGuests();
-
-  // 4. Render locally
-  renderFrame();
-
-  // 5. Schedule next tick
-  setTimeout(hostGameTick, TICK_INTERVAL);
-}
-```
-
-### Guest Client Loop
-
-```typescript
-// Guest rendering loop (receives state from host)
-function guestLoop(timestamp) {
-  // 1. Send inputs to host via WebRTC
-  sendInputsToHost();
-
-  // 2. Apply client-side prediction for local player
-  predictLocalPlayer();
-
-  // 3. Interpolate state updates from host
-  interpolateGameState();
-
-  // 4. Render current frame
-  render();
-
-  // 5. Request next frame
-  requestAnimationFrame(guestLoop);
-}
-```
-
-**Decoupling:**
-- Host ticks at fixed rate (60 Hz) running game logic + rendering
-- Guests render at display refresh rate (60-144 Hz)
-- Guests interpolate between host state updates
-- Local input prediction makes controls feel responsive
-
-## State Management
-
-### Game State Structure
-
-```typescript
-interface GameState {
-  // Match info
-  matchId: string;
-  mapId: number;
-  mode: 'ffa' | 'team';
-  phase: 'waiting' | 'countdown' | 'playing' | 'results';
-
-  // Players
-  players: Map<PlayerId, PlayerState>;
-
-  // Entities
-  items: Map<ItemId, ItemState>;
-  projectiles: Map<ProjectileId, ProjectileState>;
-  portals: [Portal, Portal];
-  mapHazards: MapHazard[];
-
-  // Field state
-  trails: TrailMap; // Pixel data for collision
-
-  // Scores
-  scores: Map<PlayerId, number>;
-
-  // Timing
-  frameNumber: number;
-  timestamp: number;
-}
-```
-
-See [game-state.md](./game-state.md) for complete structure.
-
-### State Synchronization Strategy
-
-**Full state snapshots** (every N ticks):
-- Complete game state sent to clients
-- Used for synchronization and correction
-- Larger payload but guaranteed consistency
-
-**Delta updates** (between snapshots):
-- Only changed data sent
-- More efficient bandwidth usage
-- Requires reliable ordering
-
-**Hybrid approach** (recommended):
-- Full snapshot every 1-2 seconds
-- Delta updates at tick rate (60 Hz)
-- Clients can recover from missed packets
-
-## Rendering Strategy
-
-### Trail Rendering
-
-**Pixel-based approach:**
-- Use Canvas 2D `ImageData` for direct pixel manipulation
-- Each frame:
-  1. Get current pixel data
-  2. Draw new player positions as pixels
-  3. Draw other entities on top
-  4. Put pixel data back to canvas
-
-**Alternative: Sprite-based trails:**
-- Store trail segments as line primitives
-- Render using Canvas `stroke()` operations
-- May be faster but less faithful to original
-
-**Decision:** Start with pixel-based for authenticity, optimize if needed.
-
-### Layer System
-
-```
-┌─────────────────────────┐
-│  UI Layer (HUD/Text)    │  ← Canvas/DOM overlay
-├─────────────────────────┤
-│  Effects Layer          │  ← Explosions, particles
-├─────────────────────────┤
-│  Entity Layer           │  ← Players, items, projectiles
-├─────────────────────────┤
-│  Trail Layer            │  ← Pixel-based trails
-├─────────────────────────┤
-│  Background Layer       │  ← Static map background
-└─────────────────────────┘
-```
-
-**Implementation:**
-- Single canvas with multiple draw passes, OR
-- Multiple stacked canvases for optimization
-- Decision deferred to implementation
-
-See [rendering.md](./rendering.md) for details.
-
-## Collision Detection
-
-### Trail Collision
-
-**Pixel-perfect detection:**
-```typescript
-function checkCollision(x: number, y: number, playerColor: number): boolean {
-  const pixel = trailData.getPixel(x, y);
-
-  if (pixel === 0) return false; // Empty
-  if (pixel === playerColor && player.hasCrossing) return false;
-
-  return true; // Collision!
-}
-```
-
-**Optimization:**
-- Only check pixels where player actually moved
-- Use dirty rectangles for updated regions
-- Spatial partitioning if needed (unlikely for 750x600)
-
-### Entity Collision
-
-**Bounding box + pixel check:**
-- First pass: AABB collision between entities
-- Second pass: Pixel-perfect check if boxes overlap
-- Efficient for items, projectiles, hazards
-
-See [collision.md](./collision.md) for full algorithm.
-
-## Input Handling
-
-### All Clients (Local Input)
-
-```typescript
-interface Input {
-  frame: number;        // Client frame when input occurred
-  playerId: string;
-  action: 'left' | 'right' | 'fire';
-  pressed: boolean;
-  timestamp: number;
-}
-```
-
-**Input buffering (all clients):**
-- Queue inputs locally
-- Apply immediately for prediction
-- Keep history for reconciliation
-
-### Guest Clients → Host
-
-**Sending inputs:**
-- Send input to host via WebRTC data channel immediately
-- Use unreliable channel for responsiveness
-- Include sequence number for ordering
-
-### Host (Input Processing)
-
-**Input processing:**
-1. Receive inputs from all guests via WebRTC
-2. Combine with own inputs
-3. Validate (is player alive? is action legal?)
-4. Apply all inputs to authoritative game state
-5. Broadcast updated state to all guests
-
-**Anti-cheat (limited in P2P):**
-- Host validates inputs (basic sanity checks)
-- Rate limiting on input frequency
-- Note: Full anti-cheat harder in P2P (host could cheat)
-  - Acceptable for friendly games
-  - Could add peer validation later if needed
-
-## Networking Protocol
-
-**For complete protocol specification, see: [networking.md](./networking.md)**
-
-The networking protocol uses PeerJS for WebRTC connections with a simple message-based design:
-
-**Guest → Host messages:**
-- Join requests with player info
-- Player inputs (left/right/fire)
-- Ready status updates
-
-**Host → Guest messages:**
-- Full game state updates (60 Hz)
-- Player join/leave notifications
-- Game start/end events
-- Error messages
-
-All messages are sent as JavaScript objects over PeerJS data channels. See networking.md for complete message type definitions and protocol details.
-
-## Performance Considerations
-
-### Target Performance
-
-- **Client rendering**: 60 FPS minimum, 120+ ideal
-- **Host tick rate**: 60 Hz (matches original 70 FPS closely)
-- **Network latency**: Playable up to 100ms, good under 50ms (P2P is often better!)
-- **Bandwidth**: <30 KB/s per client (P2P, optimized)
-
-### Optimization Strategies
-
-**Rendering:**
-- Only redraw changed regions (dirty rectangles)
-- Reuse canvas contexts
-- Batch draw operations
-- Offscreen canvas for compositing
-
-**Networking:**
-- Delta compression for state updates
-- Binary protocol instead of JSON (if needed)
-- Adaptive update rate based on action intensity
-- Use unreliable data channels for non-critical data
-
-**Memory:**
-- Object pooling for projectiles, particles
-- Reuse arrays instead of allocating new ones
-- Clear old trails periodically (if memory becomes issue)
-
-### Scaling
-
-**Game size:** 2-4 players per room (matches original)
-
-**P2P Mesh topology:**
-- Works perfectly for small player counts
-- Each client connects to all others (mesh)
-- 4 players = 6 total connections (manageable)
-- No server bottleneck for game data
-
-**Trystero signaling:**
-- Uses decentralized networks (Nostr, BitTorrent, MQTT) for peer discovery
-- No single point of failure - if one network is down, others work
-- Once P2P connected, signaling network not actively used
-- Multiple fallback strategies built-in
-
-## Asset Pipeline
-
-### Graphics
-
-**Source format:** Original FPG files (Div2 format)
-**Target format:**
-- PNG spritesheets for items, UI elements
-- SVG for resolution-independent UI (optional)
-- Solid colors for trails (generated programmatically)
-
-**Conversion:**
-- Extract graphics from FPG using custom tool or manual export
-- Maintain original pixel art style (no smoothing/filtering)
-- Organize into logical spritesheets
-
-### Audio
-
-**Source format:** WAV files
-**Target format:**
-- Keep as WAV or convert to MP3/OGG for compression
-- Use Web Audio API for playback
-- Preload all sounds (small total size)
-
-### Fonts
-
-**Source format:** FNT files (Div2 format)
-**Target format:**
-- Bitmap font (PNG + JSON descriptor), or
-- Web font (WOFF2) if we redraw the fonts
-- Maintain retro look
-
-## Development Phases
-
-### Phase 1: Core Mechanics (Local)
-*Goal: Prove the core gameplay works in browser*
-
-- Single-player game loop
-- Basic rendering (trails, player movement)
-- Collision detection
-- One test map
-- Essential items (shield, crossing)
-- No networking
-
-**Deliverables:**
-- Playable single-player demo
-- Validated rendering approach
-- Performance baseline
-
-### Phase 2: Multiplayer Foundation
-*Goal: Get basic online play working*
-
-- Trystero integration with multiple signaling strategies
-- Room system (create/join via shareable links)
-- Host/guest architecture
-- Basic state synchronization
-- 2-player networked game
-- Simple prediction/interpolation
-
-**Deliverables:**
-- 2-player online demo via Trystero
-- P2P protocol working
-- Shareable room links
-- No server deployment needed!
-
-### Phase 3: Complete Feature Set
-*Goal: Implement all original game features*
-
-- All items and weapons
-- All maps and hazards
-- 4-player support
-- Team mode
-- Full UI (menus, results)
-- Audio integration
-
-**Deliverables:**
-- Feature-complete game
-- All original mechanics implemented
-
-### Phase 4: Polish & Optimization
-*Goal: Production-ready quality*
-
-- Performance optimization
-- Network optimization
-- Browser compatibility testing
-- UX improvements
-- Bug fixes
-- Deployment setup
-
-**Deliverables:**
-- Stable, polished game
-- Deployment documentation
-- Player-facing documentation
+Rules of the layering:
+
+- `game/` (except `TronGame`, `TronRenderer`, `SoundManager`, `Ticker`, `input/InputManager`)
+  has no DOM, audio, timers or `Math.random()`; randomness comes from an injected seedable
+  RNG. This is what makes headless, reproducible tests possible.
+- The game screen only knows the `GameSession` interface.
+- Network code never contains game rules; `roomLogic.ts` contains lobby rules without any
+  networking, so it is unit-testable.
+
+## Simulation
+
+- Fixed timestep: `TICK_RATE = 70`. `Ticker` drives `session.step()` from
+  `requestAnimationFrame` with an accumulator; a network host keeps ticking in a hidden tab
+  through a Web Worker timer.
+- `TronGameState.tick(inputs)` advances one tick; `serialize()` returns the frame: the state
+  to draw plus **one-shot events** (new trail pixels, cleared pixels, sounds, deaths, round
+  start…). Events must be applied exactly once, in order — the session's `onFrame` callback
+  guarantees that for hosts and guests alike.
+- Collision map: `PixelGrid`, a typed array of palette indices (plus coarse 8 px occupancy
+  used by bots). The pristine level is kept separately and restored at round start and by
+  the Eraser item; weapons damage the live grid, and the renderer shows the damage.
+- Movement rules shared between host and guest prediction live in `movement.ts`.
+
+## Rendering
+
+`TronRenderer` keeps two off-screen canvases — level and trails — and composites them with
+portals, items, projectiles, explosions, bodyguards, heads, the sidebar and overlays each
+display frame. Trails are persistent pixels; provisional (predicted) trail pixels are drawn
+on top every frame without being stored.
+
+## Multiplayer in one paragraph
+
+The host simulates; guests send sequence-numbered inputs and receive a compact state every
+tick. Guests predict their own player by replaying unacknowledged inputs on top of the
+latest host state, and extrapolate the others, so steering is immediate at any latency.
+Rooms use Trystero's synchronised state; identities are stable per tab, so reloads rejoin.
+See [networking.md](./networking.md).
+
+## Testing strategy
+
+| Level | What | Where |
+|-------|------|-------|
+| Rules | Scripted situations, seeded fuzz on real levels, determinism | `tests/rules.test.ts` |
+| Bots | Seeded bot-vs-bot matches with quality thresholds | `tests/bots.test.ts`, `npm run sim` |
+| Netcode | Host+guest over a simulated link (latency, jitter, drift) | `tests/netcode.test.ts` |
+| Lobby | Seat reconciliation, authority, game config | `tests/room.test.ts` |
+| End to end | Two headless Chromes through real signaling (and TURN) | `npm run test:e2e` |
 
 ## Deployment
 
-### Hosting (Incredibly Simple!)
-
-**Client (Static Files) - That's It!**
-- Static hosting (Vercel, Netlify, GitHub Pages, Cloudflare Pages)
-- CDN distribution for global reach
-- Simple build: `npm run build` → static files
-- **Cost: FREE**
-
-**No Server Needed!**
-- Trystero uses decentralized networks for signaling (Nostr, BitTorrent, MQTT)
-- No backend code to deploy
-- No databases to manage
-- No server monitoring
-
-### Infrastructure
-
-```
-                    ┌──────────────┐
-   Players ────────►│  CDN/Static  │ (Just HTML/CSS/JS)
-                    │  Hosting     │
-                    └──────┬───────┘
-                           │
-                           ▼
-              ┌─────────────────────────┐
-              │   Trystero Signaling    │
-              │  (Decentralized)        │
-              │  Nostr / BitTorrent /   │
-              │  MQTT relays            │
-              └───────────┬─────────────┘
-                          │
-                   (Peer discovery only)
-                          │
-                          ▼
-              ┌────────────────────────┐
-              │   WebRTC P2P Mesh      │
-              │  (Direct connections)  │
-              │  Player 1 ↔ Player 2   │
-              │  Player 1 ↔ Player 3   │
-              │  Player 2 ↔ Player 3   │
-              └────────────────────────┘
-```
-
-**Deployment Options (all FREE!):**
-
-1. **GitHub Pages** (easiest)
-   ```bash
-   npm run build
-   npm run deploy  # Pushes to gh-pages branch
-   # Done! Live at: https://username.github.io/tron-revival
-   ```
-
-2. **Vercel** (automatic)
-   - Connect GitHub repo
-   - Auto-deploys on push
-   - Custom domain support
-   - https://tron-revival.vercel.app
-
-3. **Netlify** (drag & drop)
-   - Drag dist/ folder
-   - Or connect Git repo
-   - https://tron-revival.netlify.app
-
-**Total infrastructure cost: $0/month** 🎉
-
-### Configuration
-
-```typescript
-import { joinRoom } from 'trystero/nostr'; // or /torrent, /mqtt
-
-// Minimal config - Trystero handles signaling automatically
-const config = {
-  appId: 'teratron-game', // Unique app identifier
-
-  // Optional: Custom relay URLs for better reliability
-  // relayUrls: ['wss://relay.example.com'],
-
-  // Optional: TURN servers for restrictive NATs
-  rtcConfig: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      // Add TURN servers for better connectivity
-    ]
-  }
-};
-```
-
-**No environment variables needed!** Trystero uses public relays by default.
-
-## Open Questions
-
-These will be resolved during implementation:
-
-1. **Host update rate:** 30 Hz, 60 Hz, or adaptive?
-2. **State snapshot frequency:** How often to send full state vs deltas?
-3. **Trystero strategy:** Nostr (default), BitTorrent, or MQTT? Or fallback chain?
-4. **Client prediction scope:** Predict just local player, or all entities?
-5. **Data format:** JSON (easier to debug) or binary (more efficient)?
-6. **Multiple canvas layers:** Single or multiple canvases?
-7. **Asset loading strategy:** Preload all, or lazy load by map?
-8. **Browser testing scope:** How far back do we support? (probably just evergreen)
-9. **Host migration:** What happens if host disconnects? (probably just end game for MVP)
-10. **TURN servers:** Use free public TURN or set up dedicated ones for reliability?
-
-## Next Steps
-
-1. Create detailed design documents:
-   - [x] `networking.md` - Trystero P2P protocol and synchronization
-   - [ ] `game-state.md` - Complete state structure and transitions
-   - [ ] `rendering.md` - Canvas rendering implementation
-   - [ ] `collision.md` - Collision detection algorithms
-
-2. Set up project:
-   - [ ] `npm create vite@latest . -- --template vanilla-ts`
-   - [ ] `npm install trystero`
-   - [ ] Set up folder structure (src/game, src/render, src/network, etc.)
-   - [ ] Configure TypeScript (strict mode)
-
-3. Begin Phase 1 implementation:
-   - [ ] Basic game loop (single player / local multiplayer first)
-   - [ ] Player movement
-   - [ ] Trail rendering
-   - [ ] Collision detection
-
-## Summary of Pure P2P Architecture Benefits
-
-**Cost savings:**
-- **Zero infrastructure costs** - no servers at all!
-- Free static hosting (GitHub Pages, Vercel, Netlify)
-- Trystero uses decentralized networks for signaling (free!)
-- Total: **$0/month** to run
-
-**Simplicity:**
-- **Single TypeScript codebase** - no backend code
-- One package.json, one build command
-- No server deployment, monitoring, or maintenance
-- Just: `npm run build` → upload to static host → done!
-
-**Performance:**
-- Lower latency (direct P2P connections, no server hop)
-- No server bottleneck for game data
-- Scales naturally (each game is independent)
-
-**Developer Experience:**
-- All code in one language (TypeScript)
-- No API contracts to maintain
-- Simpler debugging (all code runs in browser)
-- Faster iteration (no server restarts)
-
-**Tradeoffs (acceptable for this game):**
-- Host can theoretically cheat → Fine for friendly games
-- Host leaving ends game → Add migration later if needed
-- Limited to 2-4 players → Perfect for our game design!
-- Relies on public relays → Multiple fallback strategies available
-
-**This is the ideal architecture for a small multiplayer game like Teratron!**
+`npm run build` produces static files (`dist/`); `npm run deploy` publishes them to GitHub
+Pages. TURN credentials are provided at build time through environment variables (see
+networking.md and `.env.example`).

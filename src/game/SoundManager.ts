@@ -8,7 +8,8 @@ export type PickupSound = typeof PICKUP_SOUNDS[number];
 export const USE_SOUNDS = ['glock', 'rifle', 'shotgun', 'uzi', 'bomb', 'explosion', 'alarm', 'slow', 'turbo'] as const;
 export type UseSound = typeof USE_SOUNDS[number];
 
-// All sound names
+// All sound names (the list only exists to derive the type)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const SOUND_NAMES = [
   'round_start', 'laughs', 'teleport', 'drill', 'panico',
   ...PICKUP_SOUNDS,

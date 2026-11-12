@@ -169,12 +169,20 @@ Design: `design/networking.md` (rewritten)
 - [ ] Show "host disconnected, waiting…" overlay inside the game (currently only in the lobby
       and the console)
 
-## Iteration 6 — Tooling & dependencies
+## Iteration 6 — Tooling & dependencies  ✅
 
-- [ ] Bump vite, typescript, nipplejs, tex packer; drop nanoid
-- [ ] ESLint (typescript-eslint) + `npm run lint`
-- [ ] GitHub Actions: typecheck + test + build on PR; Pages deploy on main
-- [ ] Refresh `architecture.md` and README (T9)
+- [x] Vite 6 → 8, Vitest 5, TypeScript 5.6 → 6.0 (TS 7's native compiler works for `tsc` but
+      breaks the TypeScript language-server plugin, so it is not used yet)
+- [x] Trystero 0.27; nanoid removed; bundle 557 kB → 369 kB
+- [x] ESLint (typescript-eslint) + `npm run lint`
+- [x] GitHub Actions CI: lint, typecheck, tests, build
+- [x] Rewrote `architecture.md`; README updated (T9)
+- [ ] nipplejs 0.10 → 1.0 (API changed; needs testing on a real touch device) or replace it
+      with a small pointer-event joystick
+- [ ] Remaining `npm audit` findings are dev-only: `free-tex-packer-core` (sprite build
+      script) and `node-turn` (local TURN server used by the e2e test)
+- [ ] Deploy from CI (GitHub Pages action) with the TURN settings as repository secrets
+- [ ] Run `npm run test:e2e` in CI (needs Chrome and outbound WebSocket/UDP)
 
 ## Room & session robustness (requested)  ✅
 
@@ -195,8 +203,16 @@ Design: `design/networking.md` (rewritten)
 - [x] Sidebar: desaturate a player's panel halfway to black-and-white while they are dead, and
       fully black-and-white for slots that are not playing
 - [x] Round summary shows how each player died
-- [ ] Level 8: automatic doors are not implemented yet (check `old-tron/` source and
-      `old-tron-design.md` for the original behaviour; design doc first)
+- [ ] Level 8 ("Portals", original map 207 *Bandas*): automatic doors are not implemented.
+      Original behaviour (`old-tron/TRON.PRG`, `PROCESS Banda`): up to 6 doors at the map's
+      control points, even-numbered ones rotated 90°; cycle closed 200 frames → opening 30 →
+      open 200 → closing 30 (graphs 30–39 of the map FPG); touching a door kills. Needs: the
+      door sprites and control points extracted from `TRON.FPG`, a design doc section, sim
+      support (deterministic, in snapshots), bots treating doors as hazards
+- [ ] The other two original map hazards are missing too: the dentist's hand on level 6
+      (*Mano*: chases to control points, kills on contact, drill sound; sprite already in
+      `sprites-source/dentist_hand.png`) and random shell bursts on level 7 (*Guerra*: 1/200
+      chance per frame of 30 pellets between two control points)
 
 ## Open reports
 

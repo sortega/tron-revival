@@ -17,7 +17,7 @@ export default defineConfig({
     https,
   },
   build: {
-    target: 'ES2020',
+    target: 'es2020',
   },
   test: {
     include: ['tests/**/*.test.ts'],

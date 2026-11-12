@@ -1561,7 +1561,7 @@ export class TronGameState {
     for (const item of this.items) {
       if (!item.active) continue;
 
-      let collision = false;
+      let collision: boolean;
 
       if (item.mystery) {
         // Triangular collision for mystery items (triangle pointing up)
@@ -1673,7 +1673,7 @@ export class TronGameState {
 
     // Generate random permutation (Fisher-Yates shuffle)
     // When color blindness is active, "no swap" is also an option (include identity permutation)
-    let permutation = positions.map((_, i) => i);
+    const permutation = positions.map((_, i) => i);
 
     if (hasColorBlindness) {
       // With color blindness, there's a 1/(n+1) chance of no swap at all
