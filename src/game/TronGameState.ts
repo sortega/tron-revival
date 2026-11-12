@@ -306,14 +306,18 @@ export class TronGameState {
     this.frameSoundEvents.push({ sound: '', stopLoop: loopKey });
   }
 
-  private recordDeath(player: TronPlayer, cause: DeathCause): void {
-    this.frameDeaths.push({ slotIndex: player.slotIndex, cause, x: player.getScreenX(), y: player.getScreenY() });
+  // `by`: the slot of whoever is responsible (NO_OWNER for the level), if anybody
+  private recordDeath(player: TronPlayer, cause: DeathCause, by?: number): void {
+    this.frameDeaths.push({
+      slotIndex: player.slotIndex, cause, x: player.getScreenX(), y: player.getScreenY(),
+      ...(by !== undefined && { by }),
+    });
   }
 
   // Kill a player and handle ridiculous death if applicable
-  private killPlayerWithSound(player: TronPlayer, isRidiculousDeath: boolean, cause: DeathCause): void {
+  private killPlayerWithSound(player: TronPlayer, isRidiculousDeath: boolean, cause: DeathCause, by?: number): void {
     player.kill();
-    this.recordDeath(player, cause);
+    this.recordDeath(player, cause, by);
     if (isRidiculousDeath) {
       const count = (this.ridiculousDeaths.get(player.slotIndex) || 0) + 1;
       this.ridiculousDeaths.set(player.slotIndex, count);
@@ -506,8 +510,11 @@ export class TronGameState {
           const isProtected = hasShield || (hasCrossing && isOwnColor);
 
           if (!isProtected) {
+            // Whose trail it was is only known in free-for-all: team-mates share a colour
+            const trailOwner = this.gameMode === 'ffa' ? this.players.find(p => p.color === pixelOwner) : undefined;
             this.killPlayerWithSound(player, isOwnColor,
-              isOwnColor ? 'own-trail' : this.players.some(p => p.color === pixelOwner) ? 'trail' : 'level');
+              isOwnColor ? 'own-trail' : this.players.some(p => p.color === pixelOwner) ? 'trail' : 'level',
+              isOwnColor ? undefined : trailOwner?.slotIndex);
             continue;
           }
         }
@@ -552,8 +559,8 @@ export class TronGameState {
             const p1HasShield = p1.hasEffect('shield');
             const p2HasShield = p2.hasEffect('shield');
 
-            if (!p1HasShield) { p1.kill(); this.recordDeath(p1, 'crossing'); }
-            if (!p2HasShield) { p2.kill(); this.recordDeath(p2, 'crossing'); }
+            if (!p1HasShield) { p1.kill(); this.recordDeath(p1, 'crossing', p2.slotIndex); }
+            if (!p2HasShield) { p2.kill(); this.recordDeath(p2, 'crossing', p1.slotIndex); }
 
             if (!p1HasShield || !p2HasShield) {
               this.queueSound('laughs');
@@ -966,6 +973,19 @@ export class TronGameState {
             Math.round(unwrappedY + Math.sin(dirRad) * this.BOMB_HALF_LENGTH),
             this.BOMB_HALF_WIDTH)
         : this.checkLineCollision(prevX, prevY, unwrappedX, unwrappedY);
+      if (impactPoint && proj.type === 'tracer') {
+        // A head reached before the solid pixel is hit first: a tracer meeting a player
+        // head-on must not be swallowed by the trail right behind that head
+        const length = Math.hypot(unwrappedX - prevX, unwrappedY - prevY);
+        const pixelT = length > 0 ? Math.hypot(impactPoint.rawX - prevX, impactPoint.rawY - prevY) / length : 0;
+        const guard = this.findBlocker(proj, prevX, prevY, unwrappedX, unwrappedY);
+        const before = Math.min(pixelT, guard ? guard.t : Infinity);
+        const ownerSafe = (proj.ownerCooldown ?? 0) > 1;
+        if (this.strikePlayerOnPath(proj, prevX, prevY, unwrappedX, unwrappedY, before, false, ownerSafe)) {
+          toRemove.push(proj.id);
+          continue;
+        }
+      }
       if (impactPoint) {
         if (proj.type === 'bullet') {
           this.projectileImpact(impactPoint.x, impactPoint.y, proj.ownerSlot);
@@ -1019,48 +1039,9 @@ export class TronGameState {
         blocker ? blocker.t : Infinity, tracerHit ? tracerHit.t : Infinity, bombHit ? bombHit.t : Infinity
       );
 
-      // Check collision with players (shield does NOT protect!)
-      // Skip player collisions during waiting_ready phase (round is over, let bullets fly visually)
-      let hitPlayer = false;
-      if (this.phase !== 'waiting_ready') {
-        // Bomb uses direct impact radius (like bullets), not the kill radius
-        const killRadius = this.BULLET_KILL_RADIUS;
-        for (const player of this.players) {
-          if (!player.alive) continue;
-          // Skip owner during cooldown period
-          if (skipOwner && player.slotIndex === proj.ownerSlot) continue;
-          const px = player.getScreenX();
-          const py = player.getScreenY();
-          // A bomb collides as a box; the others by distance to the path travelled.
-          // A satellite earlier on the path saves the player.
-          let hit: boolean;
-          if (proj.type === 'bomb') {
-            hit = !blocker && this.bombCovers(proj, px, py, this.BOMB_PLAYER_MARGIN);
-          } else {
-            if (proj.type === 'tracer') {
-              // A tracer kills when its path passes through the 3x3 pixels around the head
-              const t = this.pathEntersBox(px, py, this.TRACER_KILL_REACH, prevX, prevY, unwrappedX, unwrappedY);
-              hit = t !== null && t < stopT;
-            } else {
-              const closest = this.closestOnPath(px, py, prevX, prevY, unwrappedX, unwrappedY);
-              hit = closest.dist < killRadius && closest.t < stopT;
-            }
-          }
-          if (hit) {
-            if (proj.type === 'bullet') {
-              this.projectileImpact(px, py, proj.ownerSlot);
-            } else if (proj.type === 'bomb') {
-              this.bombImpact(px, py, proj.ownerSlot);
-            } else {
-              this.tracerExpire(px, py);
-              this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot, 'tracer');
-            }
-            toRemove.push(proj.id);
-            hitPlayer = true;
-            break;
-          }
-        }
-      }
+      // Check collision with players
+      const hitPlayer = this.strikePlayerOnPath(proj, prevX, prevY, unwrappedX, unwrappedY, stopT, blocker !== null, skipOwner);
+      if (hitPlayer) toRemove.push(proj.id);
       if (hitPlayer) continue;
       if (bombHit && bombHit.t <= stopT) {
         // Any shot sets the bomb off where it is, as a tracer did in the original
@@ -1260,6 +1241,47 @@ export class TronGameState {
     }
 
     return null;
+  }
+
+  // Does the projectile hit a player on the path it travels this tick, before `stopT`
+  // (how far along the path something else stops it)? If so the hit is carried out —
+  // explosion, blast or kill — and the caller removes the projectile.
+  private strikePlayerOnPath(
+    proj: Projectile, x0: number, y0: number, x1: number, y1: number,
+    stopT: number, bombBlocked: boolean, skipOwner: boolean
+  ): boolean {
+    // Not once the round is over: shots still in the air are frozen anyway
+    if (this.phase === 'waiting_ready') return false;
+    for (const player of this.players) {
+      if (!player.alive) continue;
+      // The owner is safe from a shot on its way out
+      if (skipOwner && player.slotIndex === proj.ownerSlot) continue;
+      const px = player.getScreenX();
+      const py = player.getScreenY();
+      let hit: boolean;
+      if (proj.type === 'bomb') {
+        // A bomb collides as a box
+        hit = !bombBlocked && this.bombCovers(proj, px, py, this.BOMB_PLAYER_MARGIN);
+      } else if (proj.type === 'tracer') {
+        // A tracer kills when its path passes through the 3x3 pixels around the head
+        const t = this.pathEntersBox(px, py, this.TRACER_KILL_REACH, x0, y0, x1, y1);
+        hit = t !== null && t < stopT;
+      } else {
+        const closest = this.closestOnPath(px, py, x0, y0, x1, y1);
+        hit = closest.dist < this.BULLET_KILL_RADIUS && closest.t < stopT;
+      }
+      if (!hit) continue;
+      if (proj.type === 'bullet') {
+        this.projectileImpact(px, py, proj.ownerSlot);
+      } else if (proj.type === 'bomb') {
+        this.bombImpact(px, py, proj.ownerSlot);
+      } else {
+        this.tracerExpire(px, py);
+        this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot, 'tracer', proj.ownerSlot);
+      }
+      return true;
+    }
+    return false;
   }
 
   // The first flying bomb whose body a bullet's or tracer's path crosses this tick
@@ -1523,7 +1545,7 @@ export class TronGameState {
       const dist = Math.sqrt((px - x) ** 2 + (py - y) ** 2);
       if (dist < this.BULLET_KILL_RADIUS) {
         const isSelfKill = ownerSlot !== undefined && player.slotIndex === ownerSlot;
-        this.killPlayerWithSound(player, isSelfKill, 'bullet');
+        this.killPlayerWithSound(player, isSelfKill, 'bullet', ownerSlot);
       }
     }
 
@@ -1567,7 +1589,7 @@ export class TronGameState {
       if (!player.alive) continue;
       if (within(player.getScreenX(), player.getScreenY(), this.BOMB_KILL_RADIUS * scale)) {
         const isSelfKill = ownerSlot !== undefined && player.slotIndex === ownerSlot;
-        this.killPlayerWithSound(player, isSelfKill, 'bomb');
+        this.killPlayerWithSound(player, isSelfKill, 'bomb', ownerSlot);
       }
     }
     for (const item of this.items) {
@@ -2216,7 +2238,7 @@ export class TronGameState {
             if (!player.alive || this.bodyguardSpares(bg, player.slotIndex)) continue;
             const dist = this.distanceToPath(player.getScreenX(), player.getScreenY(), path.x0, path.y0, path.x1, path.y1);
             if (dist < this.BODYGUARD_KILL_RADIUS) {
-              this.killPlayerWithSound(player, false, 'bodyguard');
+              this.killPlayerWithSound(player, false, 'bodyguard', bg.ownerSlot);
             }
           }
         }

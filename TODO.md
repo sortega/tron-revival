@@ -205,7 +205,8 @@ Design: `design/networking.md` (rewritten)
 - [x] Team mode: the Slow weapon does not slow team-mates
 - [x] Team mode: every survivor scores, team score = sum, shown as the headline between
       rounds (`design/teams.md`)
-- [x] Round summary shows how each player died
+- [x] Round summary shows how each player died and who did it (`DeathEvent.by`), aligned
+      under the name
 - [x] Level 8 ("Portals"): automatic doors, as in the original (geometry, placement and
       timing taken from `TRON.FPG` / `TRON.PRG`); they kill on contact even through a shield,
       gate the wrap-around, and bots time their crossings. See `design/level-hazards.md`
@@ -239,6 +240,7 @@ Rules: `design/projectiles.md`.
 - [x] Tracers kill within the 3×3 pixels around a head, as in the original (was 1×1):
       and the rifle bursts every 15 ticks instead of 20 (8.5 s of fire): sustained rifle
       fire kills 77 % of right-angle crossings instead of 37 %
+- [x] A tracer meeting a player head-on was swallowed by the trail right behind the head
 - [x] A single tracer or bullet crossing a flying H-bomb sets it off (whole-path test)
 - [x] A tracer hitting something on the tick it wraps erased a line across the whole arena
 - [x] H-bomb blast is a circle (cleared area, players, items, satellites)

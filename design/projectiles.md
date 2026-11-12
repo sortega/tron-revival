@@ -10,7 +10,9 @@ Every tick a projectile moves from its previous position to a new one. In this o
 
 1. **Portals** teleport it.
 2. **Solid pixels** (trails, scenery) on the path stop it: a bullet or bomb explodes there, a
-   tracer erases the path up to that point and dies.
+   tracer erases the path up to that point and dies. A tracer that reaches a player's head
+   before the solid pixel hits the player instead: one meeting a player head-on is not
+   swallowed by the trail right behind that head.
 3. **Players**: an alive player whose head is close enough to the path is hit. The owner is
    immune for the first 10 ticks so a shot does not hit its own shooter on the way out.
 4. **Items**, then **other projectiles**.
@@ -57,7 +59,7 @@ Players crossing an established line of fire, measured over 435 positions and ti
 
 | Crossing | Killed |
 |----------|--------|
-| At a right angle | 77 % |
+| At a right angle | 83 % |
 | At 45° | 74 % |
 | At 20° (spends longer near the line) | 93 % |
 | At a right angle with Turbo | 66 % |
@@ -72,7 +74,8 @@ figure was built up here:
 | 1 × 1 hit test, burst every 20 ticks (until Nov 2026) | 37 % | 11 s |
 | 3 × 3 hit test, burst every 20 ticks | 57 % | 11 s |
 | 3 × 3, burst every 20 ticks, tracers on consecutive ticks | 38 % | 11 s |
-| **3 × 3 hit test, burst every 15 ticks (current)** | **77 %** | **8.5 s** |
+| 3 × 3 hit test, burst every 15 ticks | 77 % | 8.5 s |
+| **…and a head is hit before the trail behind it (current)** | **83 %** | **8.5 s** |
 
 ## Bullets against tracers
 

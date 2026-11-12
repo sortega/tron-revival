@@ -707,8 +707,8 @@ export class TronGame implements Screen {
     if (state.deaths) {
       for (const d of state.deaths) {
         const name = this.config.players.find(p => p.slotIndex === d.slotIndex)?.nickname ?? d.slotIndex;
-        console.info(`[game] ${name} died: ${d.cause} at ${d.x},${d.y}`);
-        renderer.recordDeath(d.slotIndex, d.cause);
+        console.info(`[game] ${name} died: ${d.cause}${d.by !== undefined ? ` by slot ${d.by}` : ''} at ${d.x},${d.y}`);
+        renderer.recordDeath(d.slotIndex, d.cause, d.by);
       }
     }
     if (state.ridiculousDeathSlots) {

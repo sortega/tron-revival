@@ -88,6 +88,20 @@ time or ammunition left. A player who dies **loses the weapon and effects** (in 
 simulation, not just on screen) and the panel turns grey, like the panel of a slot nobody
 plays in. In team mode the panels use the team colours ([teams.md](./teams.md)).
 
+The round summary lists, under each dead player's name, how they died and **who did it**.
+Every death is a one-shot event `{slotIndex, cause, x, y, by?}`; `by` is the slot of the
+player responsible, which can be the victim:
+
+| Cause | `by` | Shown as |
+|-------|------|----------|
+| `tracer` | whoever fired it (`-1` for a level gun) | *shot by Ana* · *shot by their own bullet* · *shot by the level* |
+| `bullet` | whoever fired the Glock bullet — after bouncing off a satellite, the satellite's owner | *blown up by Ana* · *blown up by their own bullet* |
+| `bomb` | whoever launched the H-bomb, also when someone else set it off (none when two bombs collide) | *bombed by Ana* · *bombed by their own bomb* |
+| `bodyguard` | the satellite's owner | *killed by Ana's satellite* |
+| `trail` | the owner of the trail, in free-for-all (team-mates share a colour) | *crashed into Ana's trail* |
+| `crossing` | the other player | *head-on collision with Ana* |
+| `own-trail`, `level`, `door` | — | *crashed into their own trail*, … |
+
 ## Multiplayer in one paragraph
 
 The host simulates; guests send sequence-numbered inputs and receive a compact state every

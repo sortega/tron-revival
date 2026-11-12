@@ -2,6 +2,8 @@
 
 import type { GameMode, SlotIndex } from '../types/lobby';
 import { FFA_COLORS, TEAM_COLORS, getSlotColor, getSlotColorName } from '../types/lobby';
+import { NO_OWNER } from '../types/game';
+import { describeDeath } from './deathLabels';
 import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard, DeathCause } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
@@ -14,18 +16,6 @@ import { DOOR_LENGTH, DOOR_THICKNESS, doorFrame } from './doors';
 import type { DoorDefinition } from './doors';
 import { HAND_SPRITE, underHand } from './hand';
 import type { HandView } from './hand';
-
-const DEATH_LABELS: Record<DeathCause, string> = {
-  'trail': 'crashed into a trail',
-  'own-trail': 'crashed into their own trail',
-  'level': 'crashed into the scenery',
-  'crossing': 'head-on collision',
-  'bullet': 'blown up',
-  'tracer': 'shot',
-  'bomb': 'bombed',
-  'bodyguard': 'killed by a satellite',
-  'door': 'crushed by a door',
-};
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
@@ -60,7 +50,7 @@ export class TronRenderer {
   private ridiculousDeathSlots: Set<SlotIndex> = new Set();
 
   // Why each player died this round (shown on the round summary)
-  private deathCauses: Map<SlotIndex, DeathCause> = new Map();
+  private deathCauses: Map<SlotIndex, { cause: DeathCause; by?: number }> = new Map();
 
   // Color blindness effect state
   private colorBlindnessFrames: number = 0;  // Remaining frames (used for color cycling and sprite position)
@@ -414,8 +404,8 @@ export class TronRenderer {
   }
 
   // Remember why a player died, to show it on the round summary
-  recordDeath(slotIndex: SlotIndex, cause: DeathCause): void {
-    this.deathCauses.set(slotIndex, cause);
+  recordDeath(slotIndex: SlotIndex, cause: DeathCause, by?: number): void {
+    this.deathCauses.set(slotIndex, { cause, by });
   }
 
   // Trigger ridiculous death display for a player
@@ -867,12 +857,17 @@ export class TronRenderer {
       }
       this.ctx.fillText(nickname, nicknameX, y);
 
-      // How the player died this round
-      const cause = this.deathCauses.get(player.slotIndex);
-      if (cause && roundWinner !== null) {
+      // How the player died this round and who did it, under the name itself (the
+      // emoji in front of it is not the same width everywhere)
+      const death = this.deathCauses.get(player.slotIndex);
+      if (death && roundWinner !== null) {
+        const killer = death.by === undefined ? null
+          : this.players.find(p => p.slotIndex === death.by)?.nickname ?? null;
+        const label = describeDeath(death.cause, killer, death.by === player.slotIndex, death.by === NO_OWNER);
+        const indent = this.ctx.measureText(emoji).width;
         this.ctx.fillStyle = '#777';
         this.ctx.font = '11px monospace';
-        this.ctx.fillText(DEATH_LABELS[cause], nicknameX + 28, y + 13);
+        this.ctx.fillText(label, nicknameX + indent, y + 13);
         this.ctx.font = '20px monospace';
       }
 

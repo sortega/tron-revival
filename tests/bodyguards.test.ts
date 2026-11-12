@@ -88,17 +88,23 @@ describe('satellites block projectiles', () => {
         aimAtOwner(g, 0, owner, from, 150, 'glock');
         let returned = false;
         const deaths: string[] = [];
+        const killers: (number | undefined)[] = [];
         for (let i = 0; i < 60 && g.phase === 'playing'; i++) {
           g.tick(new Map<SlotIndex, TronInput>([[0, { steer: 0, action: i === 0 }]]));
           g.items.length = 0;
           // After the bounce the bullet belongs to the satellite's owner
           if (g.getProjectiles().some(p => p.type === 'bullet' && p.ownerSlot === OWNER)) returned = true;
-          for (const d of g.serialize().deaths ?? []) deaths.push(`${d.slotIndex}:${d.cause}`);
+          for (const d of g.serialize().deaths ?? []) {
+            deaths.push(`${d.slotIndex}:${d.cause}`);
+            killers.push(d.by);
+          }
         }
         const label = `from ${from.toFixed(1)}, settle ${settle}`;
         expect(returned, label).toBe(true);
-        // The shooter kept driving down the line of fire, and so into its own bullet
+        // The shooter kept driving down the line of fire, and so into its own bullet,
+        // which now counts as the satellite owner's
         expect(deaths, label).toEqual(['0:bullet']);
+        expect(killers, label).toEqual([OWNER]);
         expect(g.getBodyguards().length).toBe(1);
       }
     }

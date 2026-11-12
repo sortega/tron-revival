@@ -52,6 +52,8 @@ export interface DeathEvent {
   cause: DeathCause;
   x: number;
   y: number;
+  /** Slot of the player responsible (can be the victim); NO_OWNER for the level. */
+  by?: number;
 }
 
 // Projectile type: 'bullet' = Glock (explodes on impact), 'tracer' = Rifle (clears trail, has lifespan), 'bomb' = heavy missile

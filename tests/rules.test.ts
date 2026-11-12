@@ -6,6 +6,7 @@ import { PLAY_WIDTH, PLAY_HEIGHT, READY_LOCK_TICKS } from '../src/game/constants
 import type { SlotIndex } from '../src/types/lobby';
 import type { TronInput } from '../src/types/game';
 import { inputs, loadLevelGrid, makeGame, place, skipCountdown } from './helpers';
+import { describeDeath } from '../src/game/deathLabels';
 
 function wallLevel(): PixelGrid {
   const level = new PixelGrid();
@@ -101,6 +102,88 @@ describe('round lifecycle', () => {
     expect(game.pixels.has(400, 300)).toBe(true);
     // ...and trails from the previous round are gone
     expect(game.pixels.count()).toBe(PLAY_HEIGHT);
+  });
+});
+
+describe('who did it', () => {
+  /** Deaths of a short run as "victim:cause:by". */
+  function deathsOf(game: ReturnType<typeof makeGame>, ticks: number, press: (tick: number) => Partial<TronInput>[]): string[] {
+    const out: string[] = [];
+    for (let i = 0; i < ticks && game.phase === 'playing'; i++) {
+      game.tick(inputs(...press(i)));
+      game.items.length = 0;
+      for (const d of game.serialize().deaths ?? []) out.push(`${d.slotIndex}:${d.cause}:${d.by ?? '-'}`);
+    }
+    return out;
+  }
+  const open = (players = 2, mode: 'ffa' | 'team' = 'ffa'): ReturnType<typeof makeGame> => {
+    const game = makeGame(players, 1, { mode });
+    game.setLevelObstacles(new PixelGrid());
+    skipCountdown(game);
+    game.items.length = 0;
+    game.portals.length = 0;
+    game.players.forEach((_, i) => place(game, i, 60, 480 + i * 30, 0));
+    return game;
+  };
+
+  it('names the shooter of a tracer and of a bullet', () => {
+    for (const [weapon, cause] of [['rifle', 'tracer'], ['glock', 'bullet']] as const) {
+      const game = open();
+      place(game, 0, 200, 300, 0);
+      place(game, 1, 320, 300, 180);     // coming the other way
+      game.players[0]!.equipWeapon(weapon, 200);
+      expect(deathsOf(game, 60, i => [{ action: i === 0 }, {}])).toContain(`1:${cause}:0`);
+    }
+  });
+
+  it('says so when players blow themselves up', () => {
+    const grid = new PixelGrid();
+    for (let y = 280; y < 320; y++) grid.set(206, y, '#fff');
+    const game = open();
+    game.setLevelObstacles(grid);
+    place(game, 0, 200, 300, 0);
+    game.players[0]!.equipWeapon('glock', 20);
+    expect(deathsOf(game, 5, () => [{ action: true }, {}])).toEqual(['0:bullet:0']);
+  });
+
+  it('names the bomber for everyone caught in the blast', () => {
+    const grid = new PixelGrid();
+    for (let y = 250; y < 350; y++) grid.set(330, y, '#fff');
+    const game = open(3);
+    game.setLevelObstacles(grid);
+    place(game, 0, 200, 300, 0);
+    place(game, 1, 350, 260, 90);      // behind the wall the bomb hits, when it hits
+    game.players[0]!.equipWeapon('bomb', 1);
+    const deaths = deathsOf(game, 70, i => [{ action: i === 0 }, {}, {}]);
+    expect(deaths).toContain('1:bomb:0');
+  });
+
+  it('names the owner of a trail in free-for-all only', () => {
+    const crash = (mode: 'ffa' | 'team'): string[] => {
+      const game = open(mode === 'team' ? 4 : 2, mode);
+      place(game, 0, 200, 300, 0);       // lays a trail to the right
+      for (let i = 0; i < 30; i++) game.tick(new Map());
+      place(game, 1, 215, 280, 90);      // drives down into it
+      return deathsOf(game, 40, () => []);
+    };
+    expect(crash('ffa')).toEqual(['1:trail:0']);
+    expect(crash('team')).toEqual(['1:trail:-']);
+  });
+
+  it('describes deaths with the killer in them', () => {
+    expect(describeDeath('tracer', 'Ana', false, false)).toBe('shot by Ana');
+    expect(describeDeath('tracer', 'Me', true, false)).toBe('shot by their own bullet');
+    expect(describeDeath('tracer', null, false, true)).toBe('shot by the level');
+    expect(describeDeath('bullet', 'Ana', false, false)).toBe('blown up by Ana');
+    expect(describeDeath('bullet', 'Me', true, false)).toBe('blown up by their own bullet');
+    expect(describeDeath('bomb', 'Ana', false, false)).toBe('bombed by Ana');
+    expect(describeDeath('bomb', 'Me', true, false)).toBe('bombed by their own bomb');
+    expect(describeDeath('bomb', null, false, false)).toBe('bombed');
+    expect(describeDeath('bodyguard', 'Ana', false, false)).toBe("killed by Ana's satellite");
+    expect(describeDeath('trail', 'Ana', false, false)).toBe("crashed into Ana's trail");
+    expect(describeDeath('trail', null, false, false)).toBe('crashed into a trail');
+    expect(describeDeath('crossing', 'Ana', false, false)).toBe('head-on collision with Ana');
+    expect(describeDeath('own-trail', null, false, false)).toBe('crashed into their own trail');
   });
 });
 
