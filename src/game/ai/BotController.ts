@@ -19,6 +19,8 @@ import { LEVELS } from '../../types/game';
 
 const TURN_DEG = 4;                  // Degrees per step at full lock (matches TronPlayer)
 const DEG = Math.PI / 180;
+/** Keep this far from an enemy that has satellites (their area of action plus a margin). */
+const GUARDED_RADIUS = 56;
 const FIRE_ZONE_STEPS = 80;          // How far ahead bots mind the level guns' fire zones
 const DOOR_MARGIN_TICKS = 25;        // Doors must stay open this long after we pass
 
@@ -563,9 +565,18 @@ export class BotController {
       const rad = p.direction * DEG;
       hazards.push({ x: p.x / 1000, y: p.y / 1000, vx: Math.cos(rad), vy: Math.sin(rad), radius: 4, maxStep: 45 });
     }
+    // Satellites attack anyone inside their owner's area of action (design/bodyguards.md):
+    // the whole area is deadly, and it travels with the owner
+    const guarded = new Set<number>();
     for (const bg of game.getBodyguards()) {
       if (bg.ownerSlot === me.slotIndex) continue;
-      hazards.push({ x: bg.x / 1000, y: bg.y / 1000, vx: 0, vy: 0, radius: 9, maxStep: 25 });
+      if (game.gameMode === 'team' && bg.ownerSlot % 2 === me.slotIndex % 2) continue;
+      guarded.add(bg.ownerSlot);
+    }
+    for (const p of game.players) {
+      if (!p.alive || !guarded.has(p.slotIndex)) continue;
+      const rad = p.direction * DEG;
+      hazards.push({ x: p.x / 1000, y: p.y / 1000, vx: Math.cos(rad), vy: Math.sin(rad), radius: GUARDED_RADIUS, maxStep: 45 });
     }
     return hazards;
   }

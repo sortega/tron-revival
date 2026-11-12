@@ -24,6 +24,7 @@ import { GUN_BURST_CHANCE } from './guns';
 import { createHand, stepHand } from './hand';
 import type { HandState } from './hand';
 import {
+  BODYGUARD_HP,
   LEVELS,
   NO_OWNER,
   PORTAL_RADIUS,
@@ -223,8 +224,12 @@ export class TronGameState {
   private readonly BODYGUARD_ORBIT_RADIUS = 30;      // 30 pixels from player
   private readonly BODYGUARD_ORBIT_PERIOD = 140;     // 2 seconds at 70fps
   private readonly BODYGUARD_KILL_RADIUS = 5;        // Kill players within 5px
-  private readonly BODYGUARD_INTERCEPT_RADIUS = 50;  // Rush to projectiles within 50px of player
-  private readonly BODYGUARD_SPEED = 8000;           // ~8 pixels/frame (fast)
+  private readonly BODYGUARD_ACTION_RADIUS = 50;     // Area around the owner that satellites defend
+  private readonly BODYGUARD_BLOCK_RADIUS = 5;       // Stops projectiles passing this close
+  private readonly BODYGUARD_LOOKAHEAD = 6;          // Ticks of projectile flight considered
+  private readonly BODYGUARD_DEADLY_MISS = 10;       // A course passing this close to the owner comes first
+  private readonly BODYGUARD_STANDOFF = 12;          // Block at least this far from the owner (bullets explode)
+  private readonly BODYGUARD_SPEED = 16000;          // 16 pixels/tick: must beat shotgun pellets to the owner
 
   // Bodyguard state
   private bodyguards: Bodyguard[] = [];
@@ -970,6 +975,9 @@ export class TronGameState {
       }
       const skipOwner = proj.ownerCooldown !== undefined && proj.ownerCooldown > 0;
 
+      // Satellites stop enemy projectiles that pass through them (design/bodyguards.md)
+      const blocker = this.findBlocker(proj, prevX, prevY, unwrappedX, unwrappedY);
+
       // Check collision with players (shield does NOT protect!)
       // Skip player collisions during waiting_ready phase (round is over, let bullets fly visually)
       let hitPlayer = false;
@@ -983,10 +991,15 @@ export class TronGameState {
           if (skipOwner && player.slotIndex === proj.ownerSlot) continue;
           const px = player.getScreenX();
           const py = player.getScreenY();
-          // A bomb collides as a box; the others by distance to the path travelled
-          const hit = proj.type === 'bomb'
-            ? this.bombCovers(proj, px, py, this.BOMB_PLAYER_MARGIN)
-            : this.distanceToPath(px, py, prevX, prevY, unwrappedX, unwrappedY) < killRadius;
+          // A bomb collides as a box; the others by distance to the path travelled.
+          // A satellite earlier on the path saves the player.
+          let hit: boolean;
+          if (proj.type === 'bomb') {
+            hit = !blocker && this.bombCovers(proj, px, py, this.BOMB_PLAYER_MARGIN);
+          } else {
+            const closest = this.closestOnPath(px, py, prevX, prevY, unwrappedX, unwrappedY);
+            hit = closest.dist < killRadius && (!blocker || closest.t < blocker.t);
+          }
           if (hit) {
             if (proj.type === 'bullet') {
               this.projectileImpact(px, py, proj.ownerSlot);
@@ -1003,6 +1016,11 @@ export class TronGameState {
         }
       }
       if (hitPlayer) continue;
+      if (blocker) {
+        this.blockProjectile(blocker.bg, proj);
+        toRemove.push(proj.id);
+        continue;
+      }
 
       // Check collision with items
       let hitItem = false;
@@ -1097,6 +1115,7 @@ export class TronGameState {
 
     // Remove impacted projectiles
     this.projectiles = this.projectiles.filter(p => !toRemove.includes(p.id));
+    this.removeDeadBodyguards();
   }
 
   // Teleport a projectile to exit portal position
@@ -1171,18 +1190,32 @@ export class TronGameState {
     return null;
   }
 
-  // Distance from a point to the path a projectile travelled this tick. The end of the
-  // path may lie beyond an edge (unwrapped): then the point is also tried wrapped around.
-  private distanceToPath(px: number, py: number, x0: number, y0: number, x1: number, y1: number): number {
-    let best = this.pointToLineDistance(px, py, x0, y0, x1, y1);
+  // Closest approach of the path travelled this tick (x0,y0 → x1,y1) to a point: the
+  // distance and how far along the path (0..1). The end of the path may lie beyond an
+  // edge (unwrapped): then the point is also tried wrapped around.
+  private closestOnPath(
+    px: number, py: number, x0: number, y0: number, x1: number, y1: number
+  ): { dist: number; t: number } {
     const shiftX = x1 < 0 ? -PLAY_WIDTH : x1 >= PLAY_WIDTH ? PLAY_WIDTH : 0;
     const shiftY = y1 < 0 ? -PLAY_HEIGHT : y1 >= PLAY_HEIGHT ? PLAY_HEIGHT : 0;
-    if (shiftX !== 0) best = Math.min(best, this.pointToLineDistance(px + shiftX, py, x0, y0, x1, y1));
-    if (shiftY !== 0) best = Math.min(best, this.pointToLineDistance(px, py + shiftY, x0, y0, x1, y1));
-    if (shiftX !== 0 && shiftY !== 0) {
-      best = Math.min(best, this.pointToLineDistance(px + shiftX, py + shiftY, x0, y0, x1, y1));
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const lenSq = dx * dx + dy * dy;
+    let best = { dist: Infinity, t: 0 };
+    for (const sx of shiftX !== 0 ? [0, shiftX] : [0]) {
+      for (const sy of shiftY !== 0 ? [0, shiftY] : [0]) {
+        const qx = px + sx - x0;
+        const qy = py + sy - y0;
+        const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, (qx * dx + qy * dy) / lenSq));
+        const dist = Math.hypot(qx - t * dx, qy - t * dy);
+        if (dist < best.dist) best = { dist, t };
+      }
     }
     return best;
+  }
+
+  private distanceToPath(px: number, py: number, x0: number, y0: number, x1: number, y1: number): number {
+    return this.closestOnPath(px, py, x0, y0, x1, y1).dist;
   }
 
   // Is a point inside a bomb's body (a box along its heading), grown by `margin`?
@@ -1195,27 +1228,6 @@ export class TronGameState {
     const along = dx * Math.cos(rad) + dy * Math.sin(rad);
     const across = -dx * Math.sin(rad) + dy * Math.cos(rad);
     return Math.abs(along) <= this.BOMB_HALF_LENGTH + margin && Math.abs(across) <= this.BOMB_HALF_WIDTH + margin;
-  }
-
-  // Calculate distance from point to line segment
-  private pointToLineDistance(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const lenSq = dx * dx + dy * dy;
-
-    if (lenSq === 0) {
-      // Line segment is a point
-      return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
-    }
-
-    // Project point onto line, clamped to segment
-    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
-    t = Math.max(0, Math.min(1, t));
-
-    const closestX = x1 + t * dx;
-    const closestY = y1 + t * dy;
-
-    return Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
   }
 
   // Check collision between two oriented bomb bounding boxes using Separating Axis Theorem
@@ -1366,7 +1378,7 @@ export class TronGameState {
       }
     }
 
-    // Destroy bodyguards within bomb radius (only way to destroy them)
+    // Destroy bodyguards within bomb radius
     for (const bg of this.bodyguards) {
       const bgX = bg.x / 1000;
       const bgY = bg.y / 1000;
@@ -1809,6 +1821,7 @@ export class TronGameState {
       x: player.x,
       y: player.y,
       phaseOffset: 0, // Will be redistributed below
+      hp: BODYGUARD_HP,
     });
 
     // Redistribute phase offsets for all bodyguards of this player
@@ -1819,161 +1832,271 @@ export class TronGameState {
     });
   }
 
-  // Calculate wrapped distance (shortest path in toroidal space)
-  private wrappedDistance(x1: number, y1: number, x2: number, y2: number): number {
-    const dx = Math.abs(x2 - x1);
-    const dy = Math.abs(y2 - y1);
-    const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
-    const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
-    return Math.sqrt(wrapDx * wrapDx + wrapDy * wrapDy);
+  // === Satellites: see design/bodyguards.md ===
+
+  private bodyguardAlive(bg: Bodyguard): boolean {
+    return bg.id >= 0 && bg.hp > 0;
   }
 
-  // Move bodyguard toward target position (shortest path in wrapped space)
-  private moveBodyguardToward(bg: Bodyguard, targetX: number, targetY: number): void {
-    const bgX = bg.x / 1000;
-    const bgY = bg.y / 1000;
-
-    // Calculate shortest direction in wrapped space
-    let dx = targetX - bgX;
-    let dy = targetY - bgY;
-    if (Math.abs(dx) > PLAY_WIDTH / 2) dx = dx > 0 ? dx - PLAY_WIDTH : dx + PLAY_WIDTH;
-    if (Math.abs(dy) > PLAY_HEIGHT / 2) dy = dy > 0 ? dy - PLAY_HEIGHT : dy + PLAY_HEIGHT;
-
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < 1) return; // Close enough
-
-    // Move at bodyguard speed
-    const speed = Math.min(dist, this.BODYGUARD_SPEED / 1000);
-    bg.x += (dx / dist) * speed * 1000;
-    bg.y += (dy / dist) * speed * 1000;
-
-    // Wrap position
-    if (bg.x >= PLAY_WIDTH * 1000) bg.x -= PLAY_WIDTH * 1000;
-    if (bg.x < 0) bg.x += PLAY_WIDTH * 1000;
-    if (bg.y >= PLAY_HEIGHT * 1000) bg.y -= PLAY_HEIGHT * 1000;
-    if (bg.y < 0) bg.y += PLAY_HEIGHT * 1000;
+  // Satellites spare their owner and, in team mode, the owner's team-mates
+  private bodyguardSpares(bg: Bodyguard, slot: SlotIndex): boolean {
+    return slot === bg.ownerSlot || (this.gameMode === 'team' && slot % 2 === bg.ownerSlot % 2);
   }
 
-  // Check bodyguard collision with enemy projectiles (destroy them, bodyguard survives)
-  // Returns IDs of projectiles to remove
-  private checkBodyguardProjectileCollision(bg: Bodyguard): number[] {
-    const bgX = bg.x / 1000;
-    const bgY = bg.y / 1000;
-    const toRemove: number[] = [];
+  private wrapDelta(d: number, size: number): number {
+    if (d > size / 2) return d - size;
+    if (d < -size / 2) return d + size;
+    return d;
+  }
 
-    for (const proj of this.projectiles) {
-      if (proj.ownerSlot === bg.ownerSlot) continue; // Don't block own projectiles
-      const projX = proj.x / 1000;
-      const projY = proj.y / 1000;
-      const dist = this.wrappedDistance(bgX, bgY, projX, projY);
-      if (dist < this.BODYGUARD_KILL_RADIUS) {
-        // Destroy projectile (bodyguard survives, except bombs still explode)
-        if (proj.type === 'bomb') {
-          // Bomb explodes on bodyguard contact
-          this.bombImpact(Math.floor(projX), Math.floor(projY), proj.ownerSlot);
-        }
-        toRemove.push(proj.id);
+  // Move a satellite towards a position (shortest way round). Returns the path travelled,
+  // in pixels; its end may lie beyond an edge.
+  private moveBodyguardToward(
+    bg: Bodyguard, targetX: number, targetY: number
+  ): { x0: number; y0: number; x1: number; y1: number } {
+    const x0 = bg.x / 1000;
+    const y0 = bg.y / 1000;
+    const dx = this.wrapDelta(targetX - x0, PLAY_WIDTH);
+    const dy = this.wrapDelta(targetY - y0, PLAY_HEIGHT);
+    const dist = Math.hypot(dx, dy);
+    if (dist < 0.001) return { x0, y0, x1: x0, y1: y0 };
+
+    const step = Math.min(dist, this.BODYGUARD_SPEED / 1000);
+    const x1 = x0 + (dx / dist) * step;
+    const y1 = y0 + (dy / dist) * step;
+    bg.x = ((x1 + PLAY_WIDTH) % PLAY_WIDTH) * 1000;
+    bg.y = ((y1 + PLAY_HEIGHT) % PLAY_HEIGHT) * 1000;
+    return { x0, y0, x1, y1 };
+  }
+
+  // The first satellite an enemy projectile meets on the path it travels this tick
+  private findBlocker(
+    proj: Projectile, x0: number, y0: number, x1: number, y1: number
+  ): { bg: Bodyguard; t: number } | null {
+    let best: { bg: Bodyguard; t: number } | null = null;
+    for (const bg of this.bodyguards) {
+      if (bg.ownerSlot === proj.ownerSlot || !this.bodyguardAlive(bg)) continue;
+      const bx = bg.x / 1000;
+      const by = bg.y / 1000;
+      if (proj.type === 'bomb') {
+        if (this.bombCovers(proj, bx, by, this.BODYGUARD_BLOCK_RADIUS)) return { bg, t: 0 };
+        continue;
+      }
+      const closest = this.closestOnPath(bx, by, x0, y0, x1, y1);
+      if (closest.dist < this.BODYGUARD_BLOCK_RADIUS && (!best || closest.t < best.t)) {
+        best = { bg, t: closest.t };
       }
     }
-    return toRemove;
+    return best;
   }
 
-  // Check bodyguard collision with enemy players (kill them)
-  private checkBodyguardPlayerCollision(bg: Bodyguard): void {
-    const bgX = bg.x / 1000;
-    const bgY = bg.y / 1000;
-
-    for (const player of this.players) {
-      if (!player.alive) continue;
-      if (player.slotIndex === bg.ownerSlot) continue; // Don't kill owner
-      const px = player.getScreenX();
-      const py = player.getScreenY();
-      const dist = this.wrappedDistance(bgX, bgY, px, py);
-      if (dist < this.BODYGUARD_KILL_RADIUS) {
-        this.killPlayerWithSound(player, false, 'bodyguard');
-      }
+  // A satellite stops a projectile and wears down. The caller removes the projectile.
+  private blockProjectile(bg: Bodyguard, proj: Projectile): void {
+    if (proj.type === 'bomb') {
+      // The bomb goes off here (and its blast takes the satellite with it)
+      this.bombImpact(Math.floor(proj.x / 1000), Math.floor(proj.y / 1000), proj.ownerSlot);
+      return;
+    }
+    bg.hp -= proj.type === 'bullet' ? this.GLOCK_DAMAGE : this.TRACER_DAMAGE;
+    if (bg.hp <= 0) {
+      this.explosions.push({
+        id: this.nextExplosionId++,
+        x: Math.floor(bg.x / 1000),
+        y: Math.floor(bg.y / 1000),
+        frame: 0,
+      });
+      this.queueSound('explosion');
     }
   }
 
-  // Tick all bodyguards - movement, collisions
+  // Drop destroyed satellites and spread the survivors evenly around their orbit
+  private removeDeadBodyguards(): void {
+    const owners = new Set<SlotIndex>();
+    for (const bg of this.bodyguards) {
+      if (!this.bodyguardAlive(bg)) owners.add(bg.ownerSlot);
+    }
+    if (owners.size === 0) return;
+    this.bodyguards = this.bodyguards.filter(bg => this.bodyguardAlive(bg));
+    for (const ownerSlot of owners) {
+      const remaining = this.bodyguards.filter(b => b.ownerSlot === ownerSlot);
+      remaining.forEach((bg, i) => {
+        bg.phaseOffset = (360 / remaining.length) * i;
+      });
+    }
+  }
+
+  // Where a satellite could stop a projectile: points on its course over the next few
+  // ticks that lie inside the owner's area of action, on the way in. Positions are
+  // relative to the owner, who is assumed to keep moving as now; `t` is the number of
+  // ticks until the projectile gets there. `miss` is how close the course gets.
+  private threatPoints(
+    proj: Projectile, owner: TronPlayer
+  ): { points: { x: number; y: number; t: number }[]; miss: number } | null {
+    const rad = (proj.direction * Math.PI) / 180;
+    const speed = proj.speed / 1000;
+    const ownerRad = (owner.direction * Math.PI) / 180;
+    const vx = Math.cos(rad) * speed - Math.cos(ownerRad);
+    const vy = Math.sin(rad) * speed - Math.sin(ownerRad);
+    const rx = this.wrapDelta((proj.x - owner.x) / 1000, PLAY_WIDTH);
+    const ry = this.wrapDelta((proj.y - owner.y) / 1000, PLAY_HEIGHT);
+    // Cheap rejection: cannot get near in the time considered
+    const reach = this.BODYGUARD_ACTION_RADIUS + (speed + 1) * this.BODYGUARD_LOOKAHEAD;
+    if (Math.abs(rx) > reach || Math.abs(ry) > reach) return null;
+
+    // Sample finely enough that a fast tracer cannot jump over the area
+    const perTick = Math.max(1, Math.ceil(speed / (this.BODYGUARD_SPEED / 1000)));
+    const life = proj.remainingFrames ?? Infinity;
+    const inside: { x: number; y: number; t: number; dist: number }[] = [];
+    let miss = Infinity;
+    for (let k = 0; k <= this.BODYGUARD_LOOKAHEAD * perTick; k++) {
+      const t = k / perTick;
+      if (t > life) break;
+      const x = rx + vx * t;
+      const y = ry + vy * t;
+      const dist = Math.hypot(x, y);
+      if (dist > miss) break; // Past its closest approach: on the way out
+      miss = dist;
+      if (dist <= this.BODYGUARD_ACTION_RADIUS) inside.push({ x, y, t, dist });
+    }
+    if (inside.length === 0) return null;
+    // Stop it before it is close enough to hurt the owner (a bullet explodes), if possible
+    const early = inside.filter(p => p.dist >= this.BODYGUARD_STANDOFF);
+    return { points: early.length > 0 ? early : inside, miss };
+  }
+
+  // Tick all satellites: pick a job for each, move, and resolve contacts
   private tickBodyguards(): void {
     // Advance shared base angle (all bodyguards orbit in sync)
     this.bodyguardBaseAngle = (this.bodyguardBaseAngle + 360 / this.BODYGUARD_ORBIT_PERIOD) % 360;
 
-    const projectilesToRemove: number[] = [];
+    const radius = this.BODYGUARD_ACTION_RADIUS;
+    const speed = this.BODYGUARD_SPEED / 1000;
+    const blocked = new Set<number>();
 
-    for (const bg of this.bodyguards) {
-      const owner = this.players.find(p => p.slotIndex === bg.ownerSlot);
+    for (const ownerSlot of new Set(this.bodyguards.map(bg => bg.ownerSlot))) {
+      const guards = this.bodyguards.filter(bg => bg.ownerSlot === ownerSlot && this.bodyguardAlive(bg));
+      const owner = this.players.find(p => p.slotIndex === ownerSlot);
       if (!owner || !owner.alive) {
-        // Remove bodyguard if owner is dead
-        bg.id = -1; // Mark for removal
+        for (const bg of guards) bg.id = -1; // Satellites go with their owner
         continue;
       }
-
       const ownerX = owner.x / 1000;
       const ownerY = owner.y / 1000;
+      const relative = (bg: Bodyguard): { x: number; y: number } => ({
+        x: this.wrapDelta(bg.x / 1000 - ownerX, PLAY_WIDTH),
+        y: this.wrapDelta(bg.y / 1000 - ownerY, PLAY_HEIGHT),
+      });
 
-      // Find closest enemy projectile within intercept radius
-      let targetX: number;
-      let targetY: number;
-      let closestDist = this.BODYGUARD_INTERCEPT_RADIUS;
-      let hasTarget = false;
+      // Where each satellite should go, relative to the owner
+      const targets = new Map<Bodyguard, { x: number; y: number }>();
+      const free = new Set(guards);
 
+      // 1. Block projectiles: most urgent threat first, each by the satellite that can
+      //    be on its course soonest
+      const threats: { points: { x: number; y: number; t: number }[]; miss: number }[] = [];
       for (const proj of this.projectiles) {
-        if (proj.ownerSlot === bg.ownerSlot) continue; // Skip own projectiles
-        const projX = proj.x / 1000;
-        const projY = proj.y / 1000;
-        const dist = this.wrappedDistance(ownerX, ownerY, projX, projY);
-        if (dist < closestDist) {
-          closestDist = dist;
-          targetX = projX;
-          targetY = projY;
-          hasTarget = true;
+        if (proj.ownerSlot === ownerSlot || blocked.has(proj.id)) continue;
+        const threat = this.threatPoints(proj, owner);
+        if (threat) threats.push(threat);
+      }
+      // Shots that would hit come before shots that would miss; then the most urgent
+      const deadly = (miss: number): number => (miss < this.BODYGUARD_DEADLY_MISS ? 0 : 1);
+      threats.sort((a, b) => deadly(a.miss) - deadly(b.miss) || a.points[0]!.t - b.points[0]!.t);
+      for (const threat of threats) {
+        if (free.size === 0) break;
+        let best: { bg: Bodyguard; point: { x: number; y: number }; cost: number } | null = null;
+        for (const bg of free) {
+          const at = relative(bg);
+          // Of the points on the course it can reach in time, the one closest to the
+          // owner (a satellite right next to the owner covers a whole spread of shots);
+          // failing that, the point it gets closest to reaching
+          let point = threat.points[0]!;
+          let cost = Infinity;
+          for (const candidate of threat.points) {
+            // By the time the projectile is `t` ticks ahead the satellite has moved
+            // ceil(t) times (at least once: it moves right now)
+            const moves = Math.max(1, Math.ceil(candidate.t));
+            const short = Math.hypot(candidate.x - at.x, candidate.y - at.y) - this.BODYGUARD_BLOCK_RADIUS - speed * moves;
+            const candidateCost = short <= 0 ? Math.hypot(candidate.x, candidate.y) : 1000 + short;
+            if (candidateCost < cost) {
+              point = candidate;
+              cost = candidateCost;
+            }
+          }
+          if (!best || cost < best.cost) best = { bg, point, cost };
+        }
+        if (best) {
+          targets.set(best.bg, best.point);
+          free.delete(best.bg);
         }
       }
 
-      if (!hasTarget) {
-        // No threat - orbit player using base angle + phase offset
-        const orbitAngle = this.bodyguardBaseAngle + bg.phaseOffset;
-        const rad = (orbitAngle * Math.PI) / 180;
-        targetX = ownerX + Math.cos(rad) * this.BODYGUARD_ORBIT_RADIUS;
-        targetY = ownerY + Math.sin(rad) * this.BODYGUARD_ORBIT_RADIUS;
+      // 2. Attack intruders: enemy heads inside the area
+      if (free.size > 0) {
+        const intruders: { x: number; y: number }[] = [];
+        for (const player of this.players) {
+          if (!player.alive || this.bodyguardSpares(guards[0]!, player.slotIndex)) continue;
+          const x = this.wrapDelta(player.getScreenX() - ownerX, PLAY_WIDTH);
+          const y = this.wrapDelta(player.getScreenY() - ownerY, PLAY_HEIGHT);
+          if (Math.hypot(x, y) <= radius) intruders.push({ x, y });
+        }
+        if (intruders.length > 0) {
+          for (const bg of free) {
+            const at = relative(bg);
+            let nearest = intruders[0]!;
+            for (const intruder of intruders) {
+              if (Math.hypot(intruder.x - at.x, intruder.y - at.y) < Math.hypot(nearest.x - at.x, nearest.y - at.y)) {
+                nearest = intruder;
+              }
+            }
+            targets.set(bg, nearest);
+          }
+        }
       }
 
-      // Move toward target (shortest path in wrapped space)
-      this.moveBodyguardToward(bg, targetX!, targetY!);
+      for (const bg of guards) {
+        // 3. Nothing to do: orbit the owner (base angle + phase offset)
+        let target = targets.get(bg);
+        if (!target) {
+          const rad = ((this.bodyguardBaseAngle + bg.phaseOffset) * Math.PI) / 180;
+          target = { x: Math.cos(rad) * this.BODYGUARD_ORBIT_RADIUS, y: Math.sin(rad) * this.BODYGUARD_ORBIT_RADIUS };
+        }
+        // Never leave the area of action
+        const far = Math.hypot(target.x, target.y);
+        if (far > radius) target = { x: (target.x / far) * radius, y: (target.y / far) * radius };
 
-      // Check collision with enemy projectiles (destroy them)
-      projectilesToRemove.push(...this.checkBodyguardProjectileCollision(bg));
+        const path = this.moveBodyguardToward(bg, ownerX + target.x, ownerY + target.y);
 
-      // Check collision with enemy players (kill them)
-      // Skip during waiting_ready phase (round is over)
-      if (this.phase !== 'waiting_ready') {
-        this.checkBodyguardPlayerCollision(bg);
+        // Enemy projectiles it ran into
+        for (const proj of this.projectiles) {
+          if (!this.bodyguardAlive(bg)) break;
+          if (proj.ownerSlot === bg.ownerSlot || blocked.has(proj.id)) continue;
+          const touching = proj.type === 'bomb'
+            ? this.bombCovers(proj, bg.x / 1000, bg.y / 1000, this.BODYGUARD_BLOCK_RADIUS)
+            : this.distanceToPath(proj.x / 1000, proj.y / 1000, path.x0, path.y0, path.x1, path.y1) < this.BODYGUARD_BLOCK_RADIUS;
+          if (touching) {
+            this.blockProjectile(bg, proj);
+            blocked.add(proj.id);
+          }
+        }
+
+        // Enemy players it ran into (not once the round is over)
+        if (this.phase !== 'waiting_ready') {
+          for (const player of this.players) {
+            if (!player.alive || this.bodyguardSpares(bg, player.slotIndex)) continue;
+            const dist = this.distanceToPath(player.getScreenX(), player.getScreenY(), path.x0, path.y0, path.x1, path.y1);
+            if (dist < this.BODYGUARD_KILL_RADIUS) {
+              this.killPlayerWithSound(player, false, 'bodyguard');
+            }
+          }
+        }
       }
     }
 
-    // Remove projectiles destroyed by bodyguards
-    if (projectilesToRemove.length > 0) {
-      this.projectiles = this.projectiles.filter(p => !projectilesToRemove.includes(p.id));
+    if (blocked.size > 0) {
+      this.projectiles = this.projectiles.filter(p => !blocked.has(p.id));
     }
-
-    // Remove dead bodyguards and redistribute phases for remaining
-    const removedOwners = new Set<SlotIndex>();
-    for (const bg of this.bodyguards) {
-      if (bg.id < 0) removedOwners.add(bg.ownerSlot);
-    }
-    this.bodyguards = this.bodyguards.filter(bg => bg.id >= 0);
-
-    // Redistribute phases for owners who lost a bodyguard
-    for (const ownerSlot of removedOwners) {
-      const remaining = this.bodyguards.filter(b => b.ownerSlot === ownerSlot);
-      if (remaining.length > 0) {
-        remaining.forEach((bg, i) => {
-          bg.phaseOffset = (360 / remaining.length) * i;
-        });
-      }
-    }
+    this.removeDeadBodyguards();
   }
 
   private checkRoundEnd(): void {

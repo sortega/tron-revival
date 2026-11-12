@@ -90,7 +90,10 @@ export interface Bodyguard {
   x: number;           // Fixed-point ×1000
   y: number;           // Fixed-point ×1000
   phaseOffset: number; // Phase offset in degrees (for multiple bodyguards)
+  hp: number;          // Worn down by the projectiles it blocks (design/bodyguards.md)
 }
+
+export const BODYGUARD_HP = 300;
 
 // Player state during gameplay (serializable for network)
 export interface TronPlayerState {

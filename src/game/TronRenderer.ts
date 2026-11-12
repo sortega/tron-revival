@@ -4,6 +4,7 @@ import type { SlotIndex } from '../types/lobby';
 import { FFA_COLORS, TEAM_COLORS } from '../types/lobby';
 import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard, DeathCause } from '../types/game';
 import type { GamePlayer } from '../types/game';
+import { BODYGUARD_HP } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
 import { PixelGrid, forEachLinePixel } from './PixelGrid';
 import { SpriteAtlas } from '../sprites';
@@ -621,6 +622,9 @@ export class TronRenderer {
     const x = Math.floor(bg.x / 1000);
     const y = Math.floor(bg.y / 1000);
 
+    // A worn satellite fades
+    this.ctx.save();
+    this.ctx.globalAlpha = 0.35 + 0.65 * Math.max(0, Math.min(1, bg.hp / BODYGUARD_HP));
     this.spriteAtlas.drawWrapped(
       this.ctx,
       'bodyguard',
@@ -629,6 +633,7 @@ export class TronRenderer {
       PLAY_WIDTH,
       PLAY_HEIGHT
     );
+    this.ctx.restore();
   }
 
   private drawPlayerHead(x: number, y: number, color: string): void {

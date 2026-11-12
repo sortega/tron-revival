@@ -232,7 +232,9 @@ Rules: `design/projectiles.md`.
       it, usually its own shooter ("died of his own bullet")
 - [x] H-bomb collides as its 12×18 body: no more flying through a player; explodes when
       its nose touches a wall
-- [ ] Bodyguard-vs-projectile checks have not been audited for the same wrap-around mistake
+- [x] Satellites (`design/bodyguards.md`): intercept shots on their course instead of
+      chasing them, attack players who enter their area, wear out (300 HP) so repeated
+      shotgun blasts overwhelm them; contact tests are swept and wrap-aware
 
 ## Open reports
 

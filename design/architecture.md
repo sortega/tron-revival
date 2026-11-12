@@ -7,6 +7,7 @@ High-level architecture of the web revival of Teratron. Detailed designs:
 - [networking.md](./networking.md) — connectivity, rooms and lobby, netcode, resilience
 - [level-hazards.md](./level-hazards.md) — per-level hazards: automatic doors, shell bursts, the dentist's hand
 - [projectiles.md](./projectiles.md) — what bullets, tracers and bombs hit, and how
+- [bodyguards.md](./bodyguards.md) — satellites: what they block, attack and how they wear out
 - [touch-controls.md](./touch-controls.md) — steering on phones
 - [refactoring-proposal-effects-weapons.md](./refactoring-proposal-effects-weapons.md) — pending
   proposal to split weapons/effects out of the simulation class
