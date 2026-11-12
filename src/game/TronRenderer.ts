@@ -2,7 +2,7 @@
 
 import type { SlotIndex } from '../types/lobby';
 import { FFA_COLORS, TEAM_COLORS } from '../types/lobby';
-import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard } from '../types/game';
+import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard, DeathCause } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
 import { PixelGrid, forEachLinePixel } from './PixelGrid';
@@ -10,6 +10,17 @@ import { SpriteAtlas } from '../sprites';
 import { SPRITE_HASH } from './spriteHash';
 
 import type { NetworkStats } from './session/GameSession';
+
+const DEATH_LABELS: Record<DeathCause, string> = {
+  'trail': 'crashed into a trail',
+  'own-trail': 'crashed into their own trail',
+  'level': 'crashed into the scenery',
+  'crossing': 'head-on collision',
+  'bullet': 'blown up',
+  'tracer': 'shot',
+  'bomb': 'bombed',
+  'bodyguard': 'killed by a satellite',
+};
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
@@ -38,6 +49,9 @@ export class TronRenderer {
 
   // Ridiculous death display - slots that died ridiculously this round
   private ridiculousDeathSlots: Set<SlotIndex> = new Set();
+
+  // Why each player died this round (shown on the round summary)
+  private deathCauses: Map<SlotIndex, DeathCause> = new Map();
 
   // Color blindness effect state
   private colorBlindnessFrames: number = 0;  // Remaining frames (used for color cycling and sprite position)
@@ -316,6 +330,7 @@ export class TronRenderer {
   clearTrails(): void {
     this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     this.ridiculousDeathSlots.clear();
+    this.deathCauses.clear();
     this.colorBlindnessFrames = 0;
     this.whiteFlashFrames = 0;
     // Restore level canvas (removes lock borders modifications)
@@ -365,6 +380,11 @@ export class TronRenderer {
       this.trailCtx.fillStyle = color;
       this.trailCtx.fillRect(x, y, length, 1);
     });
+  }
+
+  // Remember why a player died, to show it on the round summary
+  recordDeath(slotIndex: SlotIndex, cause: DeathCause): void {
+    this.deathCauses.set(slotIndex, cause);
   }
 
   // Trigger ridiculous death display for a player
@@ -570,6 +590,18 @@ export class TronRenderer {
       const player = this.players.find(p => p.slotIndex === slotIndex);
       const playerState = playerStates.find(p => p.slotIndex === slotIndex);
 
+      // Fade the panel's colour: half-way to greyscale for dead players, fully
+      // greyscale for slots nobody is playing in
+      const desaturation = !player || !playerState ? 1 : playerState.alive ? 0 : 0.5;
+      if (desaturation > 0) {
+        this.ctx.save();
+        this.ctx.globalCompositeOperation = 'saturation';
+        this.ctx.globalAlpha = desaturation;
+        this.ctx.fillStyle = '#808080';
+        this.ctx.fillRect(panelX, y, STATUS_WIDTH, slotHeight);
+        this.ctx.restore();
+      }
+
       if (player && playerState) {
         const centerX = panelX + STATUS_WIDTH / 2;
 
@@ -747,6 +779,15 @@ export class TronRenderer {
         nickname = nickname.slice(0, -2) + '…';
       }
       this.ctx.fillText(nickname, nicknameX, y);
+
+      // How the player died this round
+      const cause = this.deathCauses.get(player.slotIndex);
+      if (cause && roundWinner !== null) {
+        this.ctx.fillStyle = '#777';
+        this.ctx.font = '11px monospace';
+        this.ctx.fillText(DEATH_LABELS[cause], nicknameX + 28, y + 13);
+        this.ctx.font = '20px monospace';
+      }
 
       // Ready status
       const statusText = isReady ? 'READY' : 'waiting...';

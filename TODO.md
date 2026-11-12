@@ -192,8 +192,9 @@ Design: `design/networking.md` (rewritten)
 
 - [x] Satellites (bodyguards) freeze when the round ends
 - [x] Projectiles freeze when the round ends
-- [ ] Sidebar: desaturate a player's panel halfway to black-and-white while they are dead, and
+- [x] Sidebar: desaturate a player's panel halfway to black-and-white while they are dead, and
       fully black-and-white for slots that are not playing
+- [x] Round summary shows how each player died
 - [ ] Level 8: automatic doors are not implemented yet (check `old-tron/` source and
       `old-tron-design.md` for the original behaviour; design doc first)
 
