@@ -212,6 +212,18 @@ Design: `design/networking.md` (rewritten)
       original it does not kill, it hides the arena beneath it and erases pixels
 - [ ] Items can spawn hidden under a closed door (faithful, but maybe not fun)
 
+## Touch controls (requested)
+
+Audit and design: `design/touch-controls.md`.
+
+- [x] Audit of the stick (tiny, `^2.5` curve, slower than keys; latency is not the cause)
+- [x] Four steering modes selectable in-game (🕹 button): BUTTONS, POINT, SWIPE, STICK
+- [x] Phone-emulation browser test (`npm run test:e2e:touch`)
+- [x] 1 s lock on "ready" after a round ends
+- [ ] **Play-test on a real phone**, pick a winner, tune it, remove the losers (and nipplejs
+      with the old stick)
+- [ ] Trails are 1 px wide and hard to see on a phone screen
+
 ## Open reports
 
 - [ ] **Laptop vs phone: both players died at the first instant of round 1.** Not reproduced with

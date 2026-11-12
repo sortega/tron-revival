@@ -109,7 +109,8 @@ The original bindings (Z/X/Ctrl, Insert, Delete/Enter…) are not reused: Ctrl-c
 and navigation keys collide with browser shortcuts. All schemes follow the same shape —
 *left, right, "up" = action* — so they are easy to explain.
 
-On touch devices the joystick + action button drive the first local human. A local game on
+On touch devices the on-screen steering ([touch-controls.md](./touch-controls.md)) and the
+action button drive the first local human. A local game on
 a touch device therefore supports one human (plus bots) unless a keyboard is attached.
 
 `InputManager` owns all key listeners and returns `Map<SlotIndex, TronInput>` each tick.

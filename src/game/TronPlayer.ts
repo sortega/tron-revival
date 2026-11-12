@@ -9,7 +9,7 @@ import type { PixelGrid } from './PixelGrid';
 // Re-exported for existing importers
 export { PLAY_WIDTH, PLAY_HEIGHT } from './constants';
 
-const TURN_SPEED = 4;        // Degrees per frame
+export const TURN_SPEED = 4;        // Degrees per frame
 const MOVE_SPEED = 1000;     // 1 pixel per frame (in fixed-point)
 
 // Starting positions based on player count and index

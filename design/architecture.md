@@ -26,7 +26,7 @@ High-level architecture of the web revival of Teratron. Detailed designs:
 | Rendering | Canvas 2D: off-screen level + trail canvases composited every frame |
 | Multiplayer transport | Trystero (WebRTC data channels, Nostr signaling), optional TURN |
 | Wire format | MessagePack with compact positional encodings |
-| Touch input | nipplejs joystick |
+| Touch input | Own touch handling with selectable steering modes ([touch-controls.md](./touch-controls.md)); nipplejs only for the legacy stick |
 | Tests | Vitest (headless simulation, bots, simulated network), Playwright-driven Chrome for e2e |
 
 ## Layers

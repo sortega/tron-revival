@@ -1,10 +1,10 @@
 // InputManager - keyboard and touch input for all human players on this machine
 
-import nipplejs from 'nipplejs';
 import type { SlotIndex } from '../../types/lobby';
 import type { ControlScheme, TronInput } from '../../types/game';
 
 import { CONTROL_SCHEMES } from './controlSchemes';
+import { TouchControls } from './TouchControls';
 
 // True when the primary input is touch (phones, tablets). Touch-screen laptops
 // report a fine primary pointer and get the desktop layout.
@@ -33,10 +33,8 @@ export class InputManager {
 
   // Touch controls (drive one slot)
   private touchSlot: SlotIndex | null = null;
-  private touchSteer = 0;
-  private touchAction = false;
-  private joystick: nipplejs.JoystickManager | null = null;
-  private actionButton: HTMLElement | null = null;
+  private touch: TouchControls | null = null;
+  private touchHeading: (() => number | null) | null = null;
 
   constructor(bindings: InputBinding[]) {
     this.bindings = bindings;
@@ -58,64 +56,31 @@ export class InputManager {
       const right = keys.right.some(k => this.pressed.has(k));
       let steer = left === right ? 0 : left ? -1 : 1;
       let action = keys.action.some(k => this.pressed.has(k));
-      if (slot === this.touchSlot) {
-        if (steer === 0) steer = this.touchSteer;
-        action = action || this.touchAction;
+      if (slot === this.touchSlot && this.touch) {
+        const touchSteer = this.touch.getSteer(this.touchHeading?.() ?? null);
+        if (steer === 0) steer = touchSteer;
+        action = action || this.touch.getAction();
       }
       inputs.set(slot, { steer, action });
     }
     return inputs;
   }
 
-  /** Attach an on-screen joystick and action button to one player. */
-  initTouchControls(slot: SlotIndex, joystickZone: HTMLElement, actionButtonEl: HTMLElement): void {
+  /**
+   * Attach on-screen steering and an action button to one player. `heading` returns the
+   * player's current direction (null when there is nothing to steer).
+   */
+  initTouchControls(
+    slot: SlotIndex,
+    steerZone: HTMLElement,
+    actionButton: HTMLElement,
+    modeButton: HTMLElement | null,
+    heading: () => number | null,
+  ): void {
     this.touchSlot = slot;
-    this.actionButton = actionButtonEl;
-
-    this.joystick = nipplejs.create({
-      zone: joystickZone,
-      mode: 'static',
-      position: { left: '50%', top: '50%' },
-      color: '#0ff',
-      size: 90,
-      restOpacity: 0.7,
-      lockX: true, // Only horizontal movement for left/right
-    });
-
-    // Proportional steering based on the joystick's X position
-    this.joystick.on('move', (_evt, data) => {
-      const distance = data.distance ?? 0;
-      const angle = data.angle?.degree ?? 0;
-      const xComponent = Math.cos((angle * Math.PI) / 180);  // -1 (left) to 1 (right)
-      const linearSteer = xComponent * Math.min(distance / 45, 1);
-      // Power curve for finer control near the centre
-      this.touchSteer = Math.sign(linearSteer) * Math.pow(Math.abs(linearSteer), 2.5);
-    });
-    this.joystick.on('end', () => {
-      this.touchSteer = 0;
-    });
-
-    actionButtonEl.addEventListener('touchstart', this.handleActionStart, { passive: false });
-    actionButtonEl.addEventListener('touchend', this.handleActionEnd);
-    actionButtonEl.addEventListener('touchcancel', this.handleActionEnd);
+    this.touchHeading = heading;
+    this.touch = new TouchControls(steerZone, actionButton, modeButton);
   }
-
-  private handleActionStart = (e: TouchEvent): void => {
-    e.preventDefault();
-    this.touchAction = true;
-    if (this.actionButton) {
-      this.actionButton.style.transform = 'scale(0.9)';
-      this.actionButton.style.opacity = '1';
-    }
-  };
-
-  private handleActionEnd = (): void => {
-    this.touchAction = false;
-    if (this.actionButton) {
-      this.actionButton.style.transform = 'scale(1)';
-      this.actionButton.style.opacity = '0.7';
-    }
-  };
 
   private handleKeyDown = (e: KeyboardEvent): void => {
     if (!this.gameKeys.has(e.code)) return;
@@ -140,14 +105,7 @@ export class InputManager {
     window.removeEventListener('keyup', this.handleKeyUp);
     window.removeEventListener('blur', this.handleBlur);
 
-    this.joystick?.destroy();
-    this.joystick = null;
-
-    if (this.actionButton) {
-      this.actionButton.removeEventListener('touchstart', this.handleActionStart);
-      this.actionButton.removeEventListener('touchend', this.handleActionEnd);
-      this.actionButton.removeEventListener('touchcancel', this.handleActionEnd);
-      this.actionButton = null;
-    }
+    this.touch?.cleanup();
+    this.touch = null;
   }
 }

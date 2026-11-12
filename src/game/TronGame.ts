@@ -3,6 +3,7 @@
 
 import type { GameScreenOptions, Screen, ScreenManager } from '../screens/ScreenManager';
 import type { GameConfig, TronGameStateData, SoundEvent, RoundPhase } from '../types/game';
+import type { SlotIndex } from '../types/lobby';
 import { LEVELS } from '../types/game';
 import { TICK_RATE } from './constants';
 import { TronRenderer } from './TronRenderer';
@@ -67,6 +68,14 @@ export class TronGame implements Screen {
     return bindings;
   }
 
+  // Direction of a player that can be steered right now (for heading-based touch modes)
+  private steerableHeading(slot: SlotIndex): number | null {
+    const view = this.session.getViewState();
+    if (!view || view.round.phase !== 'playing') return null;
+    const player = view.round.players.find(p => p.slotIndex === slot);
+    return player?.alive ? player.direction : null;
+  }
+
   // One line per local human describing their keys
   private controlsHint(): string {
     const humans = this.config.players.filter(p => p.control.type === 'local');
@@ -92,10 +101,14 @@ export class TronGame implements Screen {
 
     // Touch controls drive the first local human
     if (isTouch && bindings[0]) {
-      const joystickZone = document.getElementById('joystickZone');
+      const steerZone = document.getElementById('steerZone');
       const actionButton = document.getElementById('actionButton');
-      if (joystickZone && actionButton) {
-        this.input.initTouchControls(bindings[0].slot, joystickZone, actionButton);
+      if (steerZone && actionButton) {
+        const slot = bindings[0].slot;
+        this.input.initTouchControls(
+          slot, steerZone, actionButton, document.getElementById('touchModeBtn'),
+          () => this.steerableHeading(slot),
+        );
       }
     }
 
@@ -318,21 +331,91 @@ export class TronGame implements Screen {
           justify-content: center;
           z-index: 10;
         }
-        .control-zone-left {
-          left: 5px;
-          bottom: 5px;
-        }
         .control-zone-right {
           right: 5px;
           bottom: 5px;
         }
+        .steer-zone {
+          position: absolute;
+          left: 0;
+          top: 44px;
+          bottom: 0;
+          width: 50%;
+          z-index: 10;
+          touch-action: none;
+        }
+        .steer-hint {
+          position: absolute;
+          left: 12px;
+          bottom: 8px;
+          color: rgba(0, 255, 255, 0.45);
+          font-family: monospace;
+          font-size: 0.65rem;
+          pointer-events: none;
+        }
+        .steer-pads {
+          position: absolute;
+          left: 8px;
+          bottom: 8px;
+          display: flex;
+          gap: 10px;
+          pointer-events: none;
+        }
+        .steer-pad {
+          width: 84px;
+          height: 84px;
+          border-radius: 14px;
+          background: rgba(0, 255, 255, 0.12);
+          border: 2px solid rgba(0, 255, 255, 0.4);
+          color: rgba(0, 255, 255, 0.8);
+          font-size: 1.8rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .steer-pad.active {
+          background: rgba(0, 255, 255, 0.4);
+          border-color: #0ff;
+        }
+        .steer-stick {
+          position: absolute;
+          border-radius: 50%;
+          background: rgba(0, 255, 255, 0.1);
+          border: 2px solid rgba(0, 255, 255, 0.4);
+          pointer-events: none;
+        }
+        .steer-knob {
+          position: absolute;
+          left: calc(50% - 18px);
+          top: calc(50% - 18px);
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          background: rgba(0, 255, 255, 0.5);
+        }
         .joystick-zone {
+          position: absolute;
+          left: 5px;
+          bottom: 5px;
           width: 100px;
           height: 100px;
-          position: relative;
           background: rgba(0, 255, 255, 0.15);
           border-radius: 50%;
           border: 2px solid rgba(0, 255, 255, 0.4);
+        }
+        .touch-mode-button {
+          position: absolute;
+          top: 5px;
+          height: 32px;
+          padding: 0 8px;
+          font-family: monospace;
+          font-size: 0.7rem;
+          background: rgba(0, 32, 32, 0.7);
+          color: #0ff;
+          border: 1px solid #0ff;
+          border-radius: 4px;
+          z-index: 100;
+          cursor: pointer;
         }
         .action-button {
           width: 60px;
@@ -509,6 +592,7 @@ export class TronGame implements Screen {
           <!-- Top buttons -->
           <button id="backBtn" class="back-button-mobile">✕</button>
           ${this.options.onBackToLobby ? '<button id="lobbyBtn" class="back-button-mobile" style="left: 42px; color: #fc4; border-color: #fc4;" title="Back to lobby">⌂</button>' : ''}
+          <button id="touchModeBtn" class="touch-mode-button" style="left: ${this.options.onBackToLobby ? 84 : 47}px;" title="Steering mode"></button>
           <button id="muteBtn" class="top-button mute-button">${soundManager.isMuted() ? '🔇' : '🔊'}</button>
           <button id="fullscreenBtn" class="top-button fullscreen-button">⛶</button>
 
@@ -530,10 +614,8 @@ export class TronGame implements Screen {
           <div id="gameCanvas" class="canvas-container"></div>
 
           <!-- Overlaid controls -->
-          <!-- Left: Joystick -->
-          <div class="control-zone control-zone-left">
-            <div id="joystickZone" class="joystick-zone"></div>
-          </div>
+          <!-- Left half: steering (built by TouchControls for the selected mode) -->
+          <div id="steerZone" class="steer-zone"></div>
 
           <!-- Right: Action button -->
           <div class="control-zone control-zone-right">
