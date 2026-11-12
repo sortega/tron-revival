@@ -45,7 +45,7 @@ never leaves the area of action (targets are clamped to it). Satellites freeze w
 ## Wear: satellites can be overwhelmed
 
 A satellite has **300 hit points**. Every projectile it blocks costs the same damage that
-projectile does to items and bombs: 10 for a tracer (rifle, Uzi, shotgun pellet, level
+projectile does to items: 10 for a tracer (rifle, Uzi, shotgun pellet, level
 gun), 50 for a Glock bullet. At 0 it is destroyed with a small explosion.
 
 A shotgun blast is 30 pellets, and a satellite in the line of fire stops roughly half of

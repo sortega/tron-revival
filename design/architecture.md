@@ -8,6 +8,7 @@ High-level architecture of the web revival of Teratron. Detailed designs:
 - [level-hazards.md](./level-hazards.md) — per-level hazards: automatic doors, shell bursts, the dentist's hand
 - [projectiles.md](./projectiles.md) — what bullets, tracers and bombs hit, and how
 - [bodyguards.md](./bodyguards.md) — satellites: what they block, attack and how they wear out
+- [teams.md](./teams.md) — team mode: scoring and how it is shown
 - [touch-controls.md](./touch-controls.md) — steering on phones
 - [refactoring-proposal-effects-weapons.md](./refactoring-proposal-effects-weapons.md) — pending
   proposal to split weapons/effects out of the simulation class
@@ -81,6 +82,11 @@ Rules of the layering:
 portals, items, projectiles, explosions, bodyguards, heads, the sidebar and overlays each
 display frame. Trails are persistent pixels; provisional (predicted) trail pixels are drawn
 on top every frame without being stored.
+
+The sidebar has one panel per slot, showing the player's active effect and weapon with the
+time or ammunition left. A player who dies **loses the weapon and effects** (in the
+simulation, not just on screen) and the panel turns grey, like the panel of a slot nobody
+plays in. In team mode the panels use the team colours ([teams.md](./teams.md)).
 
 ## Multiplayer in one paragraph
 

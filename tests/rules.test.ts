@@ -104,6 +104,64 @@ describe('round lifecycle', () => {
   });
 });
 
+describe('death', () => {
+  it('takes away the weapon and the effects', () => {
+    const game = makeGame(3);
+    skipCountdown(game);
+    const p = game.players[0]!;
+    p.equipWeapon('glock', 20);
+    p.activateEffect('shield', 2100);
+    expect(game.serialize().round.players[0]!.equippedWeapon).not.toBeNull();
+    p.kill();
+    game.tick(new Map());
+    const state = game.serialize().round.players[0]!;
+    expect(state.alive).toBe(false);
+    expect(state.equippedWeapon).toBeNull();
+    expect(state.activeEffects).toEqual([]);
+  });
+});
+
+describe('team scoring', () => {
+  const team = (): ReturnType<typeof makeGame> => {
+    const game = makeGame(4, 1, { mode: 'team' });
+    skipCountdown(game);
+    return game;
+  };
+  const scores = (game: ReturnType<typeof makeGame>): number[] => [0, 1, 2, 3].map(s => game.scores.get(s as SlotIndex) ?? 0);
+
+  it('a team finishing with both members alive scores 2', () => {
+    const game = team();
+    game.players[1]!.kill();
+    game.players[3]!.kill();
+    game.tick(new Map());
+    expect(game.phase).toBe('waiting_ready');
+    expect(scores(game)).toEqual([1, 0, 1, 0]);
+  });
+
+  it('only the survivor scores when a team-mate died on the way', () => {
+    const game = team();
+    game.players[0]!.kill();
+    game.tick(new Map());
+    expect(game.phase).toBe('playing');
+    game.players[1]!.kill();
+    game.players[3]!.kill();
+    game.tick(new Map());
+    expect(game.phase).toBe('waiting_ready');
+    // Purple (slots 0 and 2) won with one member standing: team score 1
+    expect(scores(game)).toEqual([0, 0, 1, 0]);
+    expect(game.roundWinner).toBe(2);
+  });
+
+  it('a draw scores nothing', () => {
+    const game = team();
+    for (const p of game.players) p.kill();
+    game.tick(new Map());
+    expect(game.phase).toBe('waiting_ready');
+    expect(scores(game)).toEqual([0, 0, 0, 0]);
+    expect(game.roundWinner).toBe('draw');
+  });
+});
+
 describe('collisions', () => {
   it('kills a player that drives into a level wall', () => {
     const game = makeGame(2);

@@ -36,6 +36,9 @@ import {
 } from '../types/game';
 import { TronPlayer, getStartingPosition } from './TronPlayer';
 
+/** A solid pixel found on a line: wrapped into the arena, and as it lies on the line. */
+type LineHit = { x: number; y: number; rawX: number; rawY: number };
+
 /** The path a tracer travels in one tick, in pixels (the end may lie beyond an edge). */
 interface TracerPath {
   ownerSlot: Projectile['ownerSlot'];
@@ -212,7 +215,6 @@ export class TronGameState {
   private readonly BOMB_KILL_RADIUS = 50;         // Kills players within 50px
   private readonly BOMB_ITEM_DAMAGE_RADIUS = 70;  // Destroys items within 70px
   private readonly BOMB_EXPLOSION_SCALE = 2;    // Large bomb explosion
-  private readonly BOMB_HP = 100;                 // Starting HP
   // The bomb collides as a 12x18 box along its heading (design/projectiles.md)
   private readonly BOMB_HALF_LENGTH = 9;
   private readonly BOMB_HALF_WIDTH = 6;
@@ -889,7 +891,6 @@ export class TronGameState {
       speed: this.BOMB_SPEED,
       type: 'bomb',
       ownerCooldown: this.PROJECTILE_OWNER_COOLDOWN,
-      hp: this.BOMB_HP,
     });
   }
 
@@ -973,7 +974,9 @@ export class TronGameState {
           this.bombImpact(impactPoint.x, impactPoint.y, proj.ownerSlot);
         } else {
           // Clear path up to impact point, then expire
-          this.clearPixelPath(prevX, prevY, impactPoint.x, impactPoint.y);
+          // (to the hit as it lies on the path: beyond an edge it must not be wrapped,
+          // or the line would be drawn back across the whole arena)
+          this.clearPixelPath(prevX, prevY, impactPoint.rawX, impactPoint.rawY);
           this.tracerExpire(impactPoint.x, impactPoint.y);
         }
         toRemove.push(proj.id);
@@ -1008,8 +1011,14 @@ export class TronGameState {
       const tracerHit = proj.type === 'bullet'
         ? this.findTracerOnPath(proj, prevX, prevY, unwrappedX, unwrappedY, tracerPaths)
         : null;
+      // A bullet or tracer that crosses a flying bomb sets it off
+      const bombHit = proj.type === 'bomb'
+        ? null
+        : this.findBombOnPath(prevX, prevY, unwrappedX, unwrappedY, toRemove);
       // Whatever comes first on the path counts
-      const stopT = Math.min(blocker ? blocker.t : Infinity, tracerHit ? tracerHit.t : Infinity);
+      const stopT = Math.min(
+        blocker ? blocker.t : Infinity, tracerHit ? tracerHit.t : Infinity, bombHit ? bombHit.t : Infinity
+      );
 
       // Check collision with players (shield does NOT protect!)
       // Skip player collisions during waiting_ready phase (round is over, let bullets fly visually)
@@ -1049,6 +1058,14 @@ export class TronGameState {
         }
       }
       if (hitPlayer) continue;
+      if (bombHit && bombHit.t <= stopT) {
+        // Any shot sets the bomb off where it is, as a tracer did in the original
+        const bomb = bombHit.bomb;
+        toRemove.push(bomb.id);
+        this.bombImpact(Math.floor(bomb.x / 1000), Math.floor(bomb.y / 1000), bomb.ownerSlot);
+        toRemove.push(proj.id);
+        continue;
+      }
       if (tracerHit && tracerHit.t <= stopT) {
         this.projectileImpact(tracerHit.x, tracerHit.y, proj.ownerSlot);
         toRemove.push(proj.id);
@@ -1094,7 +1111,7 @@ export class TronGameState {
 
       // Check collision with other projectiles
       // - Bullets collide with bullets (mutual destruction + explosion)
-      // - Bullets and tracers can damage bombs (HP system)
+      // - Bullets and tracers set bombs off (handled above, on the path travelled)
       // - Bombs collide with bombs (mega explosion with doubled radii + white flash)
       // - Tracers don't collide with each other (allows shotgun/uzi spread)
       if (proj.type === 'bullet' || proj.type === 'tracer') {
@@ -1105,17 +1122,7 @@ export class TronGameState {
           const otherY = Math.floor(other.y / 1000);
           const dist = Math.sqrt((newX - otherX) ** 2 + (newY - otherY) ** 2);
           if (dist < 3) {  // Small collision radius for projectiles
-            if (other.type === 'bomb' && other.hp !== undefined) {
-              // Bullet/tracer damages bomb HP
-              const damage = proj.type === 'bullet' ? this.GLOCK_DAMAGE : this.TRACER_DAMAGE;
-              other.hp -= damage;
-              toRemove.push(proj.id);  // Bullet/tracer is consumed
-              // If bomb HP <= 0, destroy it (no explosion)
-              if (other.hp <= 0) {
-                toRemove.push(other.id);
-              }
-              break;
-            } else if (proj.type === 'bullet' && other.type === 'bullet') {
+            if (proj.type === 'bullet' && other.type === 'bullet') {
               // Two bullets collide - mutual destruction + explosion
               const midX = Math.floor((newX + otherX) / 2);
               const midY = Math.floor((newY + otherY) / 2);
@@ -1184,8 +1191,30 @@ export class TronGameState {
     this.frameClearedAreas.push({ x, y, w: size, h: size });
   }
 
+  // Clear a disc (wraps) from the collision map, reported to the renderer as a stack of
+  // strips: consecutive rows of the same width share one
+  private clearCircle(cx: number, cy: number, radius: number): void {
+    let stripTop = 0;
+    let stripHalf = -1;
+    const flush = (bottom: number): void => {
+      if (stripHalf < 0) return;
+      const area = { x: cx - stripHalf, y: stripTop, w: 2 * stripHalf + 1, h: bottom - stripTop };
+      this.pixels.clearRect(area.x, area.y, area.w, area.h);
+      this.frameClearedAreas.push(area);
+    };
+    for (let dy = -radius; dy <= radius; dy++) {
+      const half = Math.floor(Math.sqrt(radius * radius - dy * dy));
+      if (half !== stripHalf) {
+        flush(cy + dy);
+        stripTop = cy + dy;
+        stripHalf = half;
+      }
+    }
+    flush(cy + radius + 1);
+  }
+
   // Check all pixels along a line for collision (Bresenham's algorithm)
-  private checkLineCollision(x0: number, y0: number, x1: number, y1: number): { x: number; y: number } | null {
+  private checkLineCollision(x0: number, y0: number, x1: number, y1: number): LineHit | null {
     return this.pixels.firstHitOnLine(x0, y0, x1, y1);
   }
 
@@ -1193,7 +1222,7 @@ export class TronGameState {
   // Returns the first collision point or null
   private checkThickLineCollision(
     x0: number, y0: number, x1: number, y1: number, halfWidth: number
-  ): { x: number; y: number } | null {
+  ): LineHit | null {
     // Check the center line first
     const centerHit = this.checkLineCollision(x0, y0, x1, y1);
     if (centerHit) return centerHit;
@@ -1226,6 +1255,47 @@ export class TronGameState {
     }
 
     return null;
+  }
+
+  // The first flying bomb whose body a bullet's or tracer's path crosses this tick
+  private findBombOnPath(
+    x0: number, y0: number, x1: number, y1: number, removed: readonly number[]
+  ): { bomb: Projectile; t: number } | null {
+    let best: { bomb: Projectile; t: number } | null = null;
+    for (const bomb of this.projectiles) {
+      if (bomb.type !== 'bomb' || removed.includes(bomb.id)) continue;
+      // The path in the bomb's own frame: x along its heading, y across
+      const bx = bomb.x / 1000;
+      const by = bomb.y / 1000;
+      const sx = this.wrapDelta(x0 - bx, PLAY_WIDTH);
+      const sy = this.wrapDelta(y0 - by, PLAY_HEIGHT);
+      const rad = (bomb.direction * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const ax = sx * cos + sy * sin;
+      const ay = -sx * sin + sy * cos;
+      const dx = (x1 - x0) * cos + (y1 - y0) * sin;
+      const dy = -(x1 - x0) * sin + (y1 - y0) * cos;
+
+      // Segment against the box (slab test)
+      let enter = 0;
+      let leave = 1;
+      let crosses = true;
+      for (const [start, delta, half] of [
+        [ax, dx, this.BOMB_HALF_LENGTH + 1], [ay, dy, this.BOMB_HALF_WIDTH + 1],
+      ] as const) {
+        if (Math.abs(delta) < 1e-9) {
+          if (Math.abs(start) > half) crosses = false;
+          continue;
+        }
+        const t1 = (-half - start) / delta;
+        const t2 = (half - start) / delta;
+        enter = Math.max(enter, Math.min(t1, t2));
+        leave = Math.min(leave, Math.max(t1, t2));
+      }
+      if (crosses && enter <= leave && (!best || enter < best.t)) best = { bomb, t: enter };
+    }
+    return best;
   }
 
   // Where a bullet's path this tick first comes within reach of a tracer's path.
@@ -1435,119 +1505,44 @@ export class TronGameState {
 
   // Handle bomb impact - large explosion, clear area, kill nearby players
   private bombImpact(x: number, y: number, ownerSlot?: Projectile['ownerSlot']): void {
-    // Create large explosion animation (150% scale)
+    this.blast(x, y, 1, ownerSlot);
+    this.queueSound('explosion');
+  }
+
+  // A bomb blast: everything within a circle goes (design/projectiles.md). `scale`
+  // multiplies the radii (2 for two bombs colliding).
+  private blast(x: number, y: number, scale: number, ownerSlot?: Projectile['ownerSlot']): void {
     this.explosions.push({
       id: this.nextExplosionId++,
       x,
       y,
       frame: 0,
-      scale: this.BOMB_EXPLOSION_SCALE,
+      scale: this.BOMB_EXPLOSION_SCALE * scale,
     });
 
-    // Clear the blast area (wraps around edges)
-    this.clearSquare(x - this.BOMB_CLEAR_RADIUS, y - this.BOMB_CLEAR_RADIUS, 2 * this.BOMB_CLEAR_RADIUS);
+    this.clearCircle(x, y, this.BOMB_CLEAR_RADIUS * scale);
 
-    // Kill players within 50 pixels (with wraparound distance check)
+    const within = (px: number, py: number, radius: number): boolean =>
+      Math.hypot(this.wrapDelta(px - x, PLAY_WIDTH), this.wrapDelta(py - y, PLAY_HEIGHT)) < radius;
+
     for (const player of this.players) {
       if (!player.alive) continue;
-      const px = player.getScreenX();
-      const py = player.getScreenY();
-      // Wraparound distance check (original game behavior)
-      const dx = Math.abs(px - x);
-      const dy = Math.abs(py - y);
-      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
-      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
-      if (wrapDx < this.BOMB_KILL_RADIUS && wrapDy < this.BOMB_KILL_RADIUS) {
+      if (within(player.getScreenX(), player.getScreenY(), this.BOMB_KILL_RADIUS * scale)) {
         const isSelfKill = ownerSlot !== undefined && player.slotIndex === ownerSlot;
         this.killPlayerWithSound(player, isSelfKill, 'bomb');
       }
     }
-
-    // Destroy items within 70 pixels (with wraparound)
     for (const item of this.items) {
-      if (!item.active) continue;
-      const dx = Math.abs(item.x - x);
-      const dy = Math.abs(item.y - y);
-      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
-      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
-      if (wrapDx < this.BOMB_ITEM_DAMAGE_RADIUS && wrapDy < this.BOMB_ITEM_DAMAGE_RADIUS) {
-        item.active = false;
-      }
+      if (item.active && within(item.x, item.y, this.BOMB_ITEM_DAMAGE_RADIUS * scale)) item.active = false;
     }
-
-    // Destroy bodyguards within bomb radius
     for (const bg of this.bodyguards) {
-      const bgX = bg.x / 1000;
-      const bgY = bg.y / 1000;
-      const dx = Math.abs(bgX - x);
-      const dy = Math.abs(bgY - y);
-      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
-      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
-      if (wrapDx < this.BOMB_KILL_RADIUS && wrapDy < this.BOMB_KILL_RADIUS) {
-        bg.id = -1; // Mark for removal
-      }
+      if (within(bg.x / 1000, bg.y / 1000, this.BOMB_KILL_RADIUS * scale)) bg.id = -1; // Mark for removal
     }
-
-    this.queueSound('explosion');
   }
 
   // Handle mega bomb impact (bomb-on-bomb collision) - doubled radii and white flash
   private megaBombImpact(x: number, y: number): void {
-    const clearRadius = this.BOMB_CLEAR_RADIUS * 2;
-    const killRadius = this.BOMB_KILL_RADIUS * 2;
-    const itemDamageRadius = this.BOMB_ITEM_DAMAGE_RADIUS * 2;
-    const explosionScale = this.BOMB_EXPLOSION_SCALE * 2;  // Doubled to match area
-
-    // Create mega explosion animation
-    this.explosions.push({
-      id: this.nextExplosionId++,
-      x,
-      y,
-      frame: 0,
-      scale: explosionScale,
-    });
-
-    // Clear the blast area (wraps around edges)
-    this.clearSquare(x - clearRadius, y - clearRadius, 2 * clearRadius);
-
-    // Kill players within doubled radius (with wraparound distance check)
-    for (const player of this.players) {
-      if (!player.alive) continue;
-      const px = player.getScreenX();
-      const py = player.getScreenY();
-      const dx = Math.abs(px - x);
-      const dy = Math.abs(py - y);
-      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
-      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
-      if (wrapDx < killRadius && wrapDy < killRadius) {
-        this.killPlayerWithSound(player, false, 'bomb');
-      }
-    }
-
-    // Destroy items within doubled radius (with wraparound)
-    for (const item of this.items) {
-      if (!item.active) continue;
-      const dx = Math.abs(item.x - x);
-      const dy = Math.abs(item.y - y);
-      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
-      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
-      if (wrapDx < itemDamageRadius && wrapDy < itemDamageRadius) {
-        item.active = false;
-      }
-    }
-
-    // Destroy bodyguards within doubled radius
-    for (const bg of this.bodyguards) {
-      const bgX = bg.x / 1000;
-      const bgY = bg.y / 1000;
-      const dx = Math.abs(bgX - x);
-      const dy = Math.abs(bgY - y);
-      const wrapDx = dx > PLAY_WIDTH / 2 ? PLAY_WIDTH - dx : dx;
-      const wrapDy = dy > PLAY_HEIGHT / 2 ? PLAY_HEIGHT - dy : dy;
-      if (wrapDx < killRadius && wrapDy < killRadius) {
-        bg.id = -1; // Mark for removal
-      }
-    }
+    this.blast(x, y, 2);
 
     // Trigger white flash effect
     this.whiteFlashRemainingFrames = this.WHITE_FLASH_DURATION;
@@ -2232,15 +2227,11 @@ export class TronGameState {
       this.roundWinner = winner.slotIndex;
       this.scores.set(winner.slotIndex, (this.scores.get(winner.slotIndex) || 0) + 1);
     } else {
-      // Team mode: Winning team members all get a point
-      const winningTeam = winner.slotIndex % 2; // 0 for team 1, 1 for team 2
-      this.roundWinner = winner.slotIndex; // Representative winner
-
-      // Award points to all team members
-      for (const player of this.players) {
-        if (player.slotIndex % 2 === winningTeam) {
-          this.scores.set(player.slotIndex, (this.scores.get(player.slotIndex) || 0) + 1);
-        }
+      // Team mode (design/teams.md): every player still standing scores a win; the
+      // team score is the sum of its members' wins
+      this.roundWinner = winner.slotIndex; // Representative of the winning team
+      for (const player of alivePlayers) {
+        this.scores.set(player.slotIndex, (this.scores.get(player.slotIndex) || 0) + 1);
       }
     }
   }

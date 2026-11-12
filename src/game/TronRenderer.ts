@@ -1,7 +1,7 @@
 // TronRenderer - Canvas rendering for the Tron game
 
-import type { SlotIndex } from '../types/lobby';
-import { FFA_COLORS, TEAM_COLORS } from '../types/lobby';
+import type { GameMode, SlotIndex } from '../types/lobby';
+import { FFA_COLORS, TEAM_COLORS, getSlotColor, getSlotColorName } from '../types/lobby';
 import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard, DeathCause } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { BODYGUARD_HP } from '../types/game';
@@ -255,7 +255,7 @@ export class TronRenderer {
     }
 
     // Draw status panel
-    this.renderStatusPanel(round.players);
+    this.renderStatusPanel(round.players, match.gameMode);
 
     // Draw overlays based on phase
     switch (round.phase) {
@@ -651,7 +651,7 @@ export class TronRenderer {
     this.ctx.shadowBlur = 0;
   }
 
-  private renderStatusPanel(playerStates: TronPlayerState[]): void {
+  private renderStatusPanel(playerStates: TronPlayerState[], gameMode: GameMode): void {
     const panelX = PLAY_WIDTH;
     const slotHeight = CANVAS_HEIGHT / 4;
 
@@ -659,7 +659,8 @@ export class TronRenderer {
     if (this.spriteAtlas?.isLoaded()) {
       this.spriteAtlas.draw(
         this.ctx,
-        'sidebar',
+        // Team colours in team mode (design/teams.md)
+        gameMode === 'team' ? 'sidebar_team' : 'sidebar',
         panelX + STATUS_WIDTH / 2,
         CANVAS_HEIGHT / 2
       );
@@ -671,9 +672,8 @@ export class TronRenderer {
       const player = this.players.find(p => p.slotIndex === slotIndex);
       const playerState = playerStates.find(p => p.slotIndex === slotIndex);
 
-      // Fade the panel's colour: half-way to greyscale for dead players, fully
-      // greyscale for slots nobody is playing in
-      const desaturation = !player || !playerState ? 1 : playerState.alive ? 0 : 0.5;
+      // The panel of a dead player, or of a slot nobody plays in, is grey
+      const desaturation = player && playerState?.alive ? 0 : 1;
       if (desaturation > 0) {
         this.ctx.save();
         this.ctx.globalCompositeOperation = 'saturation';
@@ -785,7 +785,13 @@ export class TronRenderer {
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
     const title = match.currentRound > 1 ? `ROUND ${match.currentRound}` : 'GET READY';
-    this.ctx.fillText(title, PLAY_WIDTH / 2, CANVAS_HEIGHT / 2 - 100);
+    const team = match.gameMode === 'team';
+    // In team mode the team scores are the headline, and the table moves down
+    const shift = team ? 35 : 0;
+    this.ctx.fillText(title, PLAY_WIDTH / 2, CANVAS_HEIGHT / 2 - 100 - shift);
+    const teamScores = [0, 1].map(t =>
+      this.players.reduce((sum, p) => sum + (p.slotIndex % 2 === t ? match.scores[p.slotIndex] || 0 : 0), 0));
+    if (team) this.drawTeamScores(teamScores, roundWinner, CANVAS_HEIGHT / 2 - 45 - shift);
 
     // Column positions - more room for nicknames
     const winsX = PLAY_WIDTH / 2 - 200;
@@ -798,7 +804,7 @@ export class TronRenderer {
     this.ctx.fillStyle = '#888';
     this.ctx.font = 'bold 14px monospace';
     this.ctx.textBaseline = 'alphabetic';
-    const headerY = CANVAS_HEIGHT / 2 - 55;
+    const headerY = CANVAS_HEIGHT / 2 - 55 + shift;
     this.ctx.textAlign = 'right';
     this.ctx.fillText('Wins', winsX, headerY);
     this.ctx.fillText('MR', mrX, headerY);
@@ -806,7 +812,7 @@ export class TronRenderer {
     this.ctx.fillText('Player', nicknameX, headerY);
 
     // Player scores and ready status
-    const startY = CANVAS_HEIGHT / 2 - 30;
+    const startY = CANVAS_HEIGHT / 2 - 30 + shift;
 
     // Determine winner for emoji display (in team mode, winning team members get trophy)
     const isWinner = (slotIndex: SlotIndex): boolean => {
@@ -818,7 +824,12 @@ export class TronRenderer {
     };
 
     // Sort players by score (descending), then by ridiculous deaths (ascending) to break ties
+    // In team mode: grouped by team, the leading team first
     const sortedPlayers = [...this.players].sort((a, b) => {
+      if (team && a.slotIndex % 2 !== b.slotIndex % 2) {
+        const lead = teamScores[b.slotIndex % 2]! - teamScores[a.slotIndex % 2]!;
+        return lead !== 0 ? lead : (a.slotIndex % 2) - (b.slotIndex % 2);
+      }
       const scoreA = match.scores[a.slotIndex] || 0;
       const scoreB = match.scores[b.slotIndex] || 0;
       if (scoreB !== scoreA) return scoreB - scoreA;
@@ -883,6 +894,39 @@ export class TronRenderer {
     this.ctx.textAlign = 'center';
     const instructionY = startY + this.players.length * 35 + 40;
     this.ctx.fillText('Press ACTION when ready', PLAY_WIDTH / 2, instructionY);
+  }
+
+  // The headline between rounds of a team game: PURPLE 5 : 3 BROWN
+  private drawTeamScores(scores: number[], roundWinner: SlotIndex | 'draw' | null, y: number): void {
+    const centerX = PLAY_WIDTH / 2;
+    const won = (t: number): boolean => roundWinner !== null && roundWinner !== 'draw' && roundWinner % 2 === t;
+    this.ctx.save();
+    this.ctx.textBaseline = 'middle';
+    this.ctx.font = 'bold 40px monospace';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillStyle = '#888';
+    this.ctx.fillText(':', centerX, y - 3);
+
+    const sides = [
+      { t: 0, align: 'right' as const, dir: -1 },
+      { t: 1, align: 'left' as const, dir: 1 },
+    ];
+    for (const { t, align, dir } of sides) {
+      const color = getSlotColor('team', t as SlotIndex);
+      this.ctx.textAlign = align;
+      this.ctx.shadowColor = color;
+      this.ctx.shadowBlur = 12;
+      this.ctx.fillStyle = '#fff';
+      this.ctx.font = 'bold 44px monospace';
+      this.ctx.fillText(String(scores[t] ?? 0), centerX + dir * 24, y);
+      this.ctx.shadowBlur = 0;
+      this.ctx.fillStyle = color;
+      this.ctx.font = 'bold 22px monospace';
+      const name = getSlotColorName('team', t as SlotIndex).toUpperCase();
+      const label = won(t) ? (dir < 0 ? `🏆 ${name}` : `${name} 🏆`) : name;
+      this.ctx.fillText(label, centerX + dir * 90, y);
+    }
+    this.ctx.restore();
   }
 
   // Clean up

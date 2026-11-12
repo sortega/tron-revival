@@ -39,10 +39,11 @@ describe('PixelGrid', () => {
     const g = new PixelGrid();
     g.set(2, 5, '#fff');
     g.set(8, 5, '#fff');
-    expect(g.firstHitOnLine(0, 5, 20, 5)).toEqual({ x: 2, y: 5 });
-    expect(g.firstHitOnLine(PLAY_WIDTH - 3, 5, PLAY_WIDTH + 10, 5)).toEqual({ x: 2, y: 5 });
+    expect(g.firstHitOnLine(0, 5, 20, 5)).toEqual({ x: 2, y: 5, rawX: 2, rawY: 5 });
+    // Beyond the edge: wrapped, and as it lies on the line
+    expect(g.firstHitOnLine(PLAY_WIDTH - 3, 5, PLAY_WIDTH + 10, 5)).toEqual({ x: 2, y: 5, rawX: PLAY_WIDTH + 2, rawY: 5 });
     g.clearLine(0, 5, 5, 5);
-    expect(g.firstHitOnLine(0, 5, 20, 5)).toEqual({ x: 8, y: 5 });
+    expect(g.firstHitOnLine(0, 5, 20, 5)).toEqual({ x: 8, y: 5, rawX: 8, rawY: 5 });
     expect(g.firstHitOnLine(0, 6, 20, 6)).toBeNull();
   });
 

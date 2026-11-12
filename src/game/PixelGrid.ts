@@ -14,7 +14,7 @@ function wrap(v: number, size: number): number {
  */
 export function forEachLinePixel(
   x0: number, y0: number, x1: number, y1: number,
-  fn: (x: number, y: number) => boolean | void
+  fn: (x: number, y: number, rawX: number, rawY: number) => boolean | void
 ): void {
   const dx = Math.abs(x1 - x0);
   const dy = Math.abs(y1 - y0);
@@ -24,7 +24,7 @@ export function forEachLinePixel(
   let x = x0;
   let y = y0;
   for (;;) {
-    if (fn(wrap(x, PLAY_WIDTH), wrap(y, PLAY_HEIGHT))) return;
+    if (fn(wrap(x, PLAY_WIDTH), wrap(y, PLAY_HEIGHT), x, y)) return;
     if (x === x1 && y === y1) return;
     const e2 = 2 * err;
     if (e2 > -dy) { err -= dy; x += sx; }
@@ -123,12 +123,17 @@ export class PixelGrid {
     });
   }
 
-  /** First occupied pixel on a line (wrapping), or null. */
-  firstHitOnLine(x0: number, y0: number, x1: number, y1: number): { x: number; y: number } | null {
-    let hit: { x: number; y: number } | null = null;
-    forEachLinePixel(x0, y0, x1, y1, (x, y) => {
+  /**
+   * First occupied pixel on a line (wrapping), or null. `rawX`/`rawY` are the same
+   * pixel before wrapping, i.e. on the line as given.
+   */
+  firstHitOnLine(
+    x0: number, y0: number, x1: number, y1: number
+  ): { x: number; y: number; rawX: number; rawY: number } | null {
+    let hit: { x: number; y: number; rawX: number; rawY: number } | null = null;
+    forEachLinePixel(x0, y0, x1, y1, (x, y, rawX, rawY) => {
       if (this.cells[y * PLAY_WIDTH + x] !== 0) {
-        hit = { x, y };
+        hit = { x, y, rawX, rawY };
         return true;
       }
       return false;

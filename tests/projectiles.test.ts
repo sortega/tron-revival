@@ -46,6 +46,32 @@ describe('projectiles and the arena edges', () => {
   });
 });
 
+describe('tracers and the arena edges', () => {
+  it('a tracer that hits something just across an edge only erases its own path', () => {
+    const grid = new PixelGrid();
+    // A wall along the top edge, which a tracer leaving through the bottom edge hits on
+    // the very tick it wraps; and markers half-way up the arena on the column it flies along
+    for (let x = 300; x <= 450; x++) for (let y = 0; y <= 5; y++) grid.set(x, y, '#fff');
+    for (let x = 365; x <= 385; x++) grid.set(x, 300, '#888');
+    const g = arena(1, grid);
+    place(g, 0, 375, 560, 90);    // heading down, 40 px from the bottom edge
+    place(g, 1, 100, 100, 180);
+    g.players[0]!.equipWeapon('rifle', 200);
+    for (let i = 0; i < 40; i++) {
+      g.tick(inputs({ action: true }, {}));
+      g.items.length = 0;
+      g.serialize();
+    }
+    const pixels = (g as unknown as { pixels: PixelGrid }).pixels;
+    // The wall was hit (so tracers did wrap)...
+    let wallLeft = 0;
+    for (let x = 365; x <= 385; x++) for (let y = 0; y <= 5; y++) if (pixels.has(x, y)) wallLeft++;
+    expect(wallLeft).toBeLessThan(21 * 6);
+    // ...and nothing was erased half-way up the arena
+    for (let x = 365; x <= 385; x++) expect(pixels.has(x, 300), `marker at x=${x}`).toBe(true);
+  });
+});
+
 describe('H-bomb body', () => {
   it('never flies through a player', () => {
     // Bombs fired to pass close to a moving player, from all sides
@@ -173,5 +199,125 @@ describe('bullets against tracers', () => {
       if (g.getProjectiles().some(p => p.type === 'bullet')) flew++;
     }
     expect(flew).toBe(30);
+  });
+});
+
+describe('shooting down an H-bomb', () => {
+  /** Player 0 launches a bomb to the right and gets well clear of it. */
+  function bombInFlight(): { g: ReturnType<typeof arena>; bomb: () => { x: number; y: number } | undefined } {
+    const g = arena();
+    place(g, 0, 200, 300, 0);
+    place(g, 1, 600, 500, 180);
+    g.players[0]!.equipWeapon('bomb', 1);
+    g.tick(inputs({ action: true }, {}));
+    g.items.length = 0;
+    // The bomb does 2 px/tick and the bomber 1: let it get out of its own blast radius
+    for (let i = 0; i < 80; i++) g.tick(inputs({}, {}));
+    g.serialize();
+    return { g, bomb: () => g.getProjectiles().find(p => p.type === 'bomb') };
+  }
+  /** A level-gun style tracer at 40 px/tick, going up, starting 20 px below (x, y). */
+  function tracerBelow(g: ReturnType<typeof arena>, x: number, y: number): void {
+    (g.getProjectiles() as unknown as Record<string, unknown>[]).push({
+      id: 9999, x, y: y + 20_000, direction: 270, ownerSlot: -1,
+      speed: 40_000, type: 'tracer', remainingFrames: 10, ownerCooldown: 0,
+    });
+  }
+  const blasts = (g: ReturnType<typeof arena>): number =>
+    g.serialize().round.explosions.filter(e => (e.scale ?? 1) > 1 && e.frame === 0).length;
+
+  it('a single fast tracer through its body sets it off', () => {
+    const { g, bomb } = bombInFlight();
+    const b = bomb()!;
+    // Its end positions are 20 px either side of the bomb: only the path crosses it
+    tracerBelow(g, b.x + 2000, b.y);
+    g.tick(inputs({}, {}));
+    expect(bomb()).toBeUndefined();
+    expect(blasts(g)).toBe(1);
+    expect(g.getProjectiles().some(p => p.id === 9999)).toBe(false);
+    // The bomber was far enough away
+    expect(g.players[0]!.alive).toBe(true);
+  });
+
+  it('a tracer passing beside it does nothing', () => {
+    const { g, bomb } = bombInFlight();
+    const b = bomb()!;
+    tracerBelow(g, b.x + 30_000, b.y);
+    g.tick(inputs({}, {}));
+    expect(bomb()).toBeDefined();
+    expect(blasts(g)).toBe(0);
+    expect(g.getProjectiles().some(p => p.id === 9999)).toBe(true);
+  });
+
+  it('rifle fire sets off an oncoming bomb before it arrives', () => {
+    const g = arena();
+    place(g, 0, 150, 300, 0);     // bomber, heading right
+    place(g, 1, 600, 300, 180);   // rifle, facing the bomb
+    g.players[0]!.equipWeapon('bomb', 1);
+    g.players[1]!.equipWeapon('rifle', 200);
+    const seen: number[] = [];
+    for (let i = 0; i < 90 && g.phase === 'playing'; i++) {
+      g.tick(inputs({ action: i === 0 }, { action: true }));
+      g.items.length = 0;
+      const frame = g.serialize();
+      for (const e of frame.round.explosions) {
+        if ((e.scale ?? 1) > 1 && e.frame === 0) seen.push(Math.abs(e.x - g.players[1]!.x / 1000));
+      }
+    }
+    // It blew up in mid-flight, far from the rifle
+    expect(seen.length).toBe(1);
+    expect(seen[0]).toBeGreaterThan(100);
+    expect(g.getProjectiles().some(p => p.type === 'bomb')).toBe(false);
+    expect(g.players[1]!.alive).toBe(true);
+  });
+});
+
+describe('H-bomb blast', () => {
+  /** Detonate a bomb on a wall at x = 400 and return the game right after. */
+  function detonate(setup: (g: ReturnType<typeof arena>) => void): { g: ReturnType<typeof arena>; x: number; y: number } {
+    const grid = new PixelGrid();
+    for (let y = 290; y <= 310; y++) grid.set(400, y, '#fff');
+    // Something to erase all around
+    for (let y = 200; y <= 400; y += 2) for (let x = 300; x <= 500; x += 2) if (x !== 400) grid.set(x, y, '#888');
+    const g = arena(1, grid);
+    // The bomber comes along a corridor cleared in the filler
+    for (let x = 150; x < 400; x++) for (let y = 292; y <= 308; y++) (g as unknown as { pixels: PixelGrid }).pixels.delete(x, y);
+    place(g, 0, 200, 300, 0);
+    place(g, 1, 700, 550, 180);
+    setup(g);
+    g.players[0]!.equipWeapon('bomb', 1);
+    let at = { x: 0, y: 0 };
+    for (let i = 0; i < 200; i++) {
+      g.tick(inputs({ action: i === 0 }, {}));
+      const blast = g.serialize().round.explosions.find(e => (e.scale ?? 1) > 1);
+      if (blast) {
+        at = { x: blast.x, y: blast.y };
+        break;
+      }
+    }
+    return { g, ...at };
+  }
+
+  it('clears a disc of 60 px, not a square', () => {
+    const { g, x, y } = detonate(() => {});
+    const pixels = (g as unknown as { pixels: PixelGrid }).pixels;
+    expect(x).toBe(400);
+    // Inside the disc: gone. In the corners of the old 120 px square: still there.
+    expect(pixels.has(x + 40, y + 40)).toBe(false);          // 56.6 px away
+    expect(pixels.has(x - 58, y)).toBe(false);
+    expect(pixels.has(x + 50, y + 50)).toBe(true);           // 70.7 px away
+    expect(pixels.has(x - 56, y - 56)).toBe(true);
+    expect(pixels.has(x + 62, y)).toBe(true);
+  });
+
+  it('kills players and destroys items within a circle', () => {
+    const { g } = detonate(game => {
+      // 45 px away diagonally would be inside the old 50 px square (32, 32 offsets
+      // are), 40/40 is 56.6 px away: outside the circle but inside the old square
+      game.items.push({ id: 1, sprite: 'glock', category: 'weapon', x: 400 + 45, y: 300 + 45, active: true, hp: 40 }); // 63.6 px: inside 70
+      game.items.push({ id: 2, sprite: 'glock', category: 'weapon', x: 400 + 55, y: 300 + 55, active: true, hp: 40 }); // 77.8 px: outside, old square would take it
+    });
+    expect(g.items.find(i => i.id === 1)!.active).toBe(false);
+    expect(g.items.find(i => i.id === 2)!.active).toBe(true);
   });
 });

@@ -177,8 +177,11 @@ export class TronPlayer {
   }
 
   // Kill the player
+  // A dead player loses everything it was carrying
   kill(): void {
     this.alive = false;
+    this.equippedWeapon = null;
+    this.activeEffects = [];
   }
 
   // Reset for new round

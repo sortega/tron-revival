@@ -200,8 +200,10 @@ Design: `design/networking.md` (rewritten)
 
 - [x] Satellites (bodyguards) freeze when the round ends
 - [x] Projectiles freeze when the round ends
-- [x] Sidebar: desaturate a player's panel halfway to black-and-white while they are dead, and
-      fully black-and-white for slots that are not playing
+- [x] Sidebar: grey panel for dead players (who lose their weapon and effects) and for
+      slots that are not playing; team colours in team mode (`sidebar_team`)
+- [x] Team mode: every survivor scores, team score = sum, shown as the headline between
+      rounds (`design/teams.md`)
 - [x] Round summary shows how each player died
 - [x] Level 8 ("Portals"): automatic doors, as in the original (geometry, placement and
       timing taken from `TRON.FPG` / `TRON.PRG`); they kill on contact even through a shield,
@@ -233,8 +235,9 @@ Rules: `design/projectiles.md`.
 - [x] H-bomb collides as its 12×18 body: no more flying through a player; explodes when
       its nose touches a wall
 - [x] Glock bullets explode when they cross a tracer (Uzi/rifle fire shoots them down)
-- [ ] Tracer/bullet damage to a flying H-bomb still compares end positions only, so fast
-      tracers can pass through a bomb without damaging it
+- [x] A single tracer or bullet crossing a flying H-bomb sets it off (whole-path test)
+- [x] A tracer hitting something on the tick it wraps erased a line across the whole arena
+- [x] H-bomb blast is a circle (cleared area, players, items, satellites)
 - [x] Satellites (`design/bodyguards.md`): intercept shots on their course instead of
       chasing them, attack players who enter their area, wear out (300 HP) so repeated
       shotgun blasts overwhelm them; contact tests are swept and wrap-aware

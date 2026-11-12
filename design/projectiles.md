@@ -42,9 +42,12 @@ explodes on any lit pixel it touches.
 - Tracers do not collide with each other (a shotgun spread would destroy itself), and two
   bullets that meet destroy each other in one explosion.
 
-Not like the original: an H-bomb does not explode on a tracer. It has 100 hit points
-instead; a tracer takes 10 and a bullet 50, and at zero the bomb is destroyed without a
-blast. (That test still compares end positions only.)
+An H-bomb is as touchy as in the original: **a single tracer or bullet that crosses its
+body sets it off**, where it is and with its normal blast — so shooting a bomb down is
+only safe from a distance. The shot is used up. As everywhere else, the test is the shot's
+whole path in the tick against the bomb's 12 × 18 body, and the first thing on the path
+counts. (In the original a bullet, being a sprite, did not interact with a bomb; here it
+sets it off like a tracer.)
 
 ## H-bomb
 
@@ -61,7 +64,20 @@ background.)
 - **Items**: within 15 px of the path, as for any projectile.
 - **Other bombs**: box against box; two bombs make a mega explosion.
 
-The blast is centred on the pixel or player that was hit.
+### Blast
+
+The blast is centred on the pixel or player that was hit, and it is **round** (the original
+used squares):
+
+| | Radius |
+|---|---|
+| Trails and scenery erased | 60 px |
+| Players killed (shield or not), satellites destroyed | 50 px |
+| Items destroyed | 70 px |
+
+Distances wrap around the arena edges. Two bombs that collide make one blast with all three
+radii doubled. The erased disc reaches guests and the renderer as a stack of horizontal
+strips in `clearedAreas`.
 
 ## Validation
 
@@ -72,6 +88,17 @@ The blast is centred on the pixel or player that was hit.
 - Random bomb fly-bys: the bomb never survives a tick in which a player's head is inside
   its body.
 - A bomb flown at a wall explodes when its nose reaches the wall, not its centre.
+- The blast erases a disc: pixels 57 px away diagonally go, pixels in the corners of the
+  old square stay; an item 64 px away is destroyed, one 78 px away is not.
 - A bullet fired into Uzi fire from 8 directions and 3 distances never reaches the Uzi's
   owner; one meeting a rifle tracer head-on explodes half-way; a shooter's own tracers do
   not set off their bullet.
+- A single fast tracer whose path crosses a bomb sets it off; one passing beside it does
+  nothing; rifle fire sets off an oncoming bomb in mid-flight, far from the shooter.
+- The blast erases a disc: pixels 57 px away diagonally go, pixels in the corners of the
+  old square stay; an item 64 px away is destroyed, one 78 px away is not.
+- A bullet fired into Uzi fire from 8 directions and 3 distances never reaches the Uzi's
+  owner; one meeting a rifle tracer head-on explodes half-way; a shooter's own tracers do
+  not set off their bullet.
+- Rifle fire sets off an oncoming bomb in mid-flight, far from the shooter; a single tracer through
+  its body takes exactly 10 points and disappears.
