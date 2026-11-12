@@ -125,6 +125,7 @@ export interface TronRoundState {
   explosions: Explosion[];     // Active explosion animations
   bodyguards: Bodyguard[];     // Active bodyguards
   doorTick: number;            // Playing ticks elapsed this round (clock of the level's doors)
+  hand?: HandView;             // The dentist's hand, on its level
 }
 
 // Match state (scores, ready status)
@@ -219,6 +220,8 @@ export type { DoorDefinition } from '../game/doors';
 import { gunFromPoints } from '../game/guns';
 import type { GunDefinition } from '../game/guns';
 export type { GunDefinition } from '../game/guns';
+import type { HandDefinition, HandView } from '../game/hand';
+export type { HandDefinition, HandView } from '../game/hand';
 
 export interface LevelDefinition {
   id: string;
@@ -228,17 +231,29 @@ export interface LevelDefinition {
   doors?: DoorDefinition[];
   /** Guns that fire shell bursts at random (design/level-hazards.md) */
   guns?: GunDefinition[];
+  /** The dentist's hand (design/level-hazards.md) */
+  hand?: HandDefinition;
 }
 
 // Level image filenames (relative to /assets/levels/)
 // The full path is constructed at runtime using import.meta.env.BASE_URL
-export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string; doors?: DoorDefinition[]; guns?: GunDefinition[] }[] = [
+export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string; doors?: DoorDefinition[]; guns?: GunDefinition[]; hand?: HandDefinition }[] = [
   { id: 'blank', name: 'Blank', imageFile: 'blank.png' },
   { id: 'pop-culture', name: 'Pop Culture', imageFile: 'pop-culture.png' },
   { id: 'selva', name: 'Selva', imageFile: 'selva.png' },
   { id: 'bricks', name: 'Bricks', imageFile: 'bricks.png' },
   { id: 'bus', name: 'Bus', imageFile: 'bus.png' },
-  { id: 'dentistry', name: 'Dentistry', imageFile: 'dentistry.png' },
+  {
+    id: 'dentistry', name: 'Dentistry', imageFile: 'dentistry.png',
+    // Control points 1-30 of the original map 205: teeth, mostly
+    hand: { targets: ([
+      [59, 20], [109, 38], [181, 17], [335, 26], [478, 13], [443, 21],
+      [356, 45], [628, 73], [570, 49], [98, 571], [72, 588], [177, 577],
+      [239, 573], [321, 553], [368, 576], [432, 562], [485, 556], [565, 570],
+      [621, 584], [615, 554], [631, 200], [615, 212], [256, 424], [262, 425],
+      [18, 360], [79, 360], [57, 346], [220, 152], [229, 37], [227, 151],
+    ] as const).map(([x, y]) => ({ x, y })) },
+  },
   {
     id: 'warzone', name: 'Warzone', imageFile: 'warzone.png',
     // Control points 1-4 of the original map 206: muzzle and aim of the tank and the cannon
@@ -264,6 +279,7 @@ export const LEVELS: LevelDefinition[] = LEVEL_DEFINITIONS.map(def => ({
   imagePath: `${import.meta.env.BASE_URL}assets/levels/${def.imageFile}`,
   ...(def.doors && { doors: def.doors }),
   ...(def.guns && { guns: def.guns }),
+  ...(def.hand && { hand: def.hand }),
 }));
 
 // === Item Types ===

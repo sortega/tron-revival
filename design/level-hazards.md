@@ -5,7 +5,7 @@ Three of the original maps have a hazard of their own, started by `ItemLauncher`
 
 | Original map | Level here | Hazard | Status |
 |--------------|-----------|--------|--------|
-| 205 *Inédito* | `dentistry` | The dentist's hand (`PROCESS Mano`) | Planned |
+| 205 *Inédito* | `dentistry` | The dentist's hand (`PROCESS Mano`) | Implemented |
 | 206 *Guerra* | `warzone` | Shell bursts (`PROCESS Guerra`) | Implemented |
 | 207 *Puertas* | `portals` | Automatic doors (`PROCESS Bandas` / `Banda`) | Implemented |
 
@@ -118,20 +118,46 @@ linger in one that is about to close.
   open doorway survives and wraps around; doors do not advance outside `playing`.
 - Bot matches on `portals`: door deaths stay rare.
 
-## The dentist's hand (level `dentistry`) — planned
+## The dentist's hand (level `dentistry`)
 
-Original behaviour, for reference when it is implemented:
+A huge hand holding a drill wanders over the arena and drills the teeth. It is a nuisance
+rather than a killer: it **never kills** (in the original, touching a player only makes the
+sprite translucent), but it hides a 200 × 250 px chunk of the screen and nibbles pixels away.
 
-- A 200 × 250 sprite (graph 7, `sprites-source/dentist_hand.png`) whose control point 1 is
-  the drill tip. It starts at (800, 600), i.e. off-screen at the bottom right.
-- It holds a target zone and a countdown `resta` (100 frames). When the countdown runs out,
-  with probability ½ it picks a new target: half of the time "rest" (zone 0), otherwise one
-  of the 30 control points of map 205 (the teeth), with ±20 px of horizontal jitter.
-- With a target, it moves 6 px per frame towards it; within 4 px it drills: the countdown
-  runs, the hand jitters ±3 px per frame, clears the pixel under the tip and loops the drill
-  sound (`TORNO.WAV`). Resting, it retreats towards (800, 600) while the countdown runs.
-- In the original it does **not** kill: touching a player only flips the sprite's
-  transparency flag. (`TODO.md` said it kills; the source says otherwise.)
+### Behaviour
+
+A port of `PROCESS Mano`. State: the drill tip `(x, y)` in whole pixels, a target (0 =
+resting, or one of the 30 control points of map 205, mostly teeth), the aim point and a
+countdown `rest`. It starts resting at home, (800, 600), off-screen at the bottom right, with
+`rest = 100`. Every `playing` tick:
+
+1. If `rest ≤ 0`: with probability ½ pick a new target — half of the time "rest", otherwise
+   a random control point; otherwise keep the current one. Then `rest = 100`, and if there
+   is a target, aim at it with ±20 px of horizontal jitter.
+2. Resting: move 6 px towards home; `rest` runs down.
+3. With a target, farther than 4 px from the aim: move 6 px towards it (`rest` does not run).
+4. Within 4 px of the aim: **drill** — `rest` runs down, the tip jitters ±3 px on each axis,
+   and the pixel under the tip is erased from the collision grid (trail or scenery). The
+   drill sound loops while drilling.
+
+Differences from the original: movement snaps onto its destination when closer than one
+step (the original overshoots and oscillates), and positions are rounded to whole pixels.
+
+### State, networking and rendering
+
+- `TronRoundState.hand` (`{x, y}`, only on this level) is all a guest needs. Erased pixels
+  travel as ordinary `clearedAreas`, the drill as an ordinary sound loop (`drill`, key `hand`).
+- The sprite (`dentist_hand` in the atlas) is drawn over everything in the play area with
+  its control point (1, 17) — the drill tip — at `(x, y)`, clipped to the play area.
+- While an alive player's head is under the sprite's bounding box it is drawn translucent
+  (the original tested the sprite's pixels and used Div's transparency flag).
+- Bots ignore the hand.
+
+### Validation
+
+Tests: the 30 targets; a long run of the state machine (rests first, moves ≤ 6 px per tick,
+drills near many different teeth); in the simulation it erases scenery pixels one at a time,
+loops the drill sound, kills nobody, exists only on its level and freezes at round end.
 
 ## Shell bursts (level `warzone`)
 

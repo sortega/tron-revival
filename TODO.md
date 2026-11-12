@@ -208,9 +208,8 @@ Design: `design/networking.md` (rewritten)
       gate the wrap-around, and bots time their crossings. See `design/level-hazards.md`
 - [x] Level 7 ("Warzone"): the tank and the cannon fire shell bursts at random, as in the
       original; bots keep out of the line of fire
-- [ ] Level 6 ("Dentistry"): the dentist's hand is missing. Specified in
-      `design/level-hazards.md` (note: the original hand does not kill, it only drills
-      trails away)
+- [x] Level 6 ("Dentistry"): the dentist's hand wanders around drilling teeth; as in the
+      original it does not kill, it hides the arena beneath it and erases pixels
 - [ ] Items can spawn hidden under a closed door (faithful, but maybe not fun)
 
 ## Open reports

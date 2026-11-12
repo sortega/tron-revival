@@ -21,6 +21,8 @@ import type {
 import type { GamePlayer } from '../types/game';
 import { anyDoorSolidAt, doorFrame } from './doors';
 import { GUN_BURST_CHANCE } from './guns';
+import { createHand, stepHand } from './hand';
+import type { HandState } from './hand';
 import {
   LEVELS,
   NO_OWNER,
@@ -87,6 +89,8 @@ export class TronGameState {
   currentLevelIndex: number = 0;
   /** Playing ticks elapsed this round; drives the level's automatic doors */
   doorTick = 0;
+  /** The dentist's hand, on the level that has one */
+  private hand: HandState | null = null;
   playersReady: Set<SlotIndex> = new Set();
   gameMode: GameMode;
   levelMode: LevelMode;
@@ -330,6 +334,7 @@ export class TronGameState {
     this.nextBodyguardId = 0;
     this.bodyguardBaseAngle = 0;
     this.doorTick = 0;
+    this.hand = LEVELS[this.currentLevelIndex]?.hand ? createHand() : null;
 
     const playerCount = this.playerConfigs.length;
 
@@ -410,6 +415,18 @@ export class TronGameState {
       const gun = guns[Math.floor(this.rng() * guns.length)]!;
       this.createPellets(gun.x * 1000, gun.y * 1000, gun.direction, NO_OWNER);
       this.queueSound('explosion');
+    }
+
+    // The dentist's hand drills away one pixel at a time
+    const handDef = LEVELS[this.currentLevelIndex]?.hand;
+    if (handDef && this.hand) {
+      if (stepHand(this.hand, handDef, this.rng)) {
+        this.queueLoopSound('drill', 'hand');
+        const { x, y } = this.hand;
+        if (x >= 0 && x < PLAY_WIDTH && y >= 0 && y < PLAY_HEIGHT) this.clearSquare(x, y, 1);
+      } else {
+        this.queueStopLoop('hand');
+      }
     }
 
     // Decrement teleport cooldowns
@@ -1977,6 +1994,7 @@ export class TronGameState {
       explosions: this.explosions,
       bodyguards: this.bodyguards,
       doorTick: this.doorTick,
+      ...(this.hand && { hand: { x: this.hand.x, y: this.hand.y } }),
     };
 
     const matchState: TronMatchState = {

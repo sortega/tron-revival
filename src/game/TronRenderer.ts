@@ -12,6 +12,8 @@ import { SPRITE_HASH } from './spriteHash';
 import type { NetworkStats } from './session/GameSession';
 import { DOOR_LENGTH, DOOR_THICKNESS, doorFrame } from './doors';
 import type { DoorDefinition } from './doors';
+import { HAND_SPRITE, underHand } from './hand';
+import type { HandView } from './hand';
 
 const DEATH_LABELS: Record<DeathCause, string> = {
   'trail': 'crashed into a trail',
@@ -234,6 +236,9 @@ export class TronRenderer {
       }
     }
 
+    // The dentist's hand goes over everything
+    if (round.hand) this.drawHand(round.hand, round.players);
+
     // Draw color blindness crossing sprites
     if (this.colorBlindnessFrames > 0 && this.spriteAtlas?.isLoaded()) {
       const elapsed = this.COLOR_BLINDNESS_DURATION - this.colorBlindnessFrames;
@@ -447,6 +452,23 @@ export class TronRenderer {
     const imageData = this.tintCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     if (!this.levelHidden) this.drawLevelImage();
     return PixelGrid.fromRgba(imageData.data);
+  }
+
+  // The dentist's hand hides what is under it, unless a player is there
+  private drawHand(hand: HandView, players: TronPlayerState[]): void {
+    if (!this.spriteAtlas?.isLoaded()) return;
+    const ctx = this.ctx;
+    const covering = players.some(p => p.alive && underHand(hand, Math.floor(p.x / 1000), Math.floor(p.y / 1000)));
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    ctx.clip();
+    if (covering) ctx.globalAlpha = 0.45;
+    this.spriteAtlas.draw(ctx, 'dentist_hand', hand.x, hand.y, {
+      anchorX: HAND_SPRITE.tipX / HAND_SPRITE.width,
+      anchorY: HAND_SPRITE.tipY / HAND_SPRITE.height,
+    });
+    ctx.restore();
   }
 
   private drawDoors(frame: number): void {
