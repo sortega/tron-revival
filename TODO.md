@@ -224,6 +224,16 @@ Audit and design: `design/touch-controls.md`.
       with the old stick)
 - [ ] Trails are 1 px wide and hard to see on a phone screen
 
+## Projectile collisions (reported)  ✅
+
+Rules: `design/projectiles.md`.
+
+- [x] A shot crossing an arena edge swept the whole row/column that tick and hit anyone on
+      it, usually its own shooter ("died of his own bullet")
+- [x] H-bomb collides as its 12×18 body: no more flying through a player; explodes when
+      its nose touches a wall
+- [ ] Bodyguard-vs-projectile checks have not been audited for the same wrap-around mistake
+
 ## Open reports
 
 - [ ] **Laptop vs phone: both players died at the first instant of round 1.** Not reproduced with

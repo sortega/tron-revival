@@ -6,6 +6,8 @@ High-level architecture of the web revival of Teratron. Detailed designs:
 - [local-and-ai.md](./local-and-ai.md) — sessions, local play, AI players, automated validation
 - [networking.md](./networking.md) — connectivity, rooms and lobby, netcode, resilience
 - [level-hazards.md](./level-hazards.md) — per-level hazards: automatic doors, shell bursts, the dentist's hand
+- [projectiles.md](./projectiles.md) — what bullets, tracers and bombs hit, and how
+- [touch-controls.md](./touch-controls.md) — steering on phones
 - [refactoring-proposal-effects-weapons.md](./refactoring-proposal-effects-weapons.md) — pending
   proposal to split weapons/effects out of the simulation class
 

@@ -202,6 +202,10 @@ export class TronGameState {
   private readonly BOMB_ITEM_DAMAGE_RADIUS = 70;  // Destroys items within 70px
   private readonly BOMB_EXPLOSION_SCALE = 2;    // Large bomb explosion
   private readonly BOMB_HP = 100;                 // Starting HP
+  // The bomb collides as a 12x18 box along its heading (design/projectiles.md)
+  private readonly BOMB_HALF_LENGTH = 9;
+  private readonly BOMB_HALF_WIDTH = 6;
+  private readonly BOMB_PLAYER_MARGIN = 2;        // A player's head is not a point
   private readonly GLOCK_DAMAGE = 50;             // Glock bullet damage to bomb
   private readonly TRACER_DAMAGE = 10;            // Tracer bullet damage to bomb
 
@@ -923,8 +927,13 @@ export class TronGameState {
       // Use UNWRAPPED coordinates so Bresenham follows the actual path
       // MUST check collision BEFORE clearing pixels for tracers!
       // Bombs use thick line collision (6px half-width) to match their sprite size
+      // (and reach 9 px ahead of the centre: the bomb explodes when its nose touches)
       const impactPoint = proj.type === 'bomb'
-        ? this.checkThickLineCollision(prevX, prevY, unwrappedX, unwrappedY, 6)
+        ? this.checkThickLineCollision(
+            prevX, prevY,
+            Math.round(unwrappedX + Math.cos(dirRad) * this.BOMB_HALF_LENGTH),
+            Math.round(unwrappedY + Math.sin(dirRad) * this.BOMB_HALF_LENGTH),
+            this.BOMB_HALF_WIDTH)
         : this.checkLineCollision(prevX, prevY, unwrappedX, unwrappedY);
       if (impactPoint) {
         if (proj.type === 'bullet') {
@@ -974,9 +983,11 @@ export class TronGameState {
           if (skipOwner && player.slotIndex === proj.ownerSlot) continue;
           const px = player.getScreenX();
           const py = player.getScreenY();
-          // Check distance to the line segment, not just endpoints
-          const dist = this.pointToLineDistance(px, py, prevX, prevY, newX, newY);
-          if (dist < killRadius) {
+          // A bomb collides as a box; the others by distance to the path travelled
+          const hit = proj.type === 'bomb'
+            ? this.bombCovers(proj, px, py, this.BOMB_PLAYER_MARGIN)
+            : this.distanceToPath(px, py, prevX, prevY, unwrappedX, unwrappedY) < killRadius;
+          if (hit) {
             if (proj.type === 'bullet') {
               this.projectileImpact(px, py, proj.ownerSlot);
             } else if (proj.type === 'bomb') {
@@ -997,8 +1008,8 @@ export class TronGameState {
       let hitItem = false;
       for (const item of this.items) {
         if (!item.active) continue;
-        // Check distance to the line segment
-        const dist = this.pointToLineDistance(item.x, item.y, prevX, prevY, newX, newY);
+        // Check distance to the path travelled
+        const dist = this.distanceToPath(item.x, item.y, prevX, prevY, unwrappedX, unwrappedY);
         if (dist < ITEM_COLLISION_RADIUS) {
           if (proj.type === 'bomb') {
             // Bomb explodes on item contact
@@ -1158,6 +1169,32 @@ export class TronGameState {
     }
 
     return null;
+  }
+
+  // Distance from a point to the path a projectile travelled this tick. The end of the
+  // path may lie beyond an edge (unwrapped): then the point is also tried wrapped around.
+  private distanceToPath(px: number, py: number, x0: number, y0: number, x1: number, y1: number): number {
+    let best = this.pointToLineDistance(px, py, x0, y0, x1, y1);
+    const shiftX = x1 < 0 ? -PLAY_WIDTH : x1 >= PLAY_WIDTH ? PLAY_WIDTH : 0;
+    const shiftY = y1 < 0 ? -PLAY_HEIGHT : y1 >= PLAY_HEIGHT ? PLAY_HEIGHT : 0;
+    if (shiftX !== 0) best = Math.min(best, this.pointToLineDistance(px + shiftX, py, x0, y0, x1, y1));
+    if (shiftY !== 0) best = Math.min(best, this.pointToLineDistance(px, py + shiftY, x0, y0, x1, y1));
+    if (shiftX !== 0 && shiftY !== 0) {
+      best = Math.min(best, this.pointToLineDistance(px + shiftX, py + shiftY, x0, y0, x1, y1));
+    }
+    return best;
+  }
+
+  // Is a point inside a bomb's body (a box along its heading), grown by `margin`?
+  private bombCovers(bomb: Projectile, px: number, py: number, margin: number): boolean {
+    let dx = px - Math.floor(bomb.x / 1000);
+    let dy = py - Math.floor(bomb.y / 1000);
+    if (dx > PLAY_WIDTH / 2) dx -= PLAY_WIDTH; else if (dx < -PLAY_WIDTH / 2) dx += PLAY_WIDTH;
+    if (dy > PLAY_HEIGHT / 2) dy -= PLAY_HEIGHT; else if (dy < -PLAY_HEIGHT / 2) dy += PLAY_HEIGHT;
+    const rad = (bomb.direction * Math.PI) / 180;
+    const along = dx * Math.cos(rad) + dy * Math.sin(rad);
+    const across = -dx * Math.sin(rad) + dy * Math.cos(rad);
+    return Math.abs(along) <= this.BOMB_HALF_LENGTH + margin && Math.abs(across) <= this.BOMB_HALF_WIDTH + margin;
   }
 
   // Calculate distance from point to line segment
