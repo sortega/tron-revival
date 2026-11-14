@@ -89,7 +89,8 @@ const OPENNESS_RANGE = 40;
 const BAD_ITEMS = new Set(['reverse', 'automatic_slow']);
 const MARGIN_FROM = 3;               // `sideMargin` is minded between these steps of a path:
 const MARGIN_STEPS = 40;             // what is nearer cannot be helped, what is further will be re-planned
-const MARGIN_PENALTY = 6;            // Cost of each step that passes too close
+const MARGIN_PENALTY = 6;            // Cost of each step that passes too close...
+const MARGIN_MAX_STEPS = 5;          // ...up to this many: a tight path still beats a shorter one
 
 interface Hazard {
   x: number;
@@ -430,6 +431,7 @@ export class BotController {
     let px = Math.floor(x);
     let py = Math.floor(y);
     let narrow = 0;
+    let tight = 0;
     let probeX = x;
     let probeY = y;
     let badItem = false;
@@ -479,11 +481,14 @@ export class BotController {
               (blocked(px + dx, py) || blocked(px, py + dy))) break;
 
           // Imprecise hands: a path that brushes past something is a bad path
-          if (sideMargin > 0 && step > MARGIN_FROM && step <= MARGIN_STEPS) {
+          if (sideMargin > 0 && tight < MARGIN_MAX_STEPS && step > MARGIN_FROM && step <= MARGIN_STEPS) {
             const ox = -sin * sideMargin;
             const oy = cos * sideMargin;
             if (blocked(wrapX(Math.floor(x + ox)), wrapY(Math.floor(y + oy))) ||
-                blocked(wrapX(Math.floor(x - ox)), wrapY(Math.floor(y - oy)))) narrow += MARGIN_PENALTY;
+                blocked(wrapX(Math.floor(x - ox)), wrapY(Math.floor(y - oy)))) {
+              narrow += MARGIN_PENALTY;
+              tight++;
+            }
           }
 
           // Room to turn around, sampled every few steps. Where neither side has

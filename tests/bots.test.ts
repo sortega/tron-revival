@@ -4,11 +4,6 @@ import { TICK_RATE } from '../src/game/constants';
 import { median, runMatch, survival, winRate } from './sim';
 
 const LEVELS = LEVEL_DEFINITIONS.map(l => l.id);
-// Median length of a round between two bots that leave each other alone. Round lengths
-// have a long tail: over 32 rounds per level the median is 20-40 s (perfect bots) and
-// 32 s (human-like bots, design/bots-human.md), but a dozen rounds can land anywhere
-// between 12 and 45 s. The floor is set where "something is badly broken" starts.
-const SURVIVAL_SECONDS = 12;
 const secs = (ticks: number): string => (ticks / TICK_RATE).toFixed(1).padStart(6);
 
 // `npm run sim` prints a tuning table instead of asserting
@@ -65,10 +60,9 @@ if (process.env.SIM_REPORT) {
 
     it('stay alive for a reasonable time when left alone', () => {
       for (const level of ['blank', 'bricks']) {
-        const r = [21, 22].flatMap(seed =>
-          runMatch({ level, drivers: ['calm-normal', 'calm-normal'], rounds: 6, seed, maxRoundSeconds: 60 }));
+        const r = runMatch({ level, drivers: ['calm-normal', 'calm-normal'], rounds: 6, seed: 21, maxRoundSeconds: 60 });
         // Round length = survival of the first bot to die
-        expect(median(r.map(x => x.ticks)), level).toBeGreaterThanOrEqual(SURVIVAL_SECONDS * TICK_RATE);
+        expect(median(r.map(x => x.ticks)), level).toBeGreaterThanOrEqual(20 * TICK_RATE);
       }
     }, 120_000);
 

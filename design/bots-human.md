@@ -156,8 +156,11 @@ People know their hands and leave room. So the planner gets one more profile fie
 `BotProfile.sideMargin` (pixels, default 0 = old behaviour), set by `HumanBot` from the
 human profile. In a rollout, every step between the 4th and the 40th that has something
 solid within `sideMargin` pixels on either side adds a penalty (the same weight as a
-step in a corridor). It is a penalty, not a wall: a gap can still be threaded when there
-is nothing better, it is just no longer attractive. Nearer than 4 steps nothing can be
+step in a corridor), for at most 5 steps per path. It is a penalty, not a wall, and a
+bounded one: a gap can still be threaded when there is nothing better, and a tight path
+always beats one that crashes a little earlier. (Unbounded, the penalty made `easy`,
+whose plans are only 60 px long, prefer crashing to squeezing on levels full of small
+obstacles.) Nearer than 4 steps nothing can be
 done about it any more; further than 40 the path will have been re-planned.
 
 For the same reason the bot gives enemy heads more room: `BotProfile.headMargin` is
