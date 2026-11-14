@@ -116,19 +116,31 @@ export class PixelGrid {
     this.coarse.fill(0);
   }
 
-  /** Clear a w×h rectangle whose top-left corner is (x, y), wrapping around edges. */
-  clearRect(x: number, y: number, w: number, h: number): void {
+  /**
+   * Clear a w×h rectangle whose top-left corner is (x, y), wrapping around edges.
+   * Returns true if any pixel in it was occupied.
+   */
+  clearRect(x: number, y: number, w: number, h: number): boolean {
+    const cells = this.cells;
+    let cleared = false;
     for (let dy = 0; dy < h; dy++) {
       const row = wrap(y + dy, PLAY_HEIGHT) * PLAY_WIDTH;
       for (let dx = 0; dx < w; dx++) {
-        this.write(row + wrap(x + dx, PLAY_WIDTH), 0);
+        const i = row + wrap(x + dx, PLAY_WIDTH);
+        if (cells[i] !== 0) {
+          this.write(i, 0);
+          cleared = true;
+        }
       }
     }
+    return cleared;
   }
 
-  /** Clear every pixel on a line (wrapping). */
-  clearLine(x0: number, y0: number, x1: number, y1: number): void {
+  /** Clear every pixel on a line (wrapping). Returns true if any of them was occupied. */
+  clearLine(x0: number, y0: number, x1: number, y1: number): boolean {
     // Bresenham, as in forEachLinePixel
+    const cells = this.cells;
+    let cleared = false;
     const dx = Math.abs(x1 - x0);
     const dy = Math.abs(y1 - y0);
     const sx = x0 < x1 ? 1 : -1;
@@ -137,8 +149,12 @@ export class PixelGrid {
     let x = x0;
     let y = y0;
     for (;;) {
-      this.write(wrap(y, PLAY_HEIGHT) * PLAY_WIDTH + wrap(x, PLAY_WIDTH), 0);
-      if (x === x1 && y === y1) return;
+      const i = wrap(y, PLAY_HEIGHT) * PLAY_WIDTH + wrap(x, PLAY_WIDTH);
+      if (cells[i] !== 0) {
+        this.write(i, 0);
+        cleared = true;
+      }
+      if (x === x1 && y === y1) return cleared;
       const e2 = 2 * err;
       if (e2 > -dy) { err -= dy; x += sx; }
       if (e2 < dx) { err += dx; y += sy; }

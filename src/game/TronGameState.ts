@@ -1159,10 +1159,10 @@ export class TronGameState {
     proj.y = (portalY + Math.sin(dirRad) * PORTAL_OUTER_RADIUS) * 1000;
   }
 
-  // Clear pixels along projectile path (for tracer bullets)
+  // Clear pixels along projectile path (for tracer bullets). Only reported to the
+  // renderer (and to guests) if something was there: most tracers fly through nothing
   private clearPixelPath(x0: number, y0: number, x1: number, y1: number): void {
-    this.pixels.clearLine(x0, y0, x1, y1);
-    this.frameClearedLines.push(x0, y0, x1, y1);
+    if (this.pixels.clearLine(x0, y0, x1, y1)) this.frameClearedLines.push(x0, y0, x1, y1);
   }
 
   // Tracer bullet expiration (no explosion)
@@ -1173,10 +1173,9 @@ export class TronGameState {
   }
 
   // Clear a size×size square (top-left corner at x,y; wraps) from the collision map
-  // and report it to the renderer
+  // and, if anything was there, report it to the renderer
   private clearSquare(x: number, y: number, size: number): void {
-    this.pixels.clearRect(x, y, size, size);
-    this.frameClearedAreas.push({ x, y, w: size, h: size });
+    if (this.pixels.clearRect(x, y, size, size)) this.frameClearedAreas.push({ x, y, w: size, h: size });
   }
 
   // Clear a disc (wraps) from the collision map, reported to the renderer as a stack of
@@ -1187,8 +1186,7 @@ export class TronGameState {
     const flush = (bottom: number): void => {
       if (stripHalf < 0) return;
       const area = { x: cx - stripHalf, y: stripTop, w: 2 * stripHalf + 1, h: bottom - stripTop };
-      this.pixels.clearRect(area.x, area.y, area.w, area.h);
-      this.frameClearedAreas.push(area);
+      if (this.pixels.clearRect(area.x, area.y, area.w, area.h)) this.frameClearedAreas.push(area);
     };
     for (let dy = -radius; dy <= radius; dy++) {
       const half = Math.floor(Math.sqrt(radius * radius - dy * dy));

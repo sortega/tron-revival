@@ -257,7 +257,9 @@ A frame is MessagePack with positional arrays for the hot parts (`network/serial
 - players as tuples, positions rounded to 1/1000 px, no colour/nickname (static, from the
   lobby),
 - projectiles as one flat number array, trails and border segments as flat `[x, y, ...]`,
-- tracer paths as line segments (`clearedLines`) rather than one entry per pixel,
+- tracer paths as line segments (`clearedLines`) rather than one entry per pixel, and only
+  the paths (and `clearedAreas`) that actually erased something: a tracer flying through
+  empty space is not reported,
 - `match`, `items` and `portals` only when they changed (plus once a second); the guest keeps
   the last value,
 - loop-sound start/stop events only on transitions.
