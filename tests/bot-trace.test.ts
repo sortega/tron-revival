@@ -228,7 +228,7 @@ describe.runIf(!!process.env.BOT_TRACE)('bot trace', () => {
 
     // 2. Ordinary driving
     body.push('<h2>Ordinary driving: the keys</h2>');
-    body.push('<p>Six seconds of a duel on <em>bricks</em>. The old bots tap for a single tick (14 ms, 4°) whenever the plan says so; a person cannot, so the human bots press longer and a little late.</p>');
+    body.push('<p>Six seconds of a duel on <em>bricks</em>. The old bots tap for as little as one to three ticks (14–43 ms) whenever the plan says so; a person cannot, so the human bots press longer and a little late.</p>');
     for (const d of ['normal', 'hard'] as BotDifficulty[]) {
       const old = record('bricks', [`raw-calm-${d}` as DriverSpec, `raw-calm-${d}` as DriverSpec], 21, 700);
       const human = record('bricks', [`calm-${d}` as DriverSpec, `calm-${d}` as DriverSpec], 21, 700);

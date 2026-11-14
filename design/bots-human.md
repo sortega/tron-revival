@@ -286,6 +286,23 @@ numbers are in the results section.
 - Fatigue, tilt, learning between rounds.
 - Dodging projectiles (the planner does not do it yet either; see TODO.md).
 
+## Trying it
+
+- **Live**: `npm run dev`, open the page, *LOCAL GAME*, set the slots to AI (all four
+  for an attract-mode game, or keep one human) and START. Add `?human=0` to the URL for
+  the old perfect bots, `?human=0.5` for half the imperfection, `?human=2` for double.
+  Things to look for: slightly wavy lines instead of ruler-straight ones, no single-tick
+  taps, shots that go behind a crossing target, and a bot that picks up Control Reversal
+  (the item with the two opposed arrows) zig-zagging for a few seconds.
+- **Pictures**: `npm run bots:trace` writes `out/bot-trace.html`: old and human bots in
+  the same seeded situations — heading and key presses through a Control Reversal, key
+  presses in ordinary driving, trails of whole rounds.
+- **Numbers**: `npm run sim:human` prints the tables below (about an hour on one core;
+  `HUMAN_REPORT=range,reversal npm run sim:human` runs only some sections, `ROUNDS=0.5`
+  halves the sample).
+- **In the real app, headless**: `npm run test:e2e:bots` plays an all-AI local game in
+  headless Chrome (`E2E_SHOTS=out` saves screenshots, `E2E_QUERY=human=0` the old bots).
+
 ## Validation
 
 Unit tests (`tests/bot-human.test.ts`) pin each mechanism:
@@ -298,9 +315,16 @@ Unit tests (`tests/bot-human.test.ts`) pin each mechanism:
 - trigger hesitation and tap rate;
 - strength 0 reproduces the old bot input-for-input; a seed reproduces a match.
 
+- the planner threads a 3-pixel gap on its own and refuses it with the side margin.
+
 Match statistics (`npm run sim:human`, see results below) check that the ordering
 easy < normal < hard holds, that `normal` still beats `straight` on every level, and
 that bots do not die in the opening seconds.
+
+`tests/bots.test.ts` (the regression thresholds of local-and-ai.md) is unchanged except
+for one thing: the early-death check now plays three seeds instead of one, with the same
+5 % ceiling. A seed lays the items out the same way on every level, so one unlucky race
+for an item used to be counted once per level.
 
 ## Results
 
