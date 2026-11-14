@@ -17,7 +17,8 @@
     "lint": "eslint .",
     "bench:sim": "node scripts/bench/run-node.mjs scripts/bench/sim-bench.ts",
     "bench:fingerprint": "node scripts/bench/run-node.mjs scripts/bench/sim-bench.ts --fingerprint",
-    "bench:browser": "node scripts/bench/browser-bench.mjs"
+    "bench:browser": "node scripts/bench/browser-bench.mjs",
+    "bench:render": "node scripts/bench/render-bench.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
