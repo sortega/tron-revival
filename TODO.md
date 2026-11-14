@@ -137,6 +137,10 @@ Design and measurements: `design/bots-human.md`
       adaptation, after-effect; disorientation after Swap / portals
 - [x] Planner margins for imprecise players (`sideMargin`, `headMargin`)
 - [x] `npm run sim:human` (before/after tables), `npm run bots:trace` (pictures)
+- [ ] Tight places: `normal` threads gaps half as often as before, `hard` does not, and
+      both spend more time squeezed than the old bots; look at replays before tuning more
+- [ ] `easy` is weaker than before (78 % against 69 % dead within 20 s when left alone);
+      decide after playing against it whether to lower the strength for easy
 - [ ] Late perception of trail pixels (bots still see every new trail pixel at once)
 - [ ] Colour blindness after a Swap does not confuse bots
 - [ ] Bots that know they see late could also *lead* their shots; today the aim error
