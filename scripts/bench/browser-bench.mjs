@@ -6,7 +6,7 @@
 //   npm run bench:browser -- --only=hard4            scenarios whose name contains "hard4"
 //   npm run bench:browser -- --profiles=desktop,mobile-6x
 //   npm run bench:browser -- --seconds=30 --json=out.json
-//   npm run bench:browser -- --query=renderer=webgl  extra URL parameters (prototype flags)
+//   npm run bench:browser -- --query=worker=1        extra URL parameters (prototype flags)
 //   npm run bench:browser -- --headed                a visible window (real GPU compositing)
 //
 // The "mobile" profiles are EMULATION: a phone-sized viewport and device pixel ratio plus
@@ -191,10 +191,23 @@ try {
       await page.waitForTimeout(warmupSeconds * 1000);
 
       await browser.startTracing(page, { categories: ['devtools.timeline', 'toplevel', 'v8', 'gpu'] });
-      await page.evaluate(() => { window.__teratron.perf(true); });
+      await page.evaluate(async () => {
+        window.__teratron.perf(true);
+        await window.__teratron.session.workerPerf?.();
+      });
       const started = Date.now();
       await page.waitForTimeout(seconds * 1000);
-      const dump = await page.evaluate(() => window.__teratron.perf(true));
+      const dump = await page.evaluate(async () => {
+        const main = window.__teratron.perf(true);
+        // `?worker=1`: the simulation's own timings come from the worker
+        const worker = await window.__teratron.session.workerPerf?.();
+        if (worker) {
+          for (const [phase, values] of Object.entries(worker.samples)) main.samples[`worker.${phase}`] = values;
+          main.counters.ticks = worker.counters.ticks ?? 0;
+          main.counters.droppedTicks = worker.counters.droppedTicks ?? 0;
+        }
+        return main;
+      });
       const wallMs = Date.now() - started;
       const trace = analyseTrace(await browser.stopTracing(), wallMs);
       const memory = await page.evaluate(() => performance.memory ? { usedMB: performance.memory.usedJSHeapSize / 1048576, totalMB: performance.memory.totalJSHeapSize / 1048576 } : null);
@@ -224,7 +237,7 @@ try {
       };
       console.log(`\n[${profileName}] ${scenario.name}: ${result.fps.toFixed(1)} fps, ${result.ticksPerSecond.toFixed(1)} ticks/s, dropped ticks ${result.droppedTicks}, slow frames ${result.slowFrames} (very slow ${result.verySlowFrames}) of ${gaps.length}`);
       console.log('  ms mean/p50/p95/p99/max');
-      for (const name of ['frame', 'rafGap', 'step', 'bots', 'sim', 'serialize', 'events', 'render']) {
+      for (const name of ['frame', 'rafGap', 'step', 'bots', 'sim', 'serialize', 'events', 'render', 'workerLag', 'worker.step', 'worker.bots', 'worker.sim']) {
         const line = row(name);
         if (line) console.log(`  ${line}`);
       }
