@@ -23,7 +23,9 @@ Related: [local-and-ai.md](./local-and-ai.md) (the planner, profiles, match-ups)
 - Everything stays deterministic for a seed, and cheap (a phone hosts the game).
 
 Non-goals: changing what the planner wants to do (goals, match-ups, rollouts). The layer
-only changes what the planner *sees* and how its decisions *reach the keys*.
+only changes what the planner *sees* and how its decisions *reach the keys* — with one
+exception, the side margin below: a planner that knows its hands are imprecise must stop
+planning hair's-breadth passes.
 
 ## Architecture
 
@@ -53,7 +55,8 @@ only changes what the planner *sees* and how its decisions *reach the keys*.
 `BotController` (`slot`, `decide(game)`), so sessions and the test harness use it as a
 drop-in. `createBot(slot, difficulty, rng)` is the factory.
 
-The planner is **not modified**. The perceived world is created with
+The planner's logic is **not modified** (one optional profile field was added, see
+*Side margin*). The perceived world is created with
 `Object.create(game)`, and perceived players with `Object.create(player)`: anything the
 layer does not override (collision grid, portals, doors, own position…) reads through to
 the truth, so the planner can be optimised or rewritten independently as long as it keeps
@@ -141,6 +144,32 @@ and the correction is itself a clumsy tap: paths wobble slightly instead of bein
 straight, more so for `easy`. Speed effects need no special case: lag is in *time*, so
 under Turbo the same lag is twice as many pixels, and under Slow half.
 
+### Side margin
+
+The planner checks its candidate paths pixel by pixel and is happy to pass one pixel
+away from a wall, or to stop a turn on the exact tick that leaves it skimming a trail.
+With perfect keys that works; with a release that comes two ticks late (8° more turn)
+it is a crash — measured: bots died in the first second of a round by over-turning into
+a wall the plan cleared by a pixel.
+
+People know their hands and leave room. So the planner gets one more profile field,
+`BotProfile.sideMargin` (pixels, default 0 = old behaviour), set by `HumanBot` from the
+human profile. In a rollout, every step between the 4th and the 40th that has something
+solid within `sideMargin` pixels on either side adds a penalty (the same weight as a
+step in a corridor). It is a penalty, not a wall: a gap can still be threaded when there
+is nothing better, it is just no longer attractive. Nearer than 4 steps nothing can be
+done about it any more; further than 40 the path will have been re-planned.
+
+For the same reason the bot gives enemy heads more room: `BotProfile.headMargin` is
+added to the 4 px radius of the "enemy head" hazard. The bot knows its picture of an
+enemy is `trackDelay` old; in that time the enemy can have turned up to 60° and be half
+a dozen pixels from where it is believed to be. Measured before this margin: bots racing
+an enemy for the same item were cut off and died a few seconds into the round.
+
+These are the only changes inside `BotController` (a dozen lines in the rollout loop,
+one in `collectHazards`, both inactive at 0), and the side margin is what makes "no
+superhuman threading of gaps" true.
+
 ### Changed controls (Control Reversal)
 
 The planner never learns about the reversal (the perceived self has no `reverse`
@@ -169,8 +198,9 @@ turns the other way until the bot notices.
 ### Disorientation
 
 When a bot's own position jumps (the *Swap* item, or a portal), it needs time to find
-itself again: the keys are frozen in their current state and it does not fire for
-`disorient` ticks (half of that for a portal, which is at least expected).
+itself again: for `disorient` ticks (half of that for a portal, which is at least
+expected) it does not react to anything and does not fire. A steering key that was down
+stays down for a startled moment (5 ticks) and is then let go.
 
 ### Trigger
 
@@ -179,7 +209,9 @@ itself again: the keys are frozen in their current state and it does not fire fo
   ticks is the same engagement and needs no new hesitation).
 - **Commitment**: that first shot goes out even if the chance has passed in the
   meantime (up to 24 ticks ago) — people shoot where the target *was*. Later shots of
-  the engagement are only fired while the planner still wants them.
+  the engagement are only fired while the planner still wants them. Only guns are
+  committed to (Glock, shotgun, rifle, Uzi), and not in a panic: an H-bomb, or a Glock
+  bullet into a wall at arm's length, kills the shooter.
 - **Tap rate**: single-shot weapons (Glock, shotgun, H-bomb, Lock Borders) are tapped
   every `tapPeriod` ticks (drawn per tap), each press lasting 3 ticks, instead of the
   planner's metronomic 8.
@@ -202,6 +234,8 @@ Ranges are uniform, in ticks unless noted (1 tick = 14.3 ms).
 | `tapPeriod` | 13–20 | 10–13 | 8–10 |
 | `steerLag` | 0–2 | 0–2 | 0–1 |
 | `minPress` | 4 | 4 | 3 |
+| `sideMargin` (px, planner) | 2 | 2 | 1 |
+| `headMargin` (px, planner; `easy` does not mind heads at all) | 10 | 7 | 5 |
 | `panicDist` (px) | 28 | 20 | 14 |
 | `panicOversteer` | 0–1 | 0–1 | 0–1 |
 | `reverse.notice` | 40–70 | 22–34 | 14–20 |

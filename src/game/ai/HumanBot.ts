@@ -66,7 +66,9 @@ export class HumanBot {
       this.motor = null;
     }
     this.rng = rng;
-    this.planner = new BotController(slot, options.planner ?? BOT_PROFILES[difficulty], rng);
+    const plan = options.planner ?? BOT_PROFILES[difficulty];
+    // The planner knows whose hands will carry out its plans
+    this.planner = new BotController(slot, this.human ? { ...plan, sideMargin: this.human.sideMargin, headMargin: this.human.headMargin } : plan, rng);
   }
 
   decide(game: TronGameState): TronInput {
@@ -108,7 +110,7 @@ export class HumanBot {
     const world = perception.perceive(game, me, this.panic, this.turning);
     const want = this.planner.decide(world);
     const steer = motor.steer(want.steer, me.hasEffect('reverse'), this.panic);
-    const action = motor.trigger(want.action, me.equippedWeapon?.sprite ?? null);
+    const action = motor.trigger(want.action, me.equippedWeapon?.sprite ?? null, this.panic);
     this.turning += ((steer !== 0 ? 1 : 0) - this.turning) / TURNING_MEMORY;
     return { steer, action };
   }

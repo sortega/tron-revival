@@ -25,6 +25,8 @@ export interface HumanProfile {
   tapPeriod: Range;         // Between presses of a single-shot weapon
   steerLag: Range;          // From a change of intention to the key
   minPress: number;         // Shortest key press
+  sideMargin: number;       // Pixels the planner keeps clear on each side: it knows its hands
+  headMargin: number;       // Extra pixels it keeps from enemy heads: it knows it sees them late
   panicDist: number;        // Free pixels ahead under which the bot panics
   panicOversteer: Range;    // Extra ticks a turn is held when panicking
   reverse: ReverseProfile;  // Control Reversal
@@ -34,21 +36,21 @@ export interface HumanProfile {
 export const HUMAN_PROFILES: Record<BotDifficulty, HumanProfile> = {
   easy: {
     trackDelay: 24, surprise: [35, 55], attention: 1, glance: [50, 90], aimSigma: 4,
-    fireHesitation: [14, 30], tapPeriod: [13, 20], steerLag: [0, 2], minPress: 4,
+    fireHesitation: [14, 30], tapPeriod: [13, 20], steerLag: [0, 2], minPress: 4, sideMargin: 2, headMargin: 10,
     panicDist: 28, panicOversteer: [0, 1],
     reverse: { notice: [40, 70], slip: 0.8, adapt: 300, catch: [12, 20], overCorrect: 0.6 },
     disorient: [30, 50],
   },
   normal: {
     trackDelay: 15, surprise: [22, 32], attention: 2, glance: [35, 60], aimSigma: 2.2,
-    fireHesitation: [7, 14], tapPeriod: [10, 13], steerLag: [0, 2], minPress: 4,
+    fireHesitation: [7, 14], tapPeriod: [10, 13], steerLag: [0, 2], minPress: 4, sideMargin: 2, headMargin: 7,
     panicDist: 20, panicOversteer: [0, 1],
     reverse: { notice: [22, 34], slip: 0.75, adapt: 150, catch: [10, 16], overCorrect: 0.6 },
     disorient: [18, 28],
   },
   hard: {
     trackDelay: 11, surprise: [16, 22], attention: 3, glance: [35, 60], aimSigma: 1.2,
-    fireHesitation: [4, 9], tapPeriod: [8, 10], steerLag: [0, 1], minPress: 3,
+    fireHesitation: [4, 9], tapPeriod: [8, 10], steerLag: [0, 1], minPress: 3, sideMargin: 1, headMargin: 5,
     panicDist: 14, panicOversteer: [0, 1],
     reverse: { notice: [14, 20], slip: 0.5, adapt: 50, catch: [7, 11], overCorrect: 0.3 },
     disorient: [10, 16],
@@ -85,6 +87,8 @@ export function scaleProfile(p: HumanProfile, s: number): HumanProfile {
     tapPeriod: [8 + (p.tapPeriod[0] - 8) * s, 8 + (p.tapPeriod[1] - 8) * s],
     steerLag: scaleRange(p.steerLag, s),
     minPress: Math.max(1, Math.round(1 + (p.minPress - 1) * s)),
+    sideMargin: Math.round(p.sideMargin * Math.min(s, 2)),
+    headMargin: Math.round(p.headMargin * s),
     panicDist: p.panicDist,
     panicOversteer: scaleRange(p.panicOversteer, s),
     reverse: {

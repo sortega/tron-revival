@@ -7,11 +7,13 @@ import { drawTicks } from './humanProfiles';
 import type { HumanProfile } from './humanProfiles';
 
 const HOLD_WEAPONS = new Set(['rifle', 'uzi', 'turbo', 'slow']);
+const GUNS = new Set(['glock', 'shotgun', 'rifle', 'uzi']);   // Shots one commits to
 const PLANNER_PULSE = 8;      // The planner taps single-shot weapons every 8 ticks
 const COMMIT = 24;            // A shot decided on goes out if the chance passed less than this ago
 const MIN_HOLD = 6;           // ...and a hold-weapon is then held at least this long
 const SAME_ENGAGEMENT = 15;   // Wanting to fire again this soon is the same engagement
 const TAP_TICKS = 3;         // How long a tap keeps the button down
+const STARTLE = 5;            // A key held when disoriented is let go after this long
 const PANIC_SLIP_FACTOR = 1.5;
 const ON_GUARD = 60;          // Right after catching a slip the player is careful...
 const ON_GUARD_FACTOR = 0.25; // ...and slips this much less
@@ -31,6 +33,7 @@ export class Motor {
   private holdExtra = 0;        // Over-correction: the next release comes this much later
   private key = 0;              // Last output
   private frozenUntil = 0;
+  private letGoAt = 0;
 
   // Control mapping: +1 = the usual one, -1 = reversed
   private reversed = false;     // Is Control Reversal on?
@@ -84,8 +87,12 @@ export class Motor {
     this.resetTrigger(null);
   }
 
-  /** Disorientation: the keys stay as they are for `ticks`. */
+  /**
+   * Disorientation: for `ticks` the bot does nothing useful. A key that is down stays
+   * down for a startled moment, then the hands let go.
+   */
   freeze(ticks: number): void {
+    if (!this.frozen) this.letGoAt = this.tick + Math.min(ticks, STARTLE);
     this.frozenUntil = Math.max(this.frozenUntil, this.tick + ticks);
   }
 
@@ -121,7 +128,17 @@ export class Motor {
       this.noticed = true;
       this.noticedTick = tick;
     }
-    if (this.frozen) return this.key;
+    if (this.frozen) {
+      if (tick >= this.letGoAt && this.key !== 0) {
+        this.key = 0;
+        this.committed = 0;
+        this.pending = this.target !== 0;
+        this.changeAt = this.frozenUntil;
+        this.lastChange = tick;
+        this.catchAt = Infinity;
+      }
+      return this.key;
+    }
 
     // Catching a wrong-way press: flip it, and hold the correction too long
     if (tick >= this.catchAt) {
@@ -211,9 +228,10 @@ export class Motor {
 
   /**
    * One tick of the action button during play. `raw`: the planner's button state.
+   * `panic`: something is right ahead.
    * Call after `steer` (which advances the clock).
    */
-  trigger(raw: boolean, weapon: string | null): boolean {
+  trigger(raw: boolean, weapon: string | null, panic = false): boolean {
     const tick = this.tick;
     const { profile, rng } = this;
     if (weapon !== this.weapon) this.resetTrigger(weapon);
@@ -221,13 +239,16 @@ export class Motor {
 
     const hold = HOLD_WEAPONS.has(weapon);
     if (raw) this.lastRaw = tick;
-    const want = hold ? raw : tick - this.lastRaw < PLANNER_PULSE;
+    const gun = GUNS.has(weapon);
+    // (the planner pulses single-shot weapons 4 ticks on, 4 off; things that blow up are
+    // not fired on a wish that is more than a blink old)
+    const want = hold ? raw : tick - this.lastRaw < (gun ? PLANNER_PULSE : PLANNER_PULSE - 3);
     if (want && !this.wanting) {
       this.wanting = true;
       if (tick - this.wantEnded > SAME_ENGAGEMENT) {
         // A new engagement: the decision takes a moment, and is then carried out
         this.readyAt = tick + drawTicks(profile.fireHesitation, rng);
-        this.owed = true;
+        this.owed = gun;
       } else {
         this.readyAt = tick;
       }
@@ -238,7 +259,8 @@ export class Motor {
       this.releaseAt = tick + drawTicks(profile.steerLag, rng) + 2;
     }
     // The first shot of an engagement goes out even if the chance has just passed
-    if (this.owed && !this.wanting && tick - this.lastRaw >= COMMIT) this.owed = false;
+    // (not with a wall in front: a Glock bullet exploding at arm's length kills)
+    if (this.owed && !this.wanting && (panic || tick - this.lastRaw >= COMMIT)) this.owed = false;
     if (this.frozen) return false;
     const due = tick >= this.readyAt && (this.wanting || this.owed);
 

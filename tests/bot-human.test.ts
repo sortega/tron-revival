@@ -1,6 +1,6 @@
 // The humanisation layer of the bots, mechanism by mechanism (design/bots-human.md)
 import { describe, expect, it } from 'vitest';
-import { BotController } from '../src/game/ai/BotController';
+import { BotController, BOT_PROFILES } from '../src/game/ai/BotController';
 import { HumanBot } from '../src/game/ai/HumanBot';
 import { HUMAN_PROFILES, scaleProfile } from '../src/game/ai/humanProfiles';
 import type { HumanProfile } from '../src/game/ai/humanProfiles';
@@ -627,5 +627,66 @@ describe('human bots: disorientation', () => {
       expect(frozenFor, d).toBeGreaterThanOrEqual(profile.disorient[0]);
       expect(frozenFor, d).toBeLessThanOrEqual(profile.disorient[1] + profile.steerLag[1] + 2);
     }
+  });
+});
+
+describe('human bots: disorientation (keys)', () => {
+  it('lets go of a held key after a startled moment, and takes it up again afterwards', () => {
+    const profile = HUMAN_PROFILES.normal;
+    const motor = new Motor(profile, createRng(1));
+    for (let t = 0; t < 10; t++) motor.steer(1, false, false);
+    motor.freeze(20);
+    const keys: number[] = [];
+    for (let t = 0; t < 30; t++) keys.push(motor.steer(1, false, false));
+    expect(keys.slice(0, 4).every(k => k === 1)).toBe(true);     // Still down
+    expect(keys.slice(5, 19).every(k => k === 0)).toBe(true);    // Let go
+    expect(keys[21]).toBe(1);                                    // Back in control
+    // ...and no shooting meanwhile
+    const trigger = new Motor(profile, createRng(1));
+    for (let t = 0; t < 40; t++) {
+      trigger.steer(0, false, false);
+      trigger.trigger(true, 'rifle');
+    }
+    trigger.freeze(10);
+    trigger.steer(0, false, false);
+    expect(trigger.trigger(true, 'rifle')).toBe(false);
+  });
+});
+
+describe('human bots: side margin', () => {
+  // A wall across the way, 80 px ahead, with a gap of `gap` pixels straight in front and
+  // plenty of room to turn away on this side. Does the planner drive through the gap?
+  function threads(gap: number, sideMargin: number): boolean {
+    const g = arena(300);
+    place(g, 1, 100, 100, 180);
+    const half = (gap - 1) / 2;
+    for (let y = 150; y < 450; y++) {
+      if (Math.abs(y - 300) > half) for (let x = 330; x < 333; x++) g.pixels.set(x, y, '#ffffff');
+    }
+    const bot = new BotController(0, { ...BOT_PROFILES.normal, mistakeChance: 0, sideMargin }, createRng(1));
+    for (let t = 0; t < 120; t++) {
+      step(g, bot.decide(g), {});
+      const p = g.players[0]!;
+      if (p.x / 1000 > 336 && p.x / 1000 < 345 && Math.abs(p.y / 1000 - 300) < 12) return true;
+    }
+    expect(g.players[0]!.alive).toBe(true);
+    return false;
+  }
+
+  it('the planner alone threads a 3-pixel gap; told about its hands, it turns away', () => {
+    expect(threads(3, 0)).toBe(true);
+    expect(threads(3, 2)).toBe(false);
+    expect(threads(1, 1)).toBe(false);
+    // A comfortable opening is still an opening
+    expect(threads(9, 2)).toBe(true);
+    expect(threads(5, 1)).toBe(true);
+  });
+
+  it('human bots plan with the margin of their profile', () => {
+    for (const d of DIFFS) {
+      expect(new HumanBot(0, d, createRng(1)).planner.profile.sideMargin, d).toBe(HUMAN_PROFILES[d].sideMargin);
+      expect(new HumanBot(0, d, createRng(1), { strength: 0 }).planner.profile.sideMargin ?? 0, d).toBe(0);
+    }
+    expect(HUMAN_PROFILES.hard.sideMargin).toBeLessThan(HUMAN_PROFILES.normal.sideMargin);
   });
 });
