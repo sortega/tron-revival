@@ -41,8 +41,13 @@ export const COARSE_ROWS = Math.ceil(PLAY_HEIGHT / COARSE_CELL);
 export class PixelGrid {
   readonly width = PLAY_WIDTH;
   readonly height = PLAY_HEIGHT;
-  private cells = new Uint16Array(PLAY_WIDTH * PLAY_HEIGHT);
-  private coarse = new Uint16Array(COARSE_COLS * COARSE_ROWS);
+  /**
+   * Palette index per pixel, row by row (0 = empty). Exposed read-only for hot loops
+   * (bot rollouts); all writes go through the methods below.
+   */
+  readonly cells = new Uint16Array(PLAY_WIDTH * PLAY_HEIGHT);
+  /** Occupied pixels per coarse cell, row by row. Read-only outside this class. */
+  readonly coarse = new Uint16Array(COARSE_COLS * COARSE_ROWS);
   private palette: string[] = [''];
   private paletteIndex = new Map<string, number>();
 
@@ -77,6 +82,11 @@ export class PixelGrid {
   /** Like `has`, but wraps coordinates around the arena edges. */
   hasWrapped(x: number, y: number): boolean {
     return this.cells[wrap(y, PLAY_HEIGHT) * PLAY_WIDTH + wrap(x, PLAY_WIDTH)] !== 0;
+  }
+
+  /** The value `cells` holds for pixels of this colour, or -1 if there are none. */
+  paletteIndexOf(color: string): number {
+    return this.paletteIndex.get(color) ?? -1;
   }
 
   /** Colour of the pixel, or null if empty. */
