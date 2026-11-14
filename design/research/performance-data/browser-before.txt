@@ -1,0 +1,200 @@
+
+[desktop] easy2-blank: 59.8 fps, 69.8 ticks/s, dropped ticks 0, slow frames 0 (very slow 0) of 1200
+  ms mean/p50/p95/p99/max
+  frame   0.53/  0.50/  1.20/  1.70/  6.80
+  rafGap  16.66/ 16.70/ 18.00/ 18.50/ 19.60
+  step   0.23/  0.20/  0.70/  1.10/  3.50
+  bots   0.11/  0.10/  0.50/  0.80/  3.10
+  sim   0.07/  0.10/  0.20/  0.30/  1.90
+  serialize   0.03/  0.00/  0.10/  0.10/  0.20
+  events   0.02/  0.00/  0.10/  0.10/  0.80
+  render   0.25/  0.20/  0.50/  0.80/  5.50
+  gc: 28 minor + 0 major, 12.2 ms total, max 0.81 ms; busy: main 6.9% gpu 8.3% compositor 3.4%
+  JS heap 10.2 MB used / 14.3 MB
+
+[desktop] hard4-cycle: 59.8 fps, 69.8 ticks/s, dropped ticks 0, slow frames 0 (very slow 0) of 1200
+  ms mean/p50/p95/p99/max
+  frame   2.27/  2.00/  4.90/  5.80/  7.90
+  rafGap  16.67/ 16.70/ 18.00/ 18.60/ 19.10
+  step   1.77/  1.50/  3.90/  5.20/  7.00
+  bots   1.62/  1.40/  3.70/  5.00/  6.90
+  sim   0.09/  0.10/  0.20/  0.40/  1.10
+  serialize   0.02/  0.00/  0.10/  0.10/  0.20
+  events   0.03/  0.00/  0.10/  0.20/  0.90
+  render   0.20/  0.20/  0.40/  0.50/  0.90
+  gc: 105 minor + 0 major, 36.0 ms total, max 0.97 ms; busy: main 16.7% gpu 6.2% compositor 2.2%
+  JS heap 11.9 MB used / 20.4 MB
+
+[desktop] hard4-portals: 59.9 fps, 69.8 ticks/s, dropped ticks 0, slow frames 0 (very slow 0) of 1200
+  ms mean/p50/p95/p99/max
+  frame   2.17/  1.00/  7.10/  8.30/ 10.00
+  rafGap  16.67/ 16.60/ 18.30/ 18.70/ 21.20
+  step   1.70/  0.50/  6.40/  7.90/  8.50
+  bots   1.61/  0.40/  6.30/  7.80/  8.40
+  sim   0.05/  0.00/  0.20/  0.30/  0.80
+  serialize   0.02/  0.00/  0.10/  0.10/  0.20
+  events   0.01/  0.00/  0.10/  0.10/  0.70
+  render   0.18/  0.20/  0.40/  0.60/  6.00
+  gc: 80 minor + 0 major, 20.2 ms total, max 0.71 ms; busy: main 15.8% gpu 5.4% compositor 2%
+  JS heap 13.2 MB used / 21.5 MB
+
+[desktop] heavy-uzi: 59.9 fps, 69.8 ticks/s, dropped ticks 0, slow frames 0 (very slow 0) of 1200
+  ms mean/p50/p95/p99/max
+  frame   1.52/  1.40/  2.90/  3.90/  5.80
+  rafGap  16.67/ 16.70/ 18.20/ 18.60/ 18.70
+  step   0.97/  0.90/  1.40/  2.50/  3.60
+  bots   0.00/  0.00/  0.00/  0.00/  0.10
+  sim   0.40/  0.40/  0.60/  1.00/  2.10
+  serialize   0.01/  0.00/  0.10/  0.10/  0.10
+  events   0.55/  0.50/  0.80/  1.40/  2.00
+  render   0.38/  0.40/  0.70/  0.90/  1.20
+  gc: 46 minor + 0 major, 10.3 ms total, max 0.34 ms; busy: main 10.5% gpu 15.1% compositor 1%
+  JS heap 12.8 MB used / 18.2 MB
+
+[desktop] heavy-hbombs: 59.9 fps, 69.8 ticks/s, dropped ticks 0, slow frames 0 (very slow 0) of 1200
+  ms mean/p50/p95/p99/max
+  frame   1.91/  1.70/  4.20/  5.80/  7.20
+  rafGap  16.67/ 16.70/ 18.20/ 18.70/ 22.60
+  step   1.42/  1.30/  3.10/  3.80/  5.00
+  bots   0.00/  0.00/  0.00/  0.00/  0.10
+  sim   1.35/  1.20/  3.00/  3.70/  4.90
+  serialize   0.02/  0.00/  0.10/  0.10/  1.00
+  events   0.04/  0.00/  0.20/  0.30/  1.90
+  render   0.25/  0.20/  0.50/  0.60/  1.60
+  gc: 1133 minor + 8 major, 266.0 ms total, max 10.48 ms; busy: main 17.5% gpu 5.5% compositor 1.8%
+  JS heap 8.5 MB used / 23.3 MB
+
+[mobile-4x] easy2-blank: 59.9 fps, 69.9 ticks/s, dropped ticks 0, slow frames 0 (very slow 0) of 1201
+  ms mean/p50/p95/p99/max
+  frame   0.46/  0.40/  1.10/  1.30/  2.80
+  rafGap  16.67/ 16.60/ 18.40/ 19.00/ 19.40
+  step   0.18/  0.10/  0.70/  1.00/  2.40
+  bots   0.08/  0.00/  0.40/  0.80/  1.80
+  sim   0.07/  0.00/  0.40/  0.70/  1.20
+  serialize   0.02/  0.00/  0.10/  0.40/  0.80
+  events   0.02/  0.00/  0.10/  0.40/  0.90
+  render   0.24/  0.10/  0.80/  1.10/  1.20
+  gc: 23 minor + 0 major, 16.6 ms total, max 1.49 ms; busy: main 6.7% gpu 2.2% compositor 0.6%
+  JS heap 10.1 MB used / 13.8 MB
+
+[mobile-4x] hard4-cycle: 59.8 fps, 69.9 ticks/s, dropped ticks 0, slow frames 1 (very slow 1) of 1198
+  ms mean/p50/p95/p99/max
+  frame   1.80/  1.80/  3.50/  4.30/  9.40
+  rafGap  16.69/ 16.70/ 18.30/ 18.90/ 69.20
+  step   1.31/  1.40/  2.60/  3.10/  5.70
+  bots   1.18/  1.20/  2.40/  2.80/  5.60
+  sim   0.07/  0.00/  0.60/  0.90/  1.10
+  serialize   0.03/  0.00/  0.10/  0.70/  1.00
+  events   0.02/  0.00/  0.10/  0.70/  1.30
+  render   0.26/  0.10/  0.90/  1.00/  7.20
+  gc: 76 minor + 0 major, 48.1 ms total, max 1.96 ms; busy: main 15.2% gpu 2.3% compositor 0.6%
+  JS heap 16.0 MB used / 21.5 MB
+
+[mobile-4x] hard4-portals: 59.9 fps, 69.9 ticks/s, dropped ticks 0, slow frames 0 (very slow 0) of 1200
+  ms mean/p50/p95/p99/max
+  frame   5.20/  4.70/ 11.20/ 13.20/ 15.80
+  rafGap  16.67/ 16.70/ 18.40/ 18.90/ 19.40
+  step   4.15/  3.70/  9.40/ 12.20/ 13.70
+  bots   3.94/  3.50/  9.20/ 11.70/ 13.30
+  sim   0.12/  0.00/  0.80/  1.00/  1.60
+  serialize   0.04/  0.00/  0.20/  0.80/  1.00
+  events   0.04/  0.00/  0.30/  0.80/  1.40
+  render   0.35/  0.20/  1.00/  1.20/  1.30
+  gc: 99 minor + 0 major, 58.1 ms total, max 1.49 ms; busy: main 36.2% gpu 2.5% compositor 0.6%
+  JS heap 14.2 MB used / 21.5 MB
+
+[mobile-4x] heavy-uzi: 59.9 fps, 69.8 ticks/s, dropped ticks 0, slow frames 0 (very slow 0) of 1200
+  ms mean/p50/p95/p99/max
+  frame   4.11/  3.60/  7.00/  7.50/  8.60
+  rafGap  16.67/ 16.70/ 18.10/ 18.60/ 19.20
+  step   2.59/  2.60/  3.10/  3.40/  6.80
+  bots   0.00/  0.00/  0.00/  0.00/  0.00
+  sim   1.03/  1.00/  1.50/  1.70/  4.80
+  serialize   0.03/  0.00/  0.10/  0.70/  1.00
+  events   1.49/  1.50/  2.00/  2.20/  2.30
+  render   1.08/  1.00/  1.80/  2.10/  2.40
+  gc: 45 minor + 0 major, 30.6 ms total, max 1.33 ms; busy: main 28.8% gpu 10.4% compositor 0.6%
+  JS heap 12.4 MB used / 18.9 MB
+
+[mobile-4x] heavy-hbombs: 59.8 fps, 69.8 ticks/s, dropped ticks 0, slow frames 2 (very slow 0) of 1199
+  ms mean/p50/p95/p99/max
+  frame   3.51/  3.20/  7.20/  9.40/ 10.50
+  rafGap  16.68/ 16.60/ 18.30/ 19.00/ 32.50
+  step   2.57/  2.50/  4.70/  5.40/  6.10
+  bots   0.00/  0.00/  0.00/  0.00/  0.10
+  sim   2.43/  2.30/  4.50/  4.90/  5.80
+  serialize   0.03/  0.00/  0.20/  0.80/  0.90
+  events   0.07/  0.00/  0.60/  0.90/  1.20
+  render   0.49/  0.50/  1.10/  1.20/  1.90
+  gc: 1130 minor + 10 major, 589.0 ms total, max 25.65 ms; busy: main 33.7% gpu 2.9% compositor 0.6%
+  JS heap 11.7 MB used / 24.0 MB
+
+[mobile-6x] easy2-blank: 59.9 fps, 69.9 ticks/s, dropped ticks 0, slow frames 0 (very slow 0) of 1201
+  ms mean/p50/p95/p99/max
+  frame   0.48/  0.20/  1.40/  2.00/  3.10
+  rafGap  16.67/ 16.70/ 18.00/ 18.70/ 20.40
+  step   0.15/  0.00/  0.80/  1.40/  1.80
+  bots   0.05/  0.00/  0.40/  0.90/  1.70
+  sim   0.05/  0.00/  0.30/  0.80/  1.60
+  serialize   0.03/  0.00/  0.10/  0.50/  1.50
+  events   0.01/  0.00/  0.10/  0.40/  1.40
+  render   0.30/  0.10/  1.20/  1.50/  3.00
+  gc: 17 minor + 0 major, 17.3 ms total, max 1.58 ms; busy: main 8.6% gpu 2.1% compositor 0.6%
+  JS heap 9.6 MB used / 11.8 MB
+
+[mobile-6x] hard4-cycle: 59.7 fps, 69.9 ticks/s, dropped ticks 0, slow frames 2 (very slow 1) of 1197
+  ms mean/p50/p95/p99/max
+  frame   2.77/  2.40/  6.60/  8.50/ 18.80
+  rafGap  16.72/ 16.70/ 18.10/ 19.10/ 88.90
+  step   2.04/  1.90/  5.40/  7.30/  8.90
+  bots   1.84/  1.70/  5.10/  7.20/  8.20
+  sim   0.13/  0.00/  1.10/  1.60/  3.40
+  serialize   0.04/  0.00/  0.10/  1.10/  1.60
+  events   0.03/  0.00/  0.10/  1.00/  2.60
+  render   0.36/  0.10/  1.40/  1.60/ 11.90
+  gc: 80 minor + 0 major, 67.5 ms total, max 2.68 ms; busy: main 23.2% gpu 2.2% compositor 0.6%
+  JS heap 15.0 MB used / 22.2 MB
+
+[mobile-6x] hard4-portals: 59.9 fps, 69.9 ticks/s, dropped ticks 0, slow frames 1 (very slow 0) of 1201
+  ms mean/p50/p95/p99/max
+  frame   5.65/  5.60/ 12.80/ 15.60/ 23.70
+  rafGap  16.67/ 16.70/ 18.10/ 18.70/ 25.20
+  step   4.42/  4.20/ 11.50/ 14.60/ 23.60
+  bots   4.18/  4.00/ 11.40/ 14.00/ 23.20
+  sim   0.15/  0.00/  1.10/  1.50/  2.90
+  serialize   0.05/  0.00/  0.10/  1.20/  1.50
+  events   0.04/  0.00/  0.10/  1.10/  1.60
+  render   0.48/  0.10/  1.50/  1.80/  2.10
+  gc: 82 minor + 0 major, 81.5 ms total, max 2.04 ms; busy: main 40.2% gpu 2.3% compositor 0.6%
+  JS heap 14.8 MB used / 21.3 MB
+
+[mobile-6x] heavy-uzi: 49.6 fps, 69.7 ticks/s, dropped ticks 0, slow frames 161 (very slow 45) of 997
+  ms mean/p50/p95/p99/max
+  frame   7.14/  5.70/ 12.50/ 20.70/ 48.20
+  rafGap  20.09/ 16.90/ 40.60/ 63.40/110.60
+  step   3.81/  3.80/  4.80/  5.40/ 41.60
+  bots   0.00/  0.00/  0.00/  0.00/  1.00
+  sim   1.35/  1.40/  2.10/  2.70/ 38.50
+  serialize   0.04/  0.00/  0.10/  1.20/  1.60
+  events   2.35/  2.30/  3.30/  3.70/ 36.30
+  render   1.76/  1.60/  3.00/  4.50/  7.90
+  gc: 37 minor + 5 major, 156.4 ms total, max 35.84 ms; busy: main 60.1% gpu 9.3% compositor 0.6%
+  JS heap 6.7 MB used / 16.0 MB
+
+[mobile-6x] heavy-hbombs: 40.0 fps, 68.9 ticks/s, dropped ticks 15, slow frames 107 (very slow 65) of 801
+  ms mean/p50/p95/p99/max
+  frame   7.55/  4.80/ 32.30/ 46.00/ 92.20
+  rafGap  24.97/ 17.00/ 94.10/146.80/195.80
+  step   3.90/  3.90/  6.40/  7.40/ 49.60
+  bots   0.00/  0.00/  0.00/  0.00/  0.50
+  sim   3.47/  3.40/  5.80/  7.10/ 48.10
+  serialize   0.04/  0.00/  0.10/  1.30/  1.60
+  events   0.32/  0.00/  1.50/  1.80/  2.20
+  render   0.79/  0.80/  1.70/  2.00/  2.60
+  gc: 961 minor + 9 major, 1011.9 ms total, max 89.72 ms; busy: main 63.9% gpu 2.1% compositor 0.5%
+  JS heap 11.6 MB used / 23.5 MB
+
+Bundle:
+  assets/index-DjbuR9oK.js                    383.4 kB  gzip   124.8 kB
+  index.html                                    1.0 kB  gzip     0.5 kB
+GPU: ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Max, Unspecified Version)
