@@ -134,7 +134,8 @@ try {
   const arena = await guest.evaluate(() => {
     // Count coloured pixels: the trails drawn before the reload must be there
     const canvas = document.querySelector('#gameCanvas canvas');
-    const data = canvas.getContext('2d').getImageData(0, 0, 750, 600).data;
+    // The whole play area (15/16 of the width), whatever the scale of the backing store
+    const data = canvas.getContext('2d').getImageData(0, 0, canvas.width * 15 / 16, canvas.height).data;
     let n = 0;
     for (let i = 0; i < data.length; i += 4) if (data[i] + data[i + 1] + data[i + 2] > 60) n++;
     return n;

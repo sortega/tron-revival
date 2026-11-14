@@ -229,6 +229,10 @@ export interface LevelDefinition {
   id: string;
   name: string;
   imagePath: string;
+  /** Display-only background image; never a wall (design/display-layer.md) */
+  backgroundPath?: string;
+  /** The background is light: shade and markers need a dark edge to show on it */
+  lightBackground?: boolean;
   /** Automatic doors (design/level-hazards.md) */
   doors?: DoorDefinition[];
   /** Guns that fire shell bursts at random (design/level-hazards.md) */
@@ -239,7 +243,7 @@ export interface LevelDefinition {
 
 // Level image filenames (relative to /assets/levels/)
 // The full path is constructed at runtime using import.meta.env.BASE_URL
-export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string; doors?: DoorDefinition[]; guns?: GunDefinition[]; hand?: HandDefinition }[] = [
+export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string; backgroundFile?: string; lightBackground?: boolean; doors?: DoorDefinition[]; guns?: GunDefinition[]; hand?: HandDefinition }[] = [
   { id: 'blank', name: 'Blank', imageFile: 'blank.png' },
   { id: 'pop-culture', name: 'Pop Culture', imageFile: 'pop-culture.png' },
   { id: 'selva', name: 'Selva', imageFile: 'selva.png' },
@@ -272,6 +276,10 @@ export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string; d
       { x: 385, y: 290, vertical: true },
     ],
   },
+  // Levels with a display-only background (design/display-layer.md); images generated
+  // by scripts/build-research-levels.ts
+  { id: 'blueprint', name: 'Blueprint', imageFile: 'blueprint.png', backgroundFile: 'blueprint-bg.png' },
+  { id: 'paper', name: 'Paper', imageFile: 'paper.png', backgroundFile: 'paper-bg.png', lightBackground: true },
 ];
 
 // Level order (cycles after last level) - constructed with full paths
@@ -279,6 +287,8 @@ export const LEVELS: LevelDefinition[] = LEVEL_DEFINITIONS.map(def => ({
   id: def.id,
   name: def.name,
   imagePath: `${import.meta.env.BASE_URL}assets/levels/${def.imageFile}`,
+  ...(def.backgroundFile && { backgroundPath: `${import.meta.env.BASE_URL}assets/levels/${def.backgroundFile}` }),
+  ...(def.lightBackground && { lightBackground: true }),
   ...(def.doors && { doors: def.doors }),
   ...(def.guns && { guns: def.guns }),
   ...(def.hand && { hand: def.hand }),
