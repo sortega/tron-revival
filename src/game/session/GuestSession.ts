@@ -10,6 +10,7 @@ import type { PlayerIdentity } from '../../network/serialization';
 import { ByteRate } from './GameSession';
 import type { GameSession, GuestTransport, NetworkStats, ViewState } from './GameSession';
 import { predictPlayer } from './prediction';
+import { perfEnd, perfStart } from '../perf';
 
 /** Remote players are never extrapolated further than this (≈ 170 ms). */
 export const MAX_EXTRAPOLATION_TICKS = 12;
@@ -120,7 +121,9 @@ export class GuestSession implements GameSession {
       if (this.held.length < 2000) this.held.push(data);
       return;
     }
+    let t0 = perfStart();
     const state = deserializeState(data, this.players, this.latest);
+    perfEnd('decode', t0);
     if (state.tick !== undefined && state.tick <= this.minTick) return; // Already in the snapshot
     const now = this.now();
     this.lastStateAt = now;
@@ -146,12 +149,18 @@ export class GuestSession implements GameSession {
       }
     }
 
+    t0 = perfStart();
     this.onFrame?.(state);
+    perfEnd('events', t0);
   }
 
   getViewState(): ViewState | null {
     if (!this.latest) return null;
-    if (!this.view) this.view = this.buildView(this.latest);
+    if (!this.view) {
+      const t0 = perfStart();
+      this.view = this.buildView(this.latest);
+      perfEnd('predict', t0);
+    }
     return this.view;
   }
 

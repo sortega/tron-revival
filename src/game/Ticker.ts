@@ -2,6 +2,7 @@
 // Calls `step` TICK_RATE times per second and `render` once per display frame.
 
 import { TICK_MS } from './constants';
+import { perfCount, perfEnabled, perfEnd, perfSample, perfStart } from './perf';
 
 const MAX_STEPS_PER_WAKE = 10;
 
@@ -56,9 +57,17 @@ export class Ticker {
     }
   };
 
+  private lastRaf = 0;
+
   private onRaf = (): void => {
+    const t0 = perfStart();
+    if (perfEnabled()) {
+      if (this.lastRaf > 0) perfSample('rafGap', t0 - this.lastRaf);
+      this.lastRaf = t0;
+    }
     this.advance();
     this.render();
+    perfEnd('frame', t0);
     if (this.running && !document.hidden) {
       this.rafId = requestAnimationFrame(this.onRaf);
     }
@@ -75,8 +84,12 @@ export class Ticker {
       this.step();
       steps++;
     }
+    perfCount('ticks', steps);
     // Too far behind: resynchronise instead of fast-forwarding
-    if (this.accumulator >= TICK_MS) this.accumulator = 0;
+    if (this.accumulator >= TICK_MS) {
+      perfCount('droppedTicks', Math.floor(this.accumulator / TICK_MS));
+      this.accumulator = 0;
+    }
   }
 
   private stopRaf(): void {

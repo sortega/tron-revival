@@ -15,6 +15,7 @@ import { Ticker } from './Ticker';
 import type { GameSession } from './session/GameSession';
 import { HOST_SILENCE_MS } from './session/GameSession';
 import { escapeHtml } from '../util/html';
+import { perfDump, perfEnable, perfEnd, perfStart } from './perf';
 
 export class TronGame implements Screen {
   private container: HTMLElement;
@@ -216,11 +217,17 @@ export class TronGame implements Screen {
       });
     }
 
+    // `?perf=1`: record phase timings for the benchmark harness
+    // (design/research/performance.md)
+    const perf = new URLSearchParams(location.search).has('perf');
+    if (perf) perfEnable();
+
     // Debug / end-to-end test hook
     (window as unknown as { __teratron?: unknown }).__teratron = {
       config: this.config,
       view: () => this.session.getViewState(),
       stats: () => this.session.getNetworkStats(),
+      ...(perf && { perf: perfDump, session: this.session }),
     };
 
     this.ticker = new Ticker(
@@ -633,7 +640,9 @@ export class TronGame implements Screen {
   // One simulation tick
   private step(): void {
     if (!this.input) return;
+    const t0 = perfStart();
     this.session.step(this.input.getInputs());
+    perfEnd('step', t0);
 
     // Track steps per second (should stay at TICK_RATE)
     const now = performance.now();
@@ -661,10 +670,12 @@ export class TronGame implements Screen {
     }
 
     const stats = this.session.getNetworkStats() ?? undefined;
+    const t0 = perfStart();
     this.renderer.render(
       view.round, view.match, this.showFps ? this.currentFps : undefined,
       this.showFps ? stats : undefined, view.overlayTrails
     );
+    perfEnd('render', t0);
     const silentMs = stats?.silentMs ?? 0;
     if (silentMs > HOST_SILENCE_MS) {
       this.renderer.renderNotice('Connection to the host lost', `waiting… ${Math.floor(silentMs / 1000)}s`);
