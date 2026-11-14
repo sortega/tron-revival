@@ -243,11 +243,15 @@ Design, measurements and recommendation: `design/display-layer.md`; screenshots 
 - [x] Levels can have a display-only background (`backgroundFile`); new levels Blueprint
       (dark navy) and Paper (light)
 - [x] `tools/display-lab.mjs`: comparison sheets and render cost per variant
-- [ ] **Owner: look at it on a real phone and pick the default** (the branch keeps `off` +
-      `glow` head, i.e. the old look, as the default; recommendation is `auto` + `ring`)
+- [ ] **Owner: look at it on a real phone and confirm the default** (the branch defaults to
+      the recommendation, `auto` + `ring` + `tracer`; `?shade=off&head=glow&fx=` is the old
+      look). 2× costs 4× the fill: check the frame rate on a mid-range phone
+- [ ] Eraser mid-round re-derives the whole arena (35–55 ms on a slow phone): blit a
+      pre-derived pristine level layer instead if it shows
 - [ ] Remove the variants that lose (and the 1/2/3 keys) once a default is chosen
-- [ ] Provisional (predicted) trail pixels of a guest are drawn without shade until the
+- [ ] Provisional (predicted) trail pixels of a guest get an unclipped fringe until the
       host confirms them
+- [ ] `fade` extra has not been watched in motion
 - [ ] Lock-border pixels in a rejoin snapshot are taken for trails (same colour as the player)
 - [ ] Paper: decide whether a light level stays in the cycle; item sprites with a white
       box look pasted on it
