@@ -56,3 +56,30 @@ export function anyDoorSolidAt(
   }
   return false;
 }
+
+const zones = new WeakMap<readonly DoorDefinition[], Uint8Array>();
+
+/**
+ * Per pixel of a `width`×`height` arena (row by row): 1 if the pixel lies inside the
+ * bounding box of some door, i.e. `anyDoorSolidAt` can only be true where this is 1.
+ * Computed once per door list. Lets hot loops (bot rollouts) skip the per-door test
+ * for almost every pixel.
+ */
+export function doorZones(doors: readonly DoorDefinition[], width: number, height: number): Uint8Array {
+  let zone = zones.get(doors);
+  if (!zone) {
+    zone = new Uint8Array(width * height);
+    for (const door of doors) {
+      const halfX = (door.vertical ? DOOR_THICKNESS : DOOR_LENGTH) / 2;
+      const halfY = (door.vertical ? DOOR_LENGTH : DOOR_THICKNESS) / 2;
+      // One pixel of slack around the box, so its exact edges do not matter
+      const x0 = Math.max(0, Math.floor(door.x - halfX) - 1);
+      const x1 = Math.min(width - 1, Math.ceil(door.x + halfX) + 1);
+      const y0 = Math.max(0, Math.floor(door.y - halfY) - 1);
+      const y1 = Math.min(height - 1, Math.ceil(door.y + halfY) + 1);
+      for (let y = y0; y <= y1; y++) zone.fill(1, y * width + x0, y * width + x1 + 1);
+    }
+    zones.set(doors, zone);
+  }
+  return zone;
+}

@@ -1,0 +1,12 @@
+{
+  "hard-normal-easy@bus": "state:b009691614f794e5 frames:4d63897c1934acce wire:d6a7675a11457941 rounds:3",
+  "4hard@cycle": "state:96e33a1ed90956ae frames:6f144adc8666c6d9 wire:4e07ede5baf2c807 rounds:6",
+  "normal-hard@portals": "state:0220e5a5ff50c150 frames:47661ab831a51fe9 wire:79c4d0c29808c651 rounds:2",
+  "3normal+human@warzone": "state:ac3ce01f1f8a0481 frames:dac2d46f797702dc wire:6d8f7c2d32f0ae6c rounds:3",
+  "hard-easy@dentistry": "state:2b06d7608f26fbd2 frames:654b4c0a92600e45 wire:45784216eba54079 rounds:4",
+  "heavy-uzi-4p": "state:383f7927d08b5145 frames:cf9068c384579d2a wire:b1fd940a122843d3 rounds:1",
+  "heavy-rifle-shotgun-4p": "state:59462bd4422172cb frames:d17d08b36205ae61 wire:e86ca3f88e894e3b rounds:1",
+  "heavy-hbombs-4p": "state:7010630dbfb70e95 frames:eafd003f10d3367c wire:8561549913813214 rounds:1",
+  "heavy-megabomb": "state:bfacdcb8d6e1deaa frames:20e5e2188d6d814a wire:2de8fd0925535df2 rounds:2",
+  "heavy-satellites-12": "state:fa2657ddaee3436a frames:41f47212e93699a2 wire:6dbad91363e84c60 rounds:2"
+}

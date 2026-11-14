@@ -902,7 +902,9 @@ export class TronGameState {
 
   // Move projectiles and check collisions
   private tickProjectiles(): void {
-    const toRemove: number[] = [];
+    const toRemove = new Set<number>();
+    // Bombs in flight (none are launched while projectiles move)
+    const anyBomb = this.projectiles.some(p => p.type === 'bomb');
 
     // The paths tracers travel this tick, for bullets to run into
     const tracerPaths: TracerPath[] = [];
@@ -982,7 +984,7 @@ export class TronGameState {
         const before = Math.min(pixelT, guard ? guard.t : Infinity);
         const ownerSafe = (proj.ownerCooldown ?? 0) > 1;
         if (this.strikePlayerOnPath(proj, prevX, prevY, unwrappedX, unwrappedY, before, false, ownerSafe)) {
-          toRemove.push(proj.id);
+          toRemove.add(proj.id);
           continue;
         }
       }
@@ -998,7 +1000,7 @@ export class TronGameState {
           this.clearPixelPath(prevX, prevY, impactPoint.rawX, impactPoint.rawY);
           this.tracerExpire(impactPoint.x, impactPoint.y);
         }
-        toRemove.push(proj.id);
+        toRemove.add(proj.id);
         continue;
       }
 
@@ -1011,7 +1013,7 @@ export class TronGameState {
           proj.remainingFrames--;
           if (proj.remainingFrames <= 0) {
             this.tracerExpire(newX, newY);
-            toRemove.push(proj.id);
+            toRemove.add(proj.id);
             continue;
           }
         }
@@ -1031,7 +1033,7 @@ export class TronGameState {
         ? this.findTracerOnPath(proj, prevX, prevY, unwrappedX, unwrappedY, tracerPaths)
         : null;
       // A bullet or tracer that crosses a flying bomb sets it off
-      const bombHit = proj.type === 'bomb'
+      const bombHit = proj.type === 'bomb' || !anyBomb
         ? null
         : this.findBombOnPath(prevX, prevY, unwrappedX, unwrappedY, toRemove);
       // Whatever comes first on the path counts
@@ -1041,25 +1043,25 @@ export class TronGameState {
 
       // Check collision with players
       const hitPlayer = this.strikePlayerOnPath(proj, prevX, prevY, unwrappedX, unwrappedY, stopT, blocker !== null, skipOwner);
-      if (hitPlayer) toRemove.push(proj.id);
+      if (hitPlayer) toRemove.add(proj.id);
       if (hitPlayer) continue;
       if (bombHit && bombHit.t <= stopT) {
         // Any shot sets the bomb off where it is, as a tracer did in the original
         const bomb = bombHit.bomb;
-        toRemove.push(bomb.id);
+        toRemove.add(bomb.id);
         this.bombImpact(Math.floor(bomb.x / 1000), Math.floor(bomb.y / 1000), bomb.ownerSlot);
-        toRemove.push(proj.id);
+        toRemove.add(proj.id);
         continue;
       }
       if (tracerHit && tracerHit.t <= stopT) {
         this.projectileImpact(tracerHit.x, tracerHit.y, proj.ownerSlot);
-        toRemove.push(proj.id);
+        toRemove.add(proj.id);
         continue;
       }
       if (blocker) {
         const stopX = prevX + (unwrappedX - prevX) * blocker.t;
         const stopY = prevY + (unwrappedY - prevY) * blocker.t;
-        if (this.blockProjectile(blocker.bg, proj, stopX, stopY)) toRemove.push(proj.id);
+        if (this.blockProjectile(blocker.bg, proj, stopX, stopY)) toRemove.add(proj.id);
         continue;
       }
 
@@ -1073,7 +1075,7 @@ export class TronGameState {
           if (proj.type === 'bomb') {
             // Bomb explodes on item contact
             this.bombImpact(item.x, item.y, proj.ownerSlot);
-            toRemove.push(proj.id);
+            toRemove.add(proj.id);
             hitItem = true;
             break;
           } else {
@@ -1087,7 +1089,7 @@ export class TronGameState {
             if (proj.type === 'tracer') {
               this.tracerExpire(item.x, item.y);
             }
-            toRemove.push(proj.id);
+            toRemove.add(proj.id);
             hitItem = true;
             break;
           }
@@ -1100,24 +1102,22 @@ export class TronGameState {
       // - Bullets and tracers set bombs off (handled above, on the path travelled)
       // - Bombs collide with bombs (mega explosion with doubled radii + white flash)
       // - Tracers don't collide with each other (allows shotgun/uzi spread)
-      if (proj.type === 'bullet' || proj.type === 'tracer') {
+      // (only a bullet meeting a bullet has any effect, so nothing else is looked at)
+      if (proj.type === 'bullet') {
         for (const other of this.projectiles) {
-          if (other.id === proj.id) continue;
-          if (toRemove.includes(other.id)) continue;
+          if (other.type !== 'bullet' || other.id === proj.id) continue;
+          if (toRemove.has(other.id)) continue;
           const otherX = Math.floor(other.x / 1000);
           const otherY = Math.floor(other.y / 1000);
           const dist = Math.sqrt((newX - otherX) ** 2 + (newY - otherY) ** 2);
           if (dist < 3) {  // Small collision radius for projectiles
-            if (proj.type === 'bullet' && other.type === 'bullet') {
-              // Two bullets collide - mutual destruction + explosion
-              const midX = Math.floor((newX + otherX) / 2);
-              const midY = Math.floor((newY + otherY) / 2);
-              this.projectileImpact(midX, midY, proj.ownerSlot);
-              toRemove.push(proj.id);
-              toRemove.push(other.id);
-              break;
-            }
-            // Tracers don't collide with each other or with bullets
+            // Two bullets collide - mutual destruction + explosion
+            const midX = Math.floor((newX + otherX) / 2);
+            const midY = Math.floor((newY + otherY) / 2);
+            this.projectileImpact(midX, midY, proj.ownerSlot);
+            toRemove.add(proj.id);
+            toRemove.add(other.id);
+            break;
           }
         }
       }
@@ -1127,17 +1127,19 @@ export class TronGameState {
         for (const other of this.projectiles) {
           if (other.id === proj.id) continue;
           if (other.type !== 'bomb') continue;
-          if (toRemove.includes(other.id)) continue;
+          if (toRemove.has(other.id)) continue;
           const otherX = Math.floor(other.x / 1000);
           const otherY = Math.floor(other.y / 1000);
+          // Further apart than two bomb diagonals (2 x 10.8 px): they cannot touch
+          if (Math.abs(newX - otherX) > 22 || Math.abs(newY - otherY) > 22) continue;
           // Check OBB collision between two rotated bombs
           if (this.checkBombOBBCollision(newX, newY, proj.direction, otherX, otherY, other.direction)) {
             // Two bombs collide - mega explosion at midpoint
             const midX = Math.floor((newX + otherX) / 2);
             const midY = Math.floor((newY + otherY) / 2);
             this.megaBombImpact(midX, midY);
-            toRemove.push(proj.id);
-            toRemove.push(other.id);
+            toRemove.add(proj.id);
+            toRemove.add(other.id);
             break;
           }
         }
@@ -1145,7 +1147,7 @@ export class TronGameState {
     }
 
     // Remove impacted projectiles
-    this.projectiles = this.projectiles.filter(p => !toRemove.includes(p.id));
+    this.projectiles = this.projectiles.filter(p => !toRemove.has(p.id));
     this.removeDeadBodyguards();
   }
 
@@ -1157,10 +1159,10 @@ export class TronGameState {
     proj.y = (portalY + Math.sin(dirRad) * PORTAL_OUTER_RADIUS) * 1000;
   }
 
-  // Clear pixels along projectile path (for tracer bullets)
+  // Clear pixels along projectile path (for tracer bullets). Only reported to the
+  // renderer (and to guests) if something was there: most tracers fly through nothing
   private clearPixelPath(x0: number, y0: number, x1: number, y1: number): void {
-    this.pixels.clearLine(x0, y0, x1, y1);
-    this.frameClearedLines.push(x0, y0, x1, y1);
+    if (this.pixels.clearLine(x0, y0, x1, y1)) this.frameClearedLines.push(x0, y0, x1, y1);
   }
 
   // Tracer bullet expiration (no explosion)
@@ -1171,10 +1173,9 @@ export class TronGameState {
   }
 
   // Clear a size×size square (top-left corner at x,y; wraps) from the collision map
-  // and report it to the renderer
+  // and, if anything was there, report it to the renderer
   private clearSquare(x: number, y: number, size: number): void {
-    this.pixels.clearRect(x, y, size, size);
-    this.frameClearedAreas.push({ x, y, w: size, h: size });
+    if (this.pixels.clearRect(x, y, size, size)) this.frameClearedAreas.push({ x, y, w: size, h: size });
   }
 
   // Clear a disc (wraps) from the collision map, reported to the renderer as a stack of
@@ -1185,8 +1186,7 @@ export class TronGameState {
     const flush = (bottom: number): void => {
       if (stripHalf < 0) return;
       const area = { x: cx - stripHalf, y: stripTop, w: 2 * stripHalf + 1, h: bottom - stripTop };
-      this.pixels.clearRect(area.x, area.y, area.w, area.h);
-      this.frameClearedAreas.push(area);
+      if (this.pixels.clearRect(area.x, area.y, area.w, area.h)) this.frameClearedAreas.push(area);
     };
     for (let dy = -radius; dy <= radius; dy++) {
       const half = Math.floor(Math.sqrt(radius * radius - dy * dy));
@@ -1286,11 +1286,11 @@ export class TronGameState {
 
   // The first flying bomb whose body a bullet's or tracer's path crosses this tick
   private findBombOnPath(
-    x0: number, y0: number, x1: number, y1: number, removed: readonly number[]
+    x0: number, y0: number, x1: number, y1: number, removed: ReadonlySet<number>
   ): { bomb: Projectile; t: number } | null {
     let best: { bomb: Projectile; t: number } | null = null;
     for (const bomb of this.projectiles) {
-      if (bomb.type !== 'bomb' || removed.includes(bomb.id)) continue;
+      if (bomb.type !== 'bomb' || removed.has(bomb.id)) continue;
       // The path in the bomb's own frame: x along its heading, y across
       const bx = bomb.x / 1000;
       const by = bomb.y / 1000;
@@ -1894,11 +1894,6 @@ export class TronGameState {
 
   // Eraser: clear all trails, restore level, stop border locks
   private activateEraser(): void {
-    // Clear all player trails
-    for (const player of this.players) {
-      player.trail = [];
-    }
-
     // Reset collision map to only level obstacles
     this.pixels.copyFrom(this.levelObstacles);
 
@@ -2415,7 +2410,6 @@ export class TronGameState {
       const player = this.players.find(p => p.slotIndex === slotIndex);
       if (player) {
         for (const seg of segments) {
-          player.trail.push(seg);
           this.pixels.set(seg.x, seg.y, player.color);
         }
       }

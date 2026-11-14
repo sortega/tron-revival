@@ -1,0 +1,35 @@
+kernel.native.wasm 5981 bytes, kernel.jsmath.wasm 6001 bytes
+
+Bot plan (9 rollouts, lookahead 180, clearance sampling), per plan:
+  TypeScript                                        16682.9 ns/plan   (checksum 5732110)
+  TypeScript over WASM memory (shared grid)         16788.9 ns/plan   (checksum 5732110)
+  WASM, one call per plan                           12774.3 ns/plan   (checksum 5732110)
+  WASM, one call per rollout (9 crossings)          12667.1 ns/plan   (checksum 5732110)
+  WASM importing Math.sin/cos from JS               12987.7 ns/plan   (checksum 5732110)
+
+firstHitOnLine (half 12 px, half 100 px lines), per line:
+  TypeScript                                          398.6 ns/line   (checksum 66595)
+  TypeScript, modulo only outside the arena           162.7 ns/line   (checksum 66595)
+  WASM, one call per line                              77.1 ns/line   (checksum 66595)
+
+Single-pixel lookups (the chattiest possible use), per lookup:
+  TypeScript has()                                      6.3 ns/call   (checksum 2116700)
+  WASM has() called from JS                             4.0 ns/call   (checksum 2116700)
+
+clearRect of a blast (r = 60 circle as strips) + refill, per blast:
+  TypeScript                                        30126.5 ns/blast   (checksum 0)
+  WASM (121 calls per blast)                        16338.6 ns/blast   (checksum 0)
+
+Determinism (TypeScript vs WASM on the same arena):
+  WASM with AssemblyScript sin/cos         0 of 9000 rollouts end at a different step; 0 more differ in the last bits of the end position
+  WASM importing Math.sin/cos from JS      0 of 9000 rollouts end at a different step; 0 more differ in the last bits of the end position
+  sin/cos, AssemblyScript vs this JS engine: 1 of 90 multiples of 4 degrees differ; 28221 of 1000000 random headings differ
+
+Summary (WASM time / TypeScript time; below 1 = WASM faster):
+  plan, batched            0.77
+  plan, call per rollout   0.76
+  plan, JS Math imports    0.78
+  plan, TS on WASM memory  1.01
+  firstHitOnLine           0.19   (0.47 against the faster TypeScript walk)
+  has()                    0.64
+  blast clearRect          0.54

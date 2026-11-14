@@ -128,6 +128,10 @@ Distances wrap around the arena edges. Two bombs that collide make one blast wit
 radii doubled. The erased disc reaches guests and the renderer as a stack of horizontal
 strips in `clearedAreas`.
 
+Cleared lines and areas are one-shot events for the renderer and for guests. They are only
+emitted when at least one pixel was actually erased, so shots through empty space cost
+neither drawing nor bandwidth (an Uzi used to send 20 no-op lines per tick).
+
 ## Validation
 
 `tests/projectiles.test.ts`:

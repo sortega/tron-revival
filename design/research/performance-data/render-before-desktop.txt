@@ -1,0 +1,31 @@
+profile     scene    variant     apply+draw ms mean / p95 / max     rAF gap p95   slow frames   busy % main / gpu
+desktop     typical  c2d           0.32 /   0.70 /   1.10            16.8        0        5.5 / 8.9
+desktop     typical  c2d-noglow    0.31 /   0.60 /   0.90            16.7        0        5.4 / 8.7
+desktop     typical  c2d-nosidebar    0.21 /   0.40 /   0.80            16.7        0        4.4 / 8.6
+desktop     typical  imagedata     0.43 /   0.80 /   3.20            16.7        0        5.9 / 11.5
+desktop     typical  webgl         0.19 /   0.40 /   0.80            16.7        0        3.7 / 9.2
+desktop     heavy    c2d           1.79 /   3.80 /   5.40            16.8        0        13.4 / 16
+desktop     heavy    c2d-noglow    1.67 /   3.80 /   5.60            16.7        0        12.5 / 16.4
+desktop     heavy    c2d-nosidebar    1.38 /   3.20 /   5.10            16.7        0        10.4 / 15.6
+desktop     heavy    imagedata     0.67 /   1.20 /   2.00            16.8        0        7.9 / 10.7
+desktop     heavy    webgl         0.51 /   1.00 /   1.50            16.7        0        6.1 / 10.5
+desktop     tint     c2d           0.37 /   0.70 /   1.10            16.8        0        5.5 / 9.8
+desktop     tint     c2d-noglow    0.39 /   0.70 /   1.20            16.8        0        6 / 9.3
+desktop     tint     c2d-nosidebar    0.29 /   0.60 /   0.80            16.8        0        4.6 / 10
+desktop     tint     imagedata     0.37 /   0.70 /   1.10            16.7        0        5.5 / 8.8
+desktop     tint     webgl         0.20 /   0.40 /   0.70            16.7        0        3.8 / 9.5
+mobile-4x   typical  c2d           0.22 /   0.70 /   1.30            16.7        0        5 / 2.2
+mobile-4x   typical  c2d-noglow    0.23 /   0.80 /   1.10            16.8        0        5.2 / 2.1
+node:internal/modules/run_main:111
+    triggerUncaughtException(
+    ^
+
+page.waitForFunction: Timeout 120000ms exceeded.
+    at /Users/sortega/Code/tron-revival/.claude/worktrees/agent-a4ee25f9c1c371b71/scripts/bench/render-bench.mjs:79:20 {
+  log: [],
+  name: 'TimeoutError'
+}
+
+Node.js v26.12.1
+
+[exited with code 0]

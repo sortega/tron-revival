@@ -11,7 +11,7 @@ import type { PixelGrid } from '../PixelGrid';
 import type { Rng } from '../rng';
 import type { TronGameState } from '../TronGameState';
 import type { TronPlayer } from '../TronPlayer';
-import { anyDoorSolidAt, doorFrame } from '../doors';
+import { anyDoorSolidAt, doorFrame, doorZones } from '../doors';
 import type { DoorDefinition } from '../doors';
 import { inFireZone } from '../guns';
 import type { GunDefinition } from '../guns';
@@ -77,6 +77,7 @@ const SIDE_RANGE = 31;                // Lateral room needed for a U-turn (turn 
 const SIDE_SAMPLES = [2, 4, 7, 10, 13, 17, 21, 25, 29];
 const AREA_CAP = 400;                 // Flood-fill limit in coarse cells (≈ 160×160 px): "plenty of room"
 const AREA_PROBE = 12;                // Where, ahead of a path's end, the flood fill starts
+const AREA_PROBE_OFFSETS = [0, -50, 50, -100, 100];
 const NEIGHBOUR_DX = [1, -1, 0, 0];
 const NEIGHBOUR_DY = [0, 0, 1, -1];
 const PROBE_STEP = 50;               // Where along a path progress towards the goal is measured
@@ -123,6 +124,7 @@ interface PlanContext {
   badItems: GameItem[];
   portals: readonly TeleportPortal[];
   doors: readonly DoorDefinition[] | null;  // Automatic doors of the level, if any
+  doorZone: Uint8Array | null;              // Where a door can be at all (see doorZones)
   doorTick: number;
   guns: readonly GunDefinition[] | null;    // Level guns whose fire zones are best avoided
   linesOfFire: LineOfFire[];                // Armed enemies' cones, likewise
@@ -135,7 +137,8 @@ interface PathState {
   dir: number;
   step: number;
   portalCooldown: number;
-  cells: number[] | null;  // Coarse cells visited so far
+  cells: number[] | null;  // Coarse cells visited so far: the first `cellCount` of these
+  cellCount: number;
 }
 
 interface Rollout {
@@ -228,7 +231,7 @@ export class BotController {
     const y = me.y / 1000;
     this.enemies = this.lookAround(game, me, x, y);
     const ctx = this.makeContext(game, me);
-    const start: PathState = { x, y, dir: me.direction, step: 0, portalCooldown: 0, cells: null };
+    const start: PathState = { x, y, dir: me.direction, step: 0, portalCooldown: 0, cells: null, cellCount: 0 };
 
     // Emergency: something right ahead on the current course -> plan now
     const ahead = this.rollout(ctx, start, this.steer, 2, 16);
@@ -238,8 +241,9 @@ export class BotController {
       straightFree = this.plan(game, ctx, start);
       this.ticksSincePlan = 0;
     }
+    // (only weapons care how far it is clear ahead)
     if (straightFree === null) {
-      straightFree = this.rollout(ctx, start, 0, 0, this.profile.lookahead).dist;
+      straightFree = me.equippedWeapon ? this.rollout(ctx, start, 0, 0, this.profile.lookahead).dist : 0;
     }
 
     const action = this.decideAction(game, me, x, y, straightFree);
@@ -271,6 +275,7 @@ export class BotController {
   private makeContext(game: TronGameState, me: TronPlayer): PlanContext {
     const shield = me.activeEffects.find(e => e.sprite === 'shield');
     const crossing = me.activeEffects.find(e => e.sprite === 'crossing');
+    const doors = LEVELS[game.currentLevelIndex]?.doors ?? null;
     return {
       pixels: game.pixels,
       me,
@@ -280,7 +285,8 @@ export class BotController {
       crossingSteps: crossing ? Math.max(0, crossing.remainingFrames - 30) : 0,
       badItems: game.items.filter(i => i.active && !i.mystery && BAD_ITEMS.has(i.sprite)),
       portals: game.portals,
-      doors: LEVELS[game.currentLevelIndex]?.doors ?? null,
+      doors,
+      doorZone: doors ? doorZones(doors, PLAY_WIDTH, PLAY_HEIGHT) : null,
       doorTick: game.doorTick,
       guns: this.profile.avoidsHazards ? LEVELS[game.currentLevelIndex]?.guns ?? null : null,
       linesOfFire: this.linesOfFire(),
@@ -415,7 +421,10 @@ export class BotController {
     turn2At = Infinity, steer2 = 0, turn2Steps = 0,
     checkpoints: PathState[] | null = null
   ): Rollout {
-    const { pixels, me, hazards, ignoreSteps, crossingSteps, badItems, portals, doors, doorTick, guns, linesOfFire } = ctx;
+    const { pixels, hazards, ignoreSteps, crossingSteps, badItems, portals, doors, doorZone, doorTick, guns, linesOfFire } = ctx;
+    const grid = pixels.cells;
+    // Our own colour in the grid, while it is passable (crossing)
+    const ownColor = crossingSteps > 0 ? pixels.paletteIndexOf(ctx.me.color) : -1;
     const clearanceSteps = this.profile.clearanceSteps;
     let { x, y, dir } = start;
     let portalCooldown = start.portalCooldown;
@@ -425,23 +434,36 @@ export class BotController {
     let probeX = x;
     let probeY = y;
     let badItem = false;
-    const cells: number[] = start.cells ? start.cells.slice() : [];
+    const cells: number[] = start.cells ? start.cells.slice(0, start.cellCount) : [];
     let lastCell = cells.length > 0 ? cells[cells.length - 1]! : -1;
     let step = start.step;
     let cos = Math.cos(dir * DEG);
     let sin = Math.sin(dir * DEG);
 
     // A door pixel counts if it is solid when we get there or shortly after (we may be
-    // slower than one step per tick, and should not cut it fine)
-    const doorBlocked = (bx: number, by: number): boolean =>
-      doors !== null && (
-        anyDoorSolidAt(doors, doorFrame(doorTick + step), bx, by) ||
-        anyDoorSolidAt(doors, doorFrame(doorTick + step + DOOR_MARGIN_TICKS), bx, by));
+    // slower than one step per tick, and should not cut it fine). The door frames are
+    // worked out once per step, and only for pixels where a door can be at all.
+    let framesOfStep = -1;
+    let frameNow = 0;
+    let frameSoon = 0;
+    const doorBlocked = (bx: number, by: number): boolean => {
+      if (doors === null) return false;
+      if (bx >= 0 && by >= 0 && bx < PLAY_WIDTH && by < PLAY_HEIGHT && doorZone![by * PLAY_WIDTH + bx] === 0) return false;
+      if (framesOfStep !== step) {
+        framesOfStep = step;
+        frameNow = doorFrame(doorTick + step);
+        frameSoon = doorFrame(doorTick + step + DOOR_MARGIN_TICKS);
+      }
+      return anyDoorSolidAt(doors, frameNow, bx, by) ||
+        (frameSoon !== frameNow && anyDoorSolidAt(doors, frameSoon, bx, by));
+    };
 
     const blocked = (bx: number, by: number): boolean => {
-      if (doorBlocked(bx, by)) return true;
-      if (!pixels.has(bx, by)) return false;
-      return !(step < crossingSteps && pixels.get(bx, by) === me.color);
+      if (doors !== null && doorBlocked(bx, by)) return true;
+      if (bx < 0 || by < 0 || bx >= PLAY_WIDTH || by >= PLAY_HEIGHT) return false;
+      const value = grid[by * PLAY_WIDTH + bx]!;
+      if (value === 0) return false;
+      return !(step < crossingSteps && value === ownColor);
     };
 
     for (step = start.step + 1; step <= maxSteps; step++) {
@@ -555,7 +577,8 @@ export class BotController {
         probeY = y;
       }
       if (checkpoints && step % CHECKPOINT_EVERY === 0) {
-        checkpoints.push({ x, y, dir, step, portalCooldown, cells: cells.slice() });
+        // (`cells` keeps growing: the checkpoint is its first `cellCount` entries)
+        checkpoints.push({ x, y, dir, step, portalCooldown, cells, cellCount: cells.length });
       }
     }
 
@@ -577,14 +600,15 @@ export class BotController {
     for (const cell of r.cells) mark[cell] = gen;
 
     // Start a little ahead of the path's end; if that is blocked try both diagonals
+    const coarse = pixels.coarse;
     const queue = this.floodQueue;
     let tail = 0;
-    for (const offset of [0, -50, 50, -100, 100]) {
-      const rad = (r.endDir + offset) * DEG;
+    for (let i = 0; i < AREA_PROBE_OFFSETS.length; i++) {
+      const rad = (r.endDir + AREA_PROBE_OFFSETS[i]!) * DEG;
       const col = Math.floor(wrapX(r.endX + Math.cos(rad) * AREA_PROBE) / COARSE_CELL);
       const row = Math.floor(wrapY(r.endY + Math.sin(rad) * AREA_PROBE) / COARSE_CELL);
       const cell = row * COARSE_COLS + col;
-      if (mark[cell] !== gen && pixels.coarseFree(col, row)) {
+      if (mark[cell] !== gen && coarse[cell] === 0) {
         mark[cell] = gen;
         queue[tail++] = cell;
       }
@@ -596,10 +620,13 @@ export class BotController {
       const col = cell % COARSE_COLS;
       const row = (cell - col) / COARSE_COLS;
       for (let n = 0; n < 4; n++) {
-        const nc = (col + NEIGHBOUR_DX[n]! + COARSE_COLS) % COARSE_COLS;
-        const nr = (row + NEIGHBOUR_DY[n]! + COARSE_ROWS) % COARSE_ROWS;
+        // Neighbours wrap around the arena
+        let nc = col + NEIGHBOUR_DX[n]!;
+        if (nc < 0) nc += COARSE_COLS; else if (nc >= COARSE_COLS) nc -= COARSE_COLS;
+        let nr = row + NEIGHBOUR_DY[n]!;
+        if (nr < 0) nr += COARSE_ROWS; else if (nr >= COARSE_ROWS) nr -= COARSE_ROWS;
         const next = nr * COARSE_COLS + nc;
-        if (mark[next] === gen || !pixels.coarseFree(nc, nr)) continue;
+        if (mark[next] === gen || coarse[next] !== 0) continue;
         mark[next] = gen;
         queue[tail++] = next;
         if (tail >= AREA_CAP) break;
@@ -612,8 +639,14 @@ export class BotController {
   private sideClearance(
     blocked: (x: number, y: number) => boolean, x: number, y: number, dx: number, dy: number
   ): number {
-    for (const d of SIDE_SAMPLES) {
-      if (blocked(wrapX(Math.round(x + dx * d)), wrapY(Math.round(y + dy * d)))) return d;
+    for (let i = 0; i < SIDE_SAMPLES.length; i++) {
+      const d = SIDE_SAMPLES[i]!;
+      // (x, y) is inside the arena and d is small: one step of wrapping is enough
+      let sx = Math.round(x + dx * d);
+      if (sx < 0) sx += PLAY_WIDTH; else if (sx >= PLAY_WIDTH) sx -= PLAY_WIDTH;
+      let sy = Math.round(y + dy * d);
+      if (sy < 0) sy += PLAY_HEIGHT; else if (sy >= PLAY_HEIGHT) sy -= PLAY_HEIGHT;
+      if (blocked(sx, sy)) return d;
     }
     return SIDE_RANGE;
   }

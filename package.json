@@ -14,12 +14,18 @@
     "sim": "SIM_REPORT=1 vitest run tests/bots.test.ts --silent=false",
     "test:e2e": "node tests/e2e/touch.e2e.mjs && node tests/e2e/network.e2e.mjs",
     "test:e2e:touch": "node tests/e2e/touch.e2e.mjs",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "bench:sim": "node scripts/bench/run-node.mjs scripts/bench/sim-bench.ts",
+    "bench:fingerprint": "node scripts/bench/run-node.mjs scripts/bench/sim-bench.ts --fingerprint",
+    "bench:browser": "node scripts/bench/browser-bench.mjs",
+    "bench:render": "node scripts/bench/render-bench.mjs",
+    "bench:wasm": "node scripts/bench/wasm/run.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
     "@types/pngjs": "^6.0.5",
+    "assemblyscript": "^0.28.20",
     "eslint": "^10.14.0",
     "free-tex-packer-core": "^0.3.9",
     "gh-pages": "^6.3.0",

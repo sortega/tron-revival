@@ -121,8 +121,9 @@ Design: `design/local-and-ai.md`
 - [ ] Bots: dodge projectiles and bomb blast areas
 - [ ] Bots: most remaining deaths are "own trail" in self-made pockets; a Voronoi-style
       territory estimate would help more than longer lookahead
-- [ ] Bots cost ~0.35 ms (normal) / ~0.6 ms (hard) per tick each; fine for 3 bots on desktop,
-      check low-end phones hosting
+- [ ] Bots cost ~0.04 ms (normal) / ~0.07 ms (hard) per tick each on a fast core after the
+      November 2026 optimisations (`design/research/performance.md`); check low-end phones
+      hosting, see "Performance" below
 
 ## Iteration 4 — Netcode: make it controllable  ✅
 
@@ -247,6 +248,26 @@ Rules: `design/projectiles.md`.
 - [x] Satellites (`design/bodyguards.md`): intercept shots on their course instead of
       chasing them, attack players who enter their area; 10 px/tick; tracers cannot harm
       them and Glock bullets bounce back; only an H-bomb destroys them
+
+## Performance (research branch `research/performance`)
+
+Method, numbers and recommendations: `design/research/performance.md`.
+
+- [x] Benchmark harness: `npm run bench:sim`, `bench:fingerprint`, `bench:browser`,
+      `bench:render`, `bench:wasm`; `?perf=1` phase timers with an on-screen readout
+- [x] Bots: rollouts ×1.5 faster, ×9 on Portals (same decisions, bit for bit)
+- [x] Projectiles: no quadratic bookkeeping (Uzis ×4.8, bombs ×5.9); `TronPlayer.trail` removed
+- [x] Cleared lines / areas only reported when they erased something (Uzi bandwidth halved)
+- [x] Renderer: status panel cached, tracer paths erased in one fill (pixel-identical)
+- [x] Display frames with nothing new are not redrawn (90/120 Hz screens)
+- [x] Prototypes, not for merging as they are: WebGL2 arena, `ImageData`, AssemblyScript
+      kernels (`scripts/bench/`), simulation in a Web Worker (`?worker=1`)
+- [ ] **Check on real phones** (list at the end of the research doc): low-end Android
+      hosting 3 hard bots on Portals, a firefight, iOS Safari, a 120 Hz screen, heat
+- [ ] If phones show bot spikes: finish the worker (network hosting through it) or cap the
+      bot plans per tick
+- [ ] Load the networking code on demand (it is ~214 kB of the 389 kB bundle)
+- [ ] Uzi tracers are still 45 KB/s per firing player on the wire
 
 ## Open reports
 

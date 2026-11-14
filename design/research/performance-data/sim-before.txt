@@ -1,0 +1,100 @@
+Simulation benchmark: 4200 ticks per scenario after 1400 warm-up ticks. Times in µs per tick; budget 14286 µs.
+scenario                   phase        mean    p50    p95    p99    max
+2p-nobots-blank            TOTAL         4.0    1.3    8.5     22   1022
+                           bots          0.1    0.0    0.1    0.2    4.7
+                           sim           2.8    0.3    6.8     16   1016
+                           serialize     1.2    0.9    1.6    3.4    135
+                           gc: 12 pauses, 2.3 ms total, max 0.99 ms; ~11.0 KB allocated/tick
+4p-nobots-cycle            TOTAL         6.9    4.3     15     41   1609
+                           bots          0.0    0.0    0.0    0.0    1.2
+                           sim           5.2    2.9     10     33   1605
+                           serialize     1.7    1.2    2.6    9.8    297
+                           gc: 13 pauses, 3.7 ms total, max 1.92 ms; ~30.5 KB allocated/tick
+1bot-easy                  TOTAL         8.5    1.1     48     69   1024
+                           bots          5.9    0.1     41     61    429
+                           sim           1.7    0.2    3.9    7.4   1022
+                           serialize     0.9    0.9    1.2    1.6     68
+                           gc: 8 pauses, 1.1 ms total, max 0.19 ms; ~32.5 KB allocated/tick
+3bots-easy                 TOTAL          26     13     68    151    849
+                           bots           18    6.4     59     68    443
+                           sim           6.6    3.5    6.8     99    816
+                           serialize     1.3    1.2    1.5    2.3     40
+                           gc: 14 pauses, 2.1 ms total, max 0.21 ms; ~58.4 KB allocated/tick
+1bot-normal                TOTAL          40    1.0    243    378   1010
+                           bots           38    0.1    238    364    970
+                           sim           1.6    0.2    2.8    6.8   1008
+                           serialize     0.8    0.7    1.2    1.9    7.2
+                           gc: 11 pauses, 1.6 ms total, max 0.24 ms; ~45.2 KB allocated/tick
+3bots-normal               TOTAL         174     38    585    785   1677
+                           bots          168     31    575    780   1608
+                           sim           4.4    3.4    8.0     23    283
+                           serialize     1.4    1.3    1.7    4.1    170
+                           gc: 27 pauses, 5.2 ms total, max 0.89 ms; ~100.8 KB allocated/tick
+1bot-hard                  TOTAL          74    1.0    354    455   1514
+                           bots           71    0.1    349    448   1504
+                           sim           2.0    0.3    4.2    9.3   1283
+                           serialize     0.9    0.7    1.2    2.3    117
+                           gc: 14 pauses, 3.2 ms total, max 1.27 ms; ~51.5 KB allocated/tick
+3bots-hard                 TOTAL         340    341    691    997   1155
+                           bots          333    336    684    989   1139
+                           sim           5.0    3.1    9.2     47    249
+                           serialize     1.4    1.3    1.8    4.1     14
+                           gc: 22 pauses, 4.0 ms total, max 0.24 ms; ~168.6 KB allocated/tick
+4bots-hard                 TOTAL         310    256    714    809    997
+                           bots          305    251    705    797    986
+                           sim           4.0    2.5    5.8     54    217
+                           serialize     1.3    1.2    1.7    4.2     18
+                           gc: 19 pauses, 3.7 ms total, max 0.25 ms; ~150.9 KB allocated/tick
+3bots-hard-portals         TOTAL        3179   3087   7734   9985  13987
+                           bots         3163   3069   7689   9934  13944
+                           sim            11    9.6     26     37    204
+                           serialize     4.6    3.8    9.9     13    154
+                           gc: 676 pauses, 91.9 ms total, max 2.44 ms; ~11071.7 KB allocated/tick
+3bots-hard-warzone         TOTAL         407    337   1148   1312   1625
+                           bots          397    327   1138   1291   1604
+                           sim           7.9    3.5     30     88   1308
+                           serialize     1.4    1.3    2.0    4.3     15
+                           gc: 30 pauses, 6.4 ms total, max 1.08 ms; ~213.5 KB allocated/tick
+heavy-uzi-4p               TOTAL         332    329    347    388    665
+                           bots          0.0    0.0    0.0    0.1    5.7
+                           sim           331    328    345    377    660
+                           serialize     1.4    1.3    1.8    6.1     19
+                           gc: 15 pauses, 3.5 ms total, max 0.30 ms; ~120.9 KB allocated/tick
+heavy-rifle-shotgun-4p     TOTAL         129    148    221    263    567
+                           bots          0.0    0.0    0.0    0.0    0.3
+                           sim           127    147    220    261    556
+                           serialize     1.3    1.2    1.5    2.2    249
+                           gc: 9 pauses, 2.5 ms total, max 0.40 ms; ~69.6 KB allocated/tick
+heavy-hbombs-4p            TOTAL         902    889   1024   1075   1623
+                           bots          0.0    0.0    0.1    0.2    0.4
+                           sim           898    886   1017   1069   1613
+                           serialize     3.6    2.6    8.5     12     45
+                           gc: 940 pauses, 97.7 ms total, max 0.71 ms; ~7311.7 KB allocated/tick
+heavy-megabomb             TOTAL         3.6    3.8    4.4    5.8    233
+                           bots          0.0    0.0    0.0    0.0    0.1
+                           sim           2.4    2.7    3.0    4.0    225
+                           serialize     1.2    1.1    1.4    1.7     13
+                           gc: 2 pauses, 0.4 ms total, max 0.21 ms; ~13.2 KB allocated/tick
+heavy-satellites-12        TOTAL          81     48    255    271    537
+                           bots          0.0    0.0    0.0    0.0    0.1
+                           sim            80     47    253    270    533
+                           serialize     1.3    1.3    1.5    2.2     15
+                           gc: 9 pauses, 2.1 ms total, max 0.28 ms; ~74.6 KB allocated/tick
+net-host-3bots-hard        TOTAL         359    364    705   1002   1280
+                           bots          337    343    679    977   1238
+                           sim           4.8    3.3    9.3     34    226
+                           serialize     1.8    1.6    2.3    5.0    179
+                           events        0.0    0.0    0.0    0.1    6.8
+                           decode        3.6    3.1    6.3     12    255
+                           net            16     14     23     37    269
+                           predict       0.1    0.1    0.2    0.3     13
+                           gc: 25 pauses, 5.0 ms total, max 0.72 ms; ~182.2 KB allocated/tick; wire 386 B/tick (26.4 KB/s)
+net-host-heavy-uzi         TOTAL         412    408    433    504    666
+                           bots          0.0    0.0    0.0    0.0    0.4
+                           sim           329    326    344    372    547
+                           serialize     1.7    1.5    2.2    5.2     18
+                           events        0.0    0.0    0.0    0.1    0.4
+                           decode         29     29     31     36    239
+                           net            82     80     87    107    331
+                           predict       0.1    0.0    0.1    0.2    0.5
+                           gc: 32 pauses, 6.2 ms total, max 0.24 ms; ~250.7 KB allocated/tick; wire 5358 B/tick (366.3 KB/s)

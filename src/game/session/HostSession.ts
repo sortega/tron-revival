@@ -13,6 +13,7 @@ import { BotController } from '../ai/BotController';
 import { createRng } from '../rng';
 import { ByteRate } from './GameSession';
 import type { GameSession, HostTransport, NetworkStats, ViewState } from './GameSession';
+import { perfEnd, perfStart } from '../perf';
 
 export interface HostSessionOptions {
   transport?: HostTransport;
@@ -112,22 +113,31 @@ export class HostSession implements GameSession {
       this.pings.set(slot, next);
     }
 
+    let t0 = perfStart();
     for (const bot of this.bots) {
       this.inputs.set(bot.slot, bot.decide(this.game));
     }
+    perfEnd('bots', t0);
 
+    t0 = perfStart();
     this.game.tick(this.inputs);
+    perfEnd('sim', t0);
+    t0 = perfStart();
     const frame = this.game.serialize();
+    perfEnd('serialize', t0);
     this.lastFrame = frame;
     this.emit(frame);
   }
 
   // Deliver a frame to the local view and to every guest
   private emit(frame: TronGameStateData): void {
+    let t0 = perfStart();
     this.onFrame?.(frame);
+    perfEnd('events', t0);
     const tick = this.tick++;
 
     if (this.transport) {
+      t0 = perfStart();
       // Echo each guest's newest timestamp, advanced by the time it waited here
       const now = this.now();
       const pongs: Partial<Record<SlotIndex, number>> = {};
@@ -144,6 +154,7 @@ export class HostSession implements GameSession {
       const packed = serializeState(wire);
       this.bytesOut.add(packed.length, now);
       this.transport.broadcastState(packed);
+      perfEnd('net', t0);
     }
   }
 

@@ -15,6 +15,8 @@ import { Ticker } from './Ticker';
 import type { GameSession } from './session/GameSession';
 import { HOST_SILENCE_MS } from './session/GameSession';
 import { escapeHtml } from '../util/html';
+import { perfCounter, perfDump, perfEnable, perfEnd, perfSince, perfStart } from './perf';
+import type { PerfSummary } from './perf';
 
 export class TronGame implements Screen {
   private container: HTMLElement;
@@ -34,12 +36,21 @@ export class TronGame implements Screen {
   private showFps: boolean = localStorage.getItem('showFps') === 'true';
   private fpsKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
+  // `?perf=1`: on-screen readout of the phase timers, for devices without a console
+  private perfHud: HTMLElement | null = null;
+  private perfHudTimer: ReturnType<typeof setInterval> | null = null;
+
   // Double-tap detection for mobile FPS toggle
   private lastTapTime: number = 0;
 
   // Track loaded level to detect changes
   private loadedLevelIndex: number = -1;
   private levelLoading: boolean = false;
+
+  // Something that is drawn changed since the last display frame. The simulation ticks
+  // 70 times a second; on a 90 or 120 Hz screen the frames in between would redraw the
+  // very same picture.
+  private dirty = true;
 
   // Track previous round phase to detect transitions and stop sound loops
   private previousPhase: RoundPhase | null = null;
@@ -197,6 +208,7 @@ export class TronGame implements Screen {
     this.fpsKeyHandler = (e: KeyboardEvent) => {
       if (e.code === 'KeyF') {
         this.showFps = !this.showFps;
+        this.dirty = true;
         localStorage.setItem('showFps', this.showFps ? 'true' : 'false');
       }
     };
@@ -209,6 +221,7 @@ export class TronGame implements Screen {
         const now = Date.now();
         if (now - this.lastTapTime < 300) {
           this.showFps = !this.showFps;
+          this.dirty = true;
           localStorage.setItem('showFps', this.showFps ? 'true' : 'false');
           e.preventDefault();
         }
@@ -216,11 +229,20 @@ export class TronGame implements Screen {
       });
     }
 
+    // `?perf=1`: record phase timings for the benchmark harness
+    // (design/research/performance.md)
+    const perf = new URLSearchParams(location.search).has('perf');
+    if (perf) {
+      perfEnable();
+      this.showPerfHud();
+    }
+
     // Debug / end-to-end test hook
     (window as unknown as { __teratron?: unknown }).__teratron = {
       config: this.config,
       view: () => this.session.getViewState(),
       stats: () => this.session.getNetworkStats(),
+      ...(perf && { perf: perfDump, session: this.session }),
     };
 
     this.ticker = new Ticker(
@@ -633,7 +655,10 @@ export class TronGame implements Screen {
   // One simulation tick
   private step(): void {
     if (!this.input) return;
+    const t0 = perfStart();
     this.session.step(this.input.getInputs());
+    perfEnd('step', t0);
+    this.dirty = true;
 
     // Track steps per second (should stay at TICK_RATE)
     const now = performance.now();
@@ -660,11 +685,17 @@ export class TronGame implements Screen {
       this.loadLevel(levelIndex);
     }
 
+    // Nothing new since the last display frame: what is on the canvas is still right
+    if (!this.dirty) return;
+    this.dirty = false;
+
     const stats = this.session.getNetworkStats() ?? undefined;
+    const t0 = perfStart();
     this.renderer.render(
       view.round, view.match, this.showFps ? this.currentFps : undefined,
       this.showFps ? stats : undefined, view.overlayTrails
     );
+    perfEnd('render', t0);
     const silentMs = stats?.silentMs ?? 0;
     if (silentMs > HOST_SILENCE_MS) {
       this.renderer.renderNotice('Connection to the host lost', `waiting… ${Math.floor(silentMs / 1000)}s`);
@@ -677,6 +708,7 @@ export class TronGame implements Screen {
   private applyFrameEvents(state: TronGameStateData): void {
     const renderer = this.renderer;
     if (!renderer) return;
+    this.dirty = true;
 
     if (state.roundStarted) {
       renderer.clearTrails();
@@ -693,12 +725,7 @@ export class TronGame implements Screen {
         renderer.addBorderSegments(color, segments);
       }
     }
-    if (state.clearedLines) {
-      const l = state.clearedLines;
-      for (let i = 0; i + 3 < l.length; i += 4) {
-        renderer.clearLine(l[i]!, l[i + 1]!, l[i + 2]!, l[i + 3]!);
-      }
-    }
+    if (state.clearedLines) renderer.clearLines(state.clearedLines);
     if (state.clearedAreas) {
       for (const { x, y, w, h } of state.clearedAreas) {
         renderer.clearRect(x, y, w, h);
@@ -757,14 +784,47 @@ export class TronGame implements Screen {
       this.session.setLevelObstacles(levelIndex, obstacles);
       this.loadedLevelIndex = levelIndex;
       this.levelLoading = false;
+      this.dirty = true;
     }).catch((error) => {
       console.error('Failed to load level:', error);
       this.levelLoading = false;
     });
   }
 
+  // Once a second: ticks per second and, per phase, mean / worst milliseconds of the
+  // last second (design/research/performance.md)
+  private showPerfHud(): void {
+    const hud = document.createElement('pre');
+    hud.style.cssText = 'position:fixed;right:4px;bottom:4px;margin:0;padding:3px 5px;z-index:1000;' +
+      'font:10px/1.25 monospace;color:#0f0;background:rgba(0,0,0,0.65);pointer-events:none;';
+    document.body.appendChild(hud);
+    this.perfHud = hud;
+    const cursor = new Map<string, number>();
+    // With `?worker=1` the simulation's timers are in the worker
+    const worker = this.session as { workerSummary?: () => Promise<{ summary: PerfSummary; droppedTicks: number }> };
+    const row = (name: string, s: PerfSummary[string] | undefined, rate = false): string =>
+      s ? `${name.padEnd(11)} ${s.mean.toFixed(2).padStart(6)} ${s.worst.toFixed(1).padStart(6)}${rate ? `  ${s.n}/s` : ''}\n` : '';
+    this.perfHudTimer = setInterval(() => {
+      const main = perfSince(cursor);
+      void (worker.workerSummary?.() ?? Promise.resolve(null)).then((remote) => {
+        const sim = remote?.summary ?? main;
+        let text = 'ms            mean  worst\n';
+        text += row(remote ? 'w.step' : 'step', sim.step, true);
+        for (const phase of ['bots', 'sim', 'serialize']) text += row(remote ? `w.${phase}` : phase, sim[phase]);
+        for (const phase of ['events', 'render', 'frame', 'workerLag']) text += row(phase, main[phase]);
+        text += `dropped ticks: ${remote ? remote.droppedTicks : perfCounter('droppedTicks')}`;
+        hud.textContent = text;
+      });
+    }, 1000);
+  }
+
   cleanup(): void {
     getSoundManager().stopAllLoops();
+
+    if (this.perfHudTimer !== null) clearInterval(this.perfHudTimer);
+    this.perfHudTimer = null;
+    this.perfHud?.remove();
+    this.perfHud = null;
 
     this.ticker?.stop();
     this.ticker = null;

@@ -4,7 +4,8 @@
 import { PLAY_WIDTH, PLAY_HEIGHT } from './constants';
 
 function wrap(v: number, size: number): number {
-  return ((v % size) + size) % size;
+  // Nearly always inside already: the modulo is the slow part of a line walk
+  return v >= 0 && v < size ? v : ((v % size) + size) % size;
 }
 
 /**
@@ -41,8 +42,13 @@ export const COARSE_ROWS = Math.ceil(PLAY_HEIGHT / COARSE_CELL);
 export class PixelGrid {
   readonly width = PLAY_WIDTH;
   readonly height = PLAY_HEIGHT;
-  private cells = new Uint16Array(PLAY_WIDTH * PLAY_HEIGHT);
-  private coarse = new Uint16Array(COARSE_COLS * COARSE_ROWS);
+  /**
+   * Palette index per pixel, row by row (0 = empty). Exposed read-only for hot loops
+   * (bot rollouts); all writes go through the methods below.
+   */
+  readonly cells = new Uint16Array(PLAY_WIDTH * PLAY_HEIGHT);
+  /** Occupied pixels per coarse cell, row by row. Read-only outside this class. */
+  readonly coarse = new Uint16Array(COARSE_COLS * COARSE_ROWS);
   private palette: string[] = [''];
   private paletteIndex = new Map<string, number>();
 
@@ -79,6 +85,11 @@ export class PixelGrid {
     return this.cells[wrap(y, PLAY_HEIGHT) * PLAY_WIDTH + wrap(x, PLAY_WIDTH)] !== 0;
   }
 
+  /** The value `cells` holds for pixels of this colour, or -1 if there are none. */
+  paletteIndexOf(color: string): number {
+    return this.paletteIndex.get(color) ?? -1;
+  }
+
   /** Colour of the pixel, or null if empty. */
   get(x: number, y: number): string | null {
     if (!this.inBounds(x, y)) return null;
@@ -106,21 +117,49 @@ export class PixelGrid {
     this.coarse.fill(0);
   }
 
-  /** Clear a w×h rectangle whose top-left corner is (x, y), wrapping around edges. */
-  clearRect(x: number, y: number, w: number, h: number): void {
+  /**
+   * Clear a w×h rectangle whose top-left corner is (x, y), wrapping around edges.
+   * Returns true if any pixel in it was occupied.
+   */
+  clearRect(x: number, y: number, w: number, h: number): boolean {
+    const cells = this.cells;
+    let cleared = false;
     for (let dy = 0; dy < h; dy++) {
       const row = wrap(y + dy, PLAY_HEIGHT) * PLAY_WIDTH;
       for (let dx = 0; dx < w; dx++) {
-        this.write(row + wrap(x + dx, PLAY_WIDTH), 0);
+        const i = row + wrap(x + dx, PLAY_WIDTH);
+        if (cells[i] !== 0) {
+          this.write(i, 0);
+          cleared = true;
+        }
       }
     }
+    return cleared;
   }
 
-  /** Clear every pixel on a line (wrapping). */
-  clearLine(x0: number, y0: number, x1: number, y1: number): void {
-    forEachLinePixel(x0, y0, x1, y1, (x, y) => {
-      this.write(y * PLAY_WIDTH + x, 0);
-    });
+  /** Clear every pixel on a line (wrapping). Returns true if any of them was occupied. */
+  clearLine(x0: number, y0: number, x1: number, y1: number): boolean {
+    // Bresenham, as in forEachLinePixel
+    const cells = this.cells;
+    let cleared = false;
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    let x = x0;
+    let y = y0;
+    for (;;) {
+      const i = wrap(y, PLAY_HEIGHT) * PLAY_WIDTH + wrap(x, PLAY_WIDTH);
+      if (cells[i] !== 0) {
+        this.write(i, 0);
+        cleared = true;
+      }
+      if (x === x1 && y === y1) return cleared;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x += sx; }
+      if (e2 < dx) { err += dx; y += sy; }
+    }
   }
 
   /**
@@ -130,15 +169,24 @@ export class PixelGrid {
   firstHitOnLine(
     x0: number, y0: number, x1: number, y1: number
   ): { x: number; y: number; rawX: number; rawY: number } | null {
-    let hit: { x: number; y: number; rawX: number; rawY: number } | null = null;
-    forEachLinePixel(x0, y0, x1, y1, (x, y, rawX, rawY) => {
-      if (this.cells[y * PLAY_WIDTH + x] !== 0) {
-        hit = { x, y, rawX, rawY };
-        return true;
-      }
-      return false;
-    });
-    return hit;
+    // Bresenham, as in forEachLinePixel (this runs for every projectile every tick)
+    const cells = this.cells;
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    let x = x0;
+    let y = y0;
+    for (;;) {
+      const wx = wrap(x, PLAY_WIDTH);
+      const wy = wrap(y, PLAY_HEIGHT);
+      if (cells[wy * PLAY_WIDTH + wx] !== 0) return { x: wx, y: wy, rawX: x, rawY: y };
+      if (x === x1 && y === y1) return null;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x += sx; }
+      if (e2 < dx) { err += dx; y += sy; }
+    }
   }
 
   /** Replace the contents of this grid with a copy of another. */
