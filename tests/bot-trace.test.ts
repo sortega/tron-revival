@@ -100,7 +100,7 @@ function headingSvg(series: { label: string; track: Sample[] }[], band: [number,
   const W = 720;
   const H = 220;
   const L = 44;
-  const R = 78;
+  const R = 100;
   const T = 10;
   const B = 26;
   const unwrapped = series.map(s => {
@@ -207,7 +207,7 @@ describe.runIf(!!process.env.BOT_TRACE)('bot trace', () => {
 
     // 1. Control Reversal
     body.push('<h2>Control Reversal</h2>');
-    body.push('<p>A bot driving around <em>bricks</em> picks up Control Reversal after 2 s (it lasts 10 s). The old bots compensate after a fixed delay and never look back; the human ones turn the wrong way, catch themselves, over-correct and settle — quickly for hard, hardly at all for easy.</p>');
+    body.push('<p>A bot driving around <em>bricks</em> picks up Control Reversal after 2 s (it lasts 10 s). The old bots compensate after a fixed delay and never look back; the human ones turn the wrong way, catch themselves, over-correct and settle — quickly for hard, slowly for easy.</p>');
     const REV_AT = 140;
     const REV_TICKS = 1100;
     for (const d of ['easy', 'normal', 'hard'] as BotDifficulty[]) {
