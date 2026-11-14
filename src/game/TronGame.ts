@@ -42,6 +42,11 @@ export class TronGame implements Screen {
   private loadedLevelIndex: number = -1;
   private levelLoading: boolean = false;
 
+  // Something that is drawn changed since the last display frame. The simulation ticks
+  // 70 times a second; on a 90 or 120 Hz screen the frames in between would redraw the
+  // very same picture.
+  private dirty = true;
+
   // Track previous round phase to detect transitions and stop sound loops
   private previousPhase: RoundPhase | null = null;
 
@@ -198,6 +203,7 @@ export class TronGame implements Screen {
     this.fpsKeyHandler = (e: KeyboardEvent) => {
       if (e.code === 'KeyF') {
         this.showFps = !this.showFps;
+        this.dirty = true;
         localStorage.setItem('showFps', this.showFps ? 'true' : 'false');
       }
     };
@@ -210,6 +216,7 @@ export class TronGame implements Screen {
         const now = Date.now();
         if (now - this.lastTapTime < 300) {
           this.showFps = !this.showFps;
+          this.dirty = true;
           localStorage.setItem('showFps', this.showFps ? 'true' : 'false');
           e.preventDefault();
         }
@@ -643,6 +650,7 @@ export class TronGame implements Screen {
     const t0 = perfStart();
     this.session.step(this.input.getInputs());
     perfEnd('step', t0);
+    this.dirty = true;
 
     // Track steps per second (should stay at TICK_RATE)
     const now = performance.now();
@@ -669,6 +677,10 @@ export class TronGame implements Screen {
       this.loadLevel(levelIndex);
     }
 
+    // Nothing new since the last display frame: what is on the canvas is still right
+    if (!this.dirty) return;
+    this.dirty = false;
+
     const stats = this.session.getNetworkStats() ?? undefined;
     const t0 = perfStart();
     this.renderer.render(
@@ -688,6 +700,7 @@ export class TronGame implements Screen {
   private applyFrameEvents(state: TronGameStateData): void {
     const renderer = this.renderer;
     if (!renderer) return;
+    this.dirty = true;
 
     if (state.roundStarted) {
       renderer.clearTrails();
@@ -763,6 +776,7 @@ export class TronGame implements Screen {
       this.session.setLevelObstacles(levelIndex, obstacles);
       this.loadedLevelIndex = levelIndex;
       this.levelLoading = false;
+      this.dirty = true;
     }).catch((error) => {
       console.error('Failed to load level:', error);
       this.levelLoading = false;

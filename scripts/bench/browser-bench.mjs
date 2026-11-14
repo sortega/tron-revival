@@ -8,6 +8,8 @@
 //   npm run bench:browser -- --seconds=30 --json=out.json
 //   npm run bench:browser -- --query=worker=1        extra URL parameters (prototype flags)
 //   npm run bench:browser -- --headed                a visible window (real GPU compositing)
+//   npm run bench:browser -- --hz=120                display frames from a 120 Hz timer instead
+//                                                    of the (60 Hz) headless compositor
 //
 // The "mobile" profiles are EMULATION: a phone-sized viewport and device pixel ratio plus
 // Chrome's CPU throttling of the page's main thread. The GPU, the GPU process, memory
@@ -157,6 +159,27 @@ try {
         localStorage.setItem('teratron-local-setup', JSON.stringify({ slots, gameMode: 'ffa', levelMode: level }));
         localStorage.setItem('teratron-touch-mode', 'buttons');
       }, scenario);
+      if (args.has('hz')) {
+        // A stand-in for a fast screen: animation frames from a timer
+        await page.addInitScript((hz) => {
+          let callbacks = [];
+          window.requestAnimationFrame = (cb) => { callbacks.push(cb); return callbacks.length; };
+          window.cancelAnimationFrame = () => { callbacks = []; };
+          const interval = 1000 / hz;
+          let next = performance.now() + interval;
+          const tick = () => {
+            const now = performance.now();
+            if (now >= next) {
+              next += interval * Math.max(1, Math.floor((now - next) / interval) + 1);
+              const run = callbacks;
+              callbacks = [];
+              for (const cb of run) cb(now);
+            }
+            setTimeout(tick, Math.max(0, next - performance.now()));
+          };
+          setTimeout(tick, interval);
+        }, Number(args.get('hz')));
+      }
       await page.goto(`${baseUrl}?perf=1${extraQuery ? `&${extraQuery}` : ''}`);
       const press = sel => (profile.mobile ? page.tap(sel) : page.click(sel));
       await press('#localGameBtn');
@@ -220,6 +243,9 @@ try {
         profile: profileName, scenario: scenario.name, seconds: wallMs / 1000,
         phases,
         fps: gaps.length / (wallMs / 1000),
+        // How often the canvas was actually redrawn, and what all of it cost
+        rendersPerSecond: (dump.samples.render?.length ?? 0) / (wallMs / 1000),
+        frameMsPerSecond: (dump.samples.frame ?? []).reduce((a, b) => a + b, 0) / (wallMs / 1000),
         // Display frames that took longer than 1.5 / 2.5 refresh intervals (60 Hz)
         slowFrames: gaps.filter(g => g > 25).length,
         verySlowFrames: gaps.filter(g => g > 41.7).length,
@@ -236,6 +262,7 @@ try {
         return s ? `${name} ${f(s.mean)}/${f(s.p50)}/${f(s.p95)}/${f(s.p99)}/${f(s.max)}` : '';
       };
       console.log(`\n[${profileName}] ${scenario.name}: ${result.fps.toFixed(1)} fps, ${result.ticksPerSecond.toFixed(1)} ticks/s, dropped ticks ${result.droppedTicks}, slow frames ${result.slowFrames} (very slow ${result.verySlowFrames}) of ${gaps.length}`);
+      console.log(`  ${result.rendersPerSecond.toFixed(1)} redraws/s; ${result.frameMsPerSecond.toFixed(1)} ms of main thread per second in animation frames`);
       console.log('  ms mean/p50/p95/p99/max');
       for (const name of ['frame', 'rafGap', 'step', 'bots', 'sim', 'serialize', 'events', 'render', 'workerLag', 'worker.step', 'worker.bots', 'worker.sim']) {
         const line = row(name);
