@@ -65,6 +65,11 @@ export class TronRenderer {
   private readonly tintCanvas: HTMLCanvasElement;
   private readonly tintCtx: CanvasRenderingContext2D;
 
+  // The status panel as last drawn, and what it showed (see renderStatusPanel)
+  private readonly sidebarCanvas: HTMLCanvasElement;
+  private readonly sidebarCtx: CanvasRenderingContext2D;
+  private sidebarKey = '';
+
   // Resize handler (stored for cleanup)
   private readonly resizeHandler: () => void;
 
@@ -126,6 +131,12 @@ export class TronRenderer {
     this.tintCanvas.width = PLAY_WIDTH;
     this.tintCanvas.height = PLAY_HEIGHT;
     this.tintCtx = this.tintCanvas.getContext('2d')!;
+
+    this.sidebarCanvas = document.createElement('canvas');
+    this.sidebarCanvas.width = STATUS_WIDTH;
+    this.sidebarCanvas.height = CANVAS_HEIGHT;
+    this.sidebarCtx = this.sidebarCanvas.getContext('2d')!;
+    this.sidebarCtx.imageSmoothingEnabled = false;  // Like the main canvas
 
     // Create off-screen level canvas
     this.levelCanvas = document.createElement('canvas');
@@ -383,12 +394,23 @@ export class TronRenderer {
     }
   }
 
-  // Clear the pixels along a line (tracer path; wraps around edges)
-  clearLine(x0: number, y0: number, x1: number, y1: number): void {
-    forEachLinePixel(x0, y0, x1, y1, (x, y) => {
-      this.trailCtx.clearRect(x, y, 1, 1);
-      this.levelCtx.clearRect(x, y, 1, 1);
-    });
+  // Clear the pixels along lines (tracer paths; they wrap around edges), given as a flat
+  // [x0, y0, x1, y1, ...]. All the pixels go into one path that is erased with a single
+  // fill per canvas: a burst of tracers used to cost two canvas calls per pixel.
+  clearLines(lines: readonly number[]): void {
+    if (lines.length < 4) return;
+    const path = new Path2D();
+    const addPixel = (x: number, y: number): void => { path.rect(x, y, 1, 1); };
+    for (let i = 0; i + 3 < lines.length; i += 4) {
+      forEachLinePixel(lines[i]!, lines[i + 1]!, lines[i + 2]!, lines[i + 3]!, addPixel);
+    }
+    for (const ctx of [this.trailCtx, this.levelCtx]) {
+      // Whole pixels, so this erases exactly what clearRect would
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = '#000';
+      ctx.fill(path);
+      ctx.globalCompositeOperation = 'source-over';
+    }
   }
 
   // Paint a whole arena (joining a game in progress). The level image stays hidden
@@ -636,14 +658,47 @@ export class TronRenderer {
     this.ctx.shadowBlur = 0;
   }
 
+  // The status panel changes about once a second (the timers), so it is kept on its own
+  // canvas and only redrawn when what it shows changes.
   private renderStatusPanel(playerStates: TronPlayerState[], gameMode: GameMode): void {
-    const panelX = PLAY_WIDTH;
+    const key = this.statusPanelKey(playerStates, gameMode);
+    if (key !== this.sidebarKey) {
+      this.sidebarKey = key;
+      this.sidebarCtx.clearRect(0, 0, STATUS_WIDTH, CANVAS_HEIGHT);
+      this.drawStatusPanel(this.sidebarCtx, playerStates, gameMode);
+    }
+    this.ctx.drawImage(this.sidebarCanvas, PLAY_WIDTH, 0);
+  }
+
+  // Everything the status panel shows, as a string
+  private statusPanelKey(playerStates: TronPlayerState[], gameMode: GameMode): string {
+    let key = `${this.spriteAtlas?.isLoaded() ? 1 : 0}${gameMode}`;
+    for (let i = 0; i < 4; i++) {
+      const slotIndex = i as SlotIndex;
+      const state = playerStates.find(p => p.slotIndex === slotIndex);
+      if (!state || !this.players.some(p => p.slotIndex === slotIndex)) {
+        key += '|-';
+        continue;
+      }
+      key += `|${state.alive ? 1 : 0}${this.ridiculousDeathSlots.has(slotIndex) ? 'r' : ''}`;
+      const effect = state.activeEffects?.[0];
+      if (effect) key += `,${effect.sprite}:${Math.ceil(effect.remainingFrames / TICK_RATE)}`;
+      const weapon = state.equippedWeapon;
+      if (weapon) {
+        key += `,${weapon.sprite}:${weapon.remainingFrames !== undefined ? Math.ceil(weapon.remainingFrames / TICK_RATE) : weapon.ammo}`;
+      }
+    }
+    return key;
+  }
+
+  private drawStatusPanel(ctx: CanvasRenderingContext2D, playerStates: TronPlayerState[], gameMode: GameMode): void {
+    const panelX = 0;
     const slotHeight = CANVAS_HEIGHT / 4;
 
     // Draw sidebar background sprite (50x600, covers all 4 slots)
     if (this.spriteAtlas?.isLoaded()) {
       this.spriteAtlas.draw(
-        this.ctx,
+        ctx,
         // Team colours in team mode (design/teams.md)
         gameMode === 'team' ? 'sidebar_team' : 'sidebar',
         panelX + STATUS_WIDTH / 2,
@@ -660,12 +715,12 @@ export class TronRenderer {
       // The panel of a dead player, or of a slot nobody plays in, is grey
       const desaturation = player && playerState?.alive ? 0 : 1;
       if (desaturation > 0) {
-        this.ctx.save();
-        this.ctx.globalCompositeOperation = 'saturation';
-        this.ctx.globalAlpha = desaturation;
-        this.ctx.fillStyle = '#808080';
-        this.ctx.fillRect(panelX, y, STATUS_WIDTH, slotHeight);
-        this.ctx.restore();
+        ctx.save();
+        ctx.globalCompositeOperation = 'saturation';
+        ctx.globalAlpha = desaturation;
+        ctx.fillStyle = '#808080';
+        ctx.fillRect(panelX, y, STATUS_WIDTH, slotHeight);
+        ctx.restore();
       }
 
       if (player && playerState) {
@@ -675,7 +730,7 @@ export class TronRenderer {
         if (this.ridiculousDeathSlots.has(slotIndex) && this.spriteAtlas?.isLoaded()) {
           // Draw ridiculous death sprite covering the slot (50x150)
           this.spriteAtlas.draw(
-            this.ctx,
+            ctx,
             'ridiculous_death',
             centerX,
             y + slotHeight / 2
@@ -693,18 +748,18 @@ export class TronRenderer {
           if (effect && this.spriteAtlas?.isLoaded()) {
             // Draw effect sidebar icon (uses _sidebar sprite)
             this.spriteAtlas.draw(
-              this.ctx,
+              ctx,
               effect.sprite + '_sidebar',
               centerX,
               y + slotHeight * 0.25
             );
             // Draw remaining seconds below icon in black
             const remainingSecs = Math.ceil(effect.remainingFrames / TICK_RATE);
-            this.ctx.fillStyle = '#000';
-            this.ctx.font = 'bold 14px monospace';
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'top';
-            this.ctx.fillText(`${remainingSecs}s`, centerX, y + slotHeight * 0.25 + 22);
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 14px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(`${remainingSecs}s`, centerX, y + slotHeight * 0.25 + 22);
           }
         }
 
@@ -712,7 +767,7 @@ export class TronRenderer {
         if (hasWeapon && playerState.equippedWeapon && this.spriteAtlas?.isLoaded()) {
           // Draw weapon sidebar icon (uses _sidebar sprite)
           this.spriteAtlas.draw(
-            this.ctx,
+            ctx,
             playerState.equippedWeapon.sprite + '_sidebar',
             centerX,
             y + slotHeight * 0.75
@@ -721,18 +776,18 @@ export class TronRenderer {
           const { ammo, remainingFrames } = playerState.equippedWeapon;
           if (remainingFrames !== undefined) {
             // Time-based weapon: show seconds
-            this.ctx.fillStyle = '#000';
-            this.ctx.font = 'bold 14px monospace';
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'top';
-            this.ctx.fillText(`${Math.ceil(remainingFrames / TICK_RATE)}s`, centerX, y + slotHeight * 0.75 + 22);
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 14px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(`${Math.ceil(remainingFrames / TICK_RATE)}s`, centerX, y + slotHeight * 0.75 + 22);
           } else if (ammo !== undefined && ammo > 1) {
             // Shot-based weapon: show ammo count (skip single-use)
-            this.ctx.fillStyle = '#000';
-            this.ctx.font = 'bold 14px monospace';
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'top';
-            this.ctx.fillText(String(ammo), centerX, y + slotHeight * 0.75 + 22);
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 14px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(String(ammo), centerX, y + slotHeight * 0.75 + 22);
           }
         }
 

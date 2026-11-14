@@ -704,12 +704,7 @@ export class TronGame implements Screen {
         renderer.addBorderSegments(color, segments);
       }
     }
-    if (state.clearedLines) {
-      const l = state.clearedLines;
-      for (let i = 0; i + 3 < l.length; i += 4) {
-        renderer.clearLine(l[i]!, l[i + 1]!, l[i + 2]!, l[i + 3]!);
-      }
-    }
+    if (state.clearedLines) renderer.clearLines(state.clearedLines);
     if (state.clearedAreas) {
       for (const { x, y, w, h } of state.clearedAreas) {
         renderer.clearRect(x, y, w, h);

@@ -81,7 +81,10 @@ Rules of the layering:
 `TronRenderer` keeps two off-screen canvases — level and trails — and composites them with
 portals, items, projectiles, explosions, bodyguards, heads, the sidebar and overlays each
 display frame. Trails are persistent pixels; provisional (predicted) trail pixels are drawn
-on top every frame without being stored.
+on top every frame without being stored. The sidebar is a third off-screen canvas, redrawn
+only when what it shows changes (about once a second, for the timers). Measurements and
+the alternatives that were tried (WebGL, `ImageData`) are in
+[research/performance.md](./research/performance.md).
 
 The sidebar has one panel per slot, showing the player's active effect and weapon with the
 time or ammunition left. A player who dies **loses the weapon and effects** (in the
