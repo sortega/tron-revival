@@ -138,9 +138,10 @@ devices.
 - [ ] No chat during a game
 - [ ] Trystero's `scale` plug-in or `maxUsers` if rooms with many phones prove unstable
 
-## Research branches not merged
+## Ideas not yet decided
 
-- [ ] `research/ideas` (worktree `.claude/worktrees/agent-a0532a52a989283a1`)
+- [ ] `design/research/ideas.md` and `gap-analysis.md`: proposals ranked by value for
+      effort; nothing in them is approved. Pick what to specify next.
 
 ## Done, documented nowhere else
 
