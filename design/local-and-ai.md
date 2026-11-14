@@ -4,7 +4,8 @@ This document specifies local (same-keyboard) games, the session abstraction tha
 game screen run without a network, and computer-controlled players.
 
 Related: [architecture.md](./architecture.md), [networking.md](./networking.md),
-[old-tron-design.md](./old-tron-design.md).
+[old-tron-design.md](./old-tron-design.md), [bots-human.md](./bots-human.md) (reaction
+time, motor imprecision and aim error of bots).
 
 ## Goals
 
@@ -131,6 +132,10 @@ Main menu → **LOCAL GAME** opens a setup screen:
 - All-AI games are allowed (attract mode; also handy for testing).
 
 ## AI players
+
+> The planner described here sees the world and presses the keys through a humanisation
+> layer (delayed perception, clumsy key presses, aim error, confusion under Control
+> Reversal): see [bots-human.md](./bots-human.md).
 
 Bots are **input generators**: each tick the authoritative session asks every bot for a
 `TronInput` and feeds it to the simulation exactly like a human's input. Bots get no
