@@ -84,6 +84,7 @@ export interface MatchStats {
   steerChanges: number[];              // Times the steering key changed state
   turnTicks: number[];                 // Ticks spent steering
   squeezeTicks: number[];              // Ticks with something within 2 px on both sides (and survived)
+  threadings: number[];                // Times it slipped through a gap: squeezed for at most 6 ticks
   pulls: Record<string, number>[];     // Per weapon: trigger pulls (ticks held, for hold weapons)
   kills: Record<string, number>[];     // Per weapon: enemies killed with it
   aimErrors: number[][];               // |heading - bearing to the target| at each aimed pull, degrees
@@ -94,7 +95,7 @@ export interface MatchStats {
 export function newStats(drivers: number): MatchStats {
   const zeros = () => Array.from({ length: drivers }, () => 0);
   return {
-    playTicks: zeros(), steerChanges: zeros(), turnTicks: zeros(), squeezeTicks: zeros(),
+    playTicks: zeros(), steerChanges: zeros(), turnTicks: zeros(), squeezeTicks: zeros(), threadings: zeros(),
     pulls: Array.from({ length: drivers }, () => ({})), kills: Array.from({ length: drivers }, () => ({})),
     aimErrors: Array.from({ length: drivers }, () => []), decideMs: zeros(), decideCalls: zeros(),
   };
@@ -135,7 +136,13 @@ function observe(stats: MatchStats, game: TronGameState, i: number, input: TronI
     pending.shift();
     stats.squeezeTicks[i]!++;
   }
-  if (near(1) && near(-1)) pending.push(stats.playTicks[i]!);
+  if (near(1) && near(-1)) {
+    pending.push(stats.playTicks[i]!);
+  } else if (pending.length > 0 && pending.length <= 6 && pending[pending.length - 1] === stats.playTicks[i]! - 1
+      && pending[0] === stats.playTicks[i]! - pending.length) {
+    // Out the other side of a short squeeze that began in the open: a gap threaded
+    stats.threadings[i]!++;
+  }
 
   const weapon = me.equippedWeapon?.sprite;
   if (!weapon || !input.action) return;

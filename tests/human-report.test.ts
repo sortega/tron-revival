@@ -149,6 +149,8 @@ describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
       for (const v of VARIANTS) {
         const stats = newStats(4);
         const spec = `${v}${d}` as DriverSpec;
+        // (WEAPON_SPECS=raw-normal,hard... runs only some of the four)
+        if (process.env.WEAPON_SPECS && !process.env.WEAPON_SPECS.split(',').includes(spec)) continue;
         for (const level of ['blank', 'bricks']) many(level, [spec, spec, spec, spec], rounds(15), [21, 22], 120, stats);
         const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
         const play = sum(stats.playTicks);
@@ -163,7 +165,7 @@ describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
         const mean = errors.length ? sum(errors) / errors.length : 0;
         const rms = errors.length ? Math.sqrt(sum(errors.map(e => e * e)) / errors.length) : 0;
         say(`${(v === '' ? 'human ' : 'raw ') + d}: ${(play / TICK_RATE / 60).toFixed(1)} bot-minutes`);
-        say(`  steering: ${(sum(stats.steerChanges) / (play / TICK_RATE)).toFixed(2)} key changes/s, turning ${pct(sum(stats.turnTicks) / play)} of the time, squeezing (≤2 px both sides) ${(sum(stats.squeezeTicks) / (play / TICK_RATE / 60)).toFixed(1)} ticks/min`);
+        say(`  steering: ${(sum(stats.steerChanges) / (play / TICK_RATE)).toFixed(2)} key changes/s, turning ${pct(sum(stats.turnTicks) / play)} of the time, squeezed (≤2 px on both sides) ${(sum(stats.squeezeTicks) / (play / TICK_RATE / 60)).toFixed(1)} ticks/min, gaps threaded ${(sum(stats.threadings) / (play / TICK_RATE / 60)).toFixed(2)}/min`);
         say(`  aimed pulls: ${errors.length}, heading error mean ${mean.toFixed(2)}°, rms ${rms.toFixed(2)}°`);
         for (const w of ['glock', 'shotgun', 'bomb', 'rifle', 'uzi']) {
           const p = pulls[w] ?? 0;

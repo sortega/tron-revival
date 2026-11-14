@@ -172,6 +172,9 @@ score = free distance along the path                 (survival)
 
 The bot applies the first steering value of the best candidate. A `safetyMargin` (also
 check pixels 1–2 px to each side of the path) keeps bots from threading 1-pixel gaps.
+(In the code this is the corridor and wall-hugging penalty governed by `clearanceSteps`.
+A lateral margin proper, `sideMargin`, and extra room around enemy heads, `headMargin`,
+are set by the human layer: [bots-human.md](./bots-human.md).)
 
 Portals: a rollout that enters a portal continues from the exit, as the real rule does.
 
@@ -238,7 +241,10 @@ What the stance does:
 ### Round flow
 
 During `waiting_ready` a bot presses action once (after a short delay) if it is not marked
-ready. Under *Control Reversal*, `normal`/`hard` bots compensate by inverting their output.
+ready. Under *Control Reversal*, the planner on its own compensates by inverting its
+output after a fixed delay (`reverseReactionTicks`); with the human layer — the default —
+it never learns about the reversal and the bot's hands have to relearn the controls
+([bots-human.md](./bots-human.md)).
 
 ### Difficulty
 
