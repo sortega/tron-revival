@@ -3,6 +3,7 @@
 //
 //   node tools/display-lab.mjs shots [outDir]     comparison sheets + full screenshots
 //   node tools/display-lab.mjs perf [outDir]      ms per render() and frame pacing for each variant
+//   node tools/display-lab.mjs identity           shade=off draws every level exactly like its image
 //   node tools/display-lab.mjs perf-sw [outDir]   the same with Canvas 2D rasterised on the CPU
 //
 // Requires Google Chrome. Starts its own dev server on a free port.
@@ -12,6 +13,7 @@ import { createServer } from 'vite';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 const SHADES = ['off', 'glow', 'fringe', 'half', 'outline', 'auto', 'crisp'];
+const FULL_SHOTS = ['off', 'fringe', 'half', 'auto'];   // Whole-screen pictures only of these
 const HEADS = ['glow', 'ring', 'box', 'dot'];
 const DEVICES = {
   desktop: { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 },
@@ -26,6 +28,7 @@ const server = await createServer({ server: { port: 0, strictPort: false, https:
 await server.listen();
 const baseUrl = `http://127.0.0.1:${server.httpServer.address().port}${server.config.base}`;
 // perf-sw: Canvas 2D rasterised on the CPU, as on a device without GPU canvas acceleration
+// and render() made to wait for it (a 1×1 read-back), so that its time is the whole cost
 const software = mode === 'perf-sw';
 const browser = await chromium.launch({
   channel: 'chrome', headless: true,
@@ -119,7 +122,9 @@ async function shots() {
       const shadeCrops = [];
       for (const shade of SHADES) {
         await setDisplay(page, `shade=${shade}&head=ring&fx=`);
-        await page.screenshot({ path: `${outDir}/full-${level}-${device}-${shade}.jpg`, type: 'jpeg', quality: 80, clip: box });
+        if (FULL_SHOTS.includes(shade)) {
+          await page.screenshot({ path: `${outDir}/full-${level}-${device}-${shade}.jpg`, type: 'jpeg', quality: 75, clip: box });
+        }
         shadeCrops.push({ label: `shade=${shade}`, png: await page.screenshot({ clip: card }) });
       }
       await sheet(`${where} · shade variants (head=ring) · test card, 48×48 logical px`, shadeCrops, `${outDir}/sheet-shade-${level}-${device}.png`);
@@ -143,6 +148,15 @@ async function shots() {
       await page.context().close();
     }
   }
+  // The level with doors, with the default settings (sprites drawn under a transform)
+  for (const device of ['desktop', 'phone']) {
+    const page = await startGame(device, 'portals');
+    await sleep(3000);
+    await freeze(page);
+    await setDisplay(page, '');
+    await page.screenshot({ path: `${outDir}/full-portals-${device}-default.jpg`, type: 'jpeg', quality: 80, clip: await contentBox(page) });
+    await page.context().close();
+  }
 }
 
 async function perf() {
@@ -156,15 +170,16 @@ async function perf() {
         'shade=auto&head=ring&fx=shadow,tracer,fade,pattern',
       ]) {
         const page = await startGame(device, level, { query: spec, bots: 'ai-easy', throttle });
-        await page.evaluate(() => {
+        await page.evaluate((sync) => {
           // Frame pacing next to the time spent inside render()
           const w = window;
           w.__frames = [];
           let last = performance.now();
           const tick = (t) => { w.__frames.push(t - last); last = t; requestAnimationFrame(tick); };
           requestAnimationFrame(tick);
+          w.__teratronDisplay.sync(sync);
           w.__teratronDisplay.resetPerf();
-        });
+        }, software);
         await sleep(8000);
         const result = await page.evaluate(() => {
           const f = window.__frames.slice(5).sort((a, b) => a - b);
@@ -187,8 +202,55 @@ async function perf() {
   writeFileSync(`${outDir}/${mode}.json`, JSON.stringify(rows, null, 2));
 }
 
+// With shade=off the level layer must be, pixel for pixel, the level image over black
+// (what the renderer drew before the display layer existed)
+async function identity() {
+  let bad = 0;
+  for (const level of ['blank', 'pop-culture', 'selva', 'bricks', 'bus', 'dentistry', 'warzone', 'portals', 'blueprint', 'paper']) {
+    const context = await browser.newContext(DEVICES.desktop);
+    const page = await context.newPage();
+    await page.addInitScript((levelMode) => {
+      localStorage.setItem('teratron-local-setup', JSON.stringify({ slots: ['human', 'ai-easy', 'off', 'off'], gameMode: 'ffa', levelMode }));
+    }, level);
+    await page.goto(baseUrl + '?shade=off&head=glow&fx=');
+    await page.click('#localGameBtn');
+    await page.click('#startBtn');
+    await page.waitForFunction(() => window.__teratron?.view()?.round.phase === 'countdown' && window.__teratronDisplay, null, { timeout: 30000 });
+    await sleep(1500);   // Level image loaded, still in the countdown: nothing damaged yet
+    const result = await page.evaluate(async (file) => {
+      const image = new Image();
+      image.src = `${document.baseURI.split('?')[0]}assets/levels/${file}.png`;
+      await image.decode();
+      const draw = (source) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 750;
+        canvas.height = 600;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, 750, 600);
+        ctx.drawImage(source, 0, 0, 750, 600);
+        return ctx.getImageData(0, 0, 750, 600).data;
+      };
+      const a = draw(image);
+      const b = draw(window.__teratronDisplay.layers().level);
+      let different = 0;
+      let walls = 0;
+      for (let i = 0; i < a.length; i += 4) {
+        if (a[i] || a[i + 1] || a[i + 2]) walls++;
+        if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) different++;
+      }
+      return { different, walls };
+    }, level);
+    console.log(`${result.different === 0 ? '  ok ' : 'FAIL '} ${level}: ${result.walls} wall pixels, ${result.different} pixels differ from the level image`);
+    if (result.different) bad++;
+    await context.close();
+  }
+  if (bad) process.exitCode = 1;
+}
+
 try {
-  if (mode === 'perf' || mode === 'perf-sw') await perf();
+  if (mode === 'identity') await identity();
+  else if (mode === 'perf' || mode === 'perf-sw') await perf();
   else await shots();
 } finally {
   await browser.close();
