@@ -247,3 +247,63 @@ describe('display settings', () => {
     expect(parseDisplaySettings(formatDisplaySettings(s))).toEqual(s);
   });
 });
+
+describe('display follows the game', () => {
+  it('fed with the frame events of a real match, the display bitmap is the collision bitmap cell for cell', async () => {
+    const { TronGameState } = await import('../src/game/TronGameState');
+    const { BotController } = await import('../src/game/ai/BotController');
+    const { makePlayers } = await import('./helpers');
+    const s = settings('auto', ['shadow']);
+    const sink = new MemorySink();
+    const display = new ArenaDisplay(PLAY_WIDTH, PLAY_HEIGHT, sink, styleFor(s));
+    const players = makePlayers(4);
+    const game = new TronGameState(players, 'ffa', 'bricks', createRng(5));
+    const level = loadLevelGrid('bricks');
+    game.setLevelObstacles(level);
+    display.setLevel(level);
+    display.restoreLevel(true);
+    const bots = players.map((p, i) => new BotController(p.slotIndex, 'hard', createRng(100 + i)));
+    const inputs = new Map();
+    let erased = 0;
+    let checks = 0;
+
+    const compare = (): void => {
+      let wrong = 0;
+      for (let y = 0; y < PLAY_HEIGHT; y++) {
+        for (let x = 0; x < PLAY_WIDTH; x++) {
+          const i = y * PLAY_WIDTH + x;
+          const color = game.pixels.get(x, y);
+          const shown = display.cells.kind[i] !== 0;
+          if (shown !== (color !== null)) wrong++;
+          else if (color !== null && display.cells.color[i] !== packCss(color)) wrong++;
+        }
+      }
+      expect(wrong).toBe(0);
+      checks++;
+    };
+
+    for (let tick = 0; tick < 70 * 90; tick++) {
+      bots.forEach((bot, i) => inputs.set(players[i]!.slotIndex, bot.decide(game)));
+      game.tick(inputs);
+      const f = game.serialize();
+      // Same order as TronGame.applyFrameEvents
+      if (f.roundStarted || f.eraserUsed) display.restoreLevel();
+      for (const { slotIndex, segments } of f.newTrailSegments) display.addTrail(segments, players[slotIndex]!.color, slotIndex);
+      for (const { color, segments } of f.borderSegments ?? []) display.addLevel(segments, color);
+      const lines = f.clearedLines ?? [];
+      for (let i = 0; i + 3 < lines.length; i += 4) display.clearLine(lines[i]!, lines[i + 1]!, lines[i + 2]!, lines[i + 3]!);
+      for (const r of f.clearedAreas ?? []) display.clearRect(r.x, r.y, r.w, r.h);
+      erased += lines.length / 4 + (f.clearedAreas?.length ?? 0);
+      display.flush();
+      if (tick % 700 === 699) compare();
+    }
+    compare();
+    expect(checks).toBeGreaterThan(5);
+    expect(erased).toBeGreaterThan(20);           // Weapons were used: the erasing paths ran
+    expect(game.currentRound).toBeGreaterThan(1);
+    // And what is on the layers is what a derivation from scratch gives: no ghosts
+    const expected = fromScratch(display, s);
+    expect(same(sink.trail, expected.trail)).toBe(true);
+    expect(same(sink.level, expected.level)).toBe(true);
+  }, 120_000);
+});

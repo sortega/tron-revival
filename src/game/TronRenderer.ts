@@ -15,6 +15,8 @@ import {
   formatDisplaySettings, nextOf, parseDisplaySettings, styleFor,
 } from './display/settings';
 import type { DisplaySettings } from './display/settings';
+import { cssOf, fringeColor, packCss } from './display/shade';
+import type { ShadeStyle } from './display/shade';
 import { SpriteAtlas } from '../sprites';
 import { SPRITE_HASH } from './spriteHash';
 
@@ -39,9 +41,14 @@ export class TronRenderer {
   private readonly layers: CanvasLayerSink;
   private readonly display: ArenaDisplay;
   private settings: DisplaySettings;
+  private style: ShadeStyle;
+  private fringeCss = new Map<string, string>();  // Fringe colour per trail colour, current style
+  private perfSync = false;
   private scale = 1;  // Backing-store pixels per logical pixel
   private backgroundImage: HTMLImageElement | null = null;  // Display only, never a wall
   private lightBackground = false;
+  private backgroundCanvas: HTMLCanvasElement | null = null;  // The image at the display scale
+  private backgroundKey = '';
   private levelHidden = false;  // True while a snapshot stands in for the level image
   private fades: { x: number; y: number; w: number; h: number; frames: number }[] = [];
   private settingsNotice: { text: string; frames: number } | null = null;
@@ -146,7 +153,8 @@ export class TronRenderer {
     try { stored = localStorage.getItem(DISPLAY_STORAGE_KEY); } catch { /* private mode */ }
     this.settings = parseDisplaySettings(window.location.search, stored);
     this.layers = new CanvasLayerSink();
-    this.display = new ArenaDisplay(PLAY_WIDTH, PLAY_HEIGHT, this.layers, styleFor(this.settings, false));
+    this.style = styleFor(this.settings, false);
+    this.display = new ArenaDisplay(PLAY_WIDTH, PLAY_HEIGHT, this.layers, this.style);
     this.applyDisplaySettings(this.settings, false);
 
     // A/B switching: 1 = shade variant, 2 = head marker, 3 = extras
@@ -165,6 +173,9 @@ export class TronRenderer {
       testCard: (x: number, y: number) => this.drawTestCard(x, y),
       perf: () => this.renderPerf(),
       resetPerf: () => { this.renderCount = 0; },
+      layers: () => ({ level: this.layers.levelCanvas, trail: this.layers.trailCanvas }),
+      // Make render() wait for the canvas to be rasterised, so that its time includes it
+      sync: (on: boolean) => { this.perfSync = on; },
       // Cost of re-deriving both layers for the whole arena (round start, Eraser), in ms
       rederive: () => {
         const start = performance.now();
@@ -194,6 +205,8 @@ export class TronRenderer {
   applyDisplaySettings(settings: DisplaySettings, announce = true): void {
     this.settings = settings;
     const style = styleFor(settings, this.lightBackground);
+    this.style = style;
+    this.fringeCss.clear();
     this.scale = style.scale;
     if (this.canvas.width !== CANVAS_WIDTH * this.scale) {
       this.canvas.width = CANVAS_WIDTH * this.scale;    // Resets the context state
@@ -269,11 +282,12 @@ export class TronRenderer {
     if (this.scale > 1 && this.renderCount % 30 === 0) this.updatePixelation();  // Follows window resizes
 
     // Background of the play area: black, or the level's display-only image
-    this.ctx.fillStyle = '#000';
-    this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
-    const background = this.backgroundImage;
-    if (background && background.complete && background.naturalWidth > 0) {
+    const background = this.backgroundLayer();
+    if (background) {
       this.ctx.drawImage(background, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    } else {
+      this.ctx.fillStyle = '#000';
+      this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
     }
 
     // Bring the derived layers up to date with the display bitmap
@@ -311,7 +325,19 @@ export class TronRenderer {
 
     // Provisional trails (guest prediction): not part of the trail canvas
     if (overlayTrails) {
+      const style = this.style;
+      // Same shade as confirmed trail (approximately: it is not clipped by what is around)
+      const o = style.fringe === 'none' ? 0 : Math.min(style.fringeWidth, style.scale) / style.scale;
       for (const { color, segments } of overlayTrails) {
+        if (o > 0) {
+          let fringe = this.fringeCss.get(color);
+          if (!fringe) {
+            fringe = cssOf(fringeColor(style, packCss(color)));
+            this.fringeCss.set(color, fringe);
+          }
+          this.ctx.fillStyle = fringe;
+          for (const seg of segments) this.ctx.fillRect(seg.x - o, seg.y - o, 1 + 2 * o, 1 + 2 * o);
+        }
         this.ctx.fillStyle = color;
         for (const seg of segments) this.ctx.fillRect(seg.x, seg.y, 1, 1);
       }
@@ -423,6 +449,7 @@ export class TronRenderer {
       if (--this.settingsNotice.frames <= 0) this.settingsNotice = null;
     }
 
+    if (this.perfSync) this.ctx.getImageData(0, 0, 1, 1);
     this.renderTimes[this.renderCount++ % this.renderTimes.length] = performance.now() - renderStart;
 
     // Draw debug overlay (FPS + network stats)
@@ -633,6 +660,25 @@ export class TronRenderer {
     return PixelGrid.fromRgba(scratchCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT).data);
   }
 
+  // The level's background image at the scale of the backing store (opaque), so that
+  // drawing it every frame is a plain copy; null when the level has none (black)
+  private backgroundLayer(): HTMLCanvasElement | null {
+    const image = this.backgroundImage;
+    if (!image || !image.complete || image.naturalWidth === 0) return null;
+    const key = `${image.src}@${this.scale}`;
+    if (this.backgroundKey !== key || !this.backgroundCanvas) {
+      const canvas = this.backgroundCanvas ?? document.createElement('canvas');
+      canvas.width = PLAY_WIDTH * this.scale;
+      canvas.height = PLAY_HEIGHT * this.scale;
+      const ctx = canvas.getContext('2d', { alpha: false })!;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      this.backgroundCanvas = canvas;
+      this.backgroundKey = key;
+    }
+    return this.backgroundCanvas;
+  }
+
   // (a) glow: a blurred, low-alpha copy of the trails under them
   private drawGlow(trails: HTMLCanvasElement): void {
     const ctx = this.ctx;
@@ -823,6 +869,14 @@ export class TronRenderer {
       ctx.fillStyle = '#fff';
       ctx.fillRect(x, y, PLAYER_HEAD_SIZE, PLAYER_HEAD_SIZE);
       ctx.shadowBlur = 0;
+      return;
+    }
+    if (head === 'ring' && this.lightBackground && this.scale === 1) {
+      // No sub-pixels to draw a thin edge with: the shade itself is dark
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.fillRect(x - 1, y - 1, 3, 3);
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, PLAYER_HEAD_SIZE, PLAYER_HEAD_SIZE);
       return;
     }
     if (head === 'box' || (head === 'ring' && this.lightBackground)) {

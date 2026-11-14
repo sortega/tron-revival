@@ -18,8 +18,11 @@ export interface DisplaySettings {
   fx: Fx[];
 }
 
-/** What a player gets without asking for anything. */
-export const DEFAULT_DISPLAY: DisplaySettings = { shade: 'off', head: 'glow', fx: [] };
+/** What a player gets without asking for anything (design/display-layer.md, Recommendation). */
+export const DEFAULT_DISPLAY: DisplaySettings = { shade: 'auto', head: 'ring', fx: ['tracer'] };
+
+/** The picture as it was before the display layer existed. */
+export const CLASSIC_DISPLAY: DisplaySettings = { shade: 'off', head: 'glow', fx: [] };
 
 export const DISPLAY_STORAGE_KEY = 'teratron-display';
 

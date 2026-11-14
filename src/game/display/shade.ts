@@ -87,7 +87,8 @@ function patternOn(tag: number, x: number, y: number): boolean {
   }
 }
 
-function fringeColor(style: ShadeStyle, trail: number): number {
+/** Packed colour of the fringe of a trail of the given packed colour. */
+export function fringeColor(style: ShadeStyle, trail: number): number {
   const a = style.fringeAlpha << 24;
   if (style.fringe === 'dark') return a >>> 0;
   if (style.fringe === 'color') return ((trail & 0x00ffffff) | a) >>> 0;
@@ -195,4 +196,9 @@ export function shadeCells(
       }
     }
   }
+}
+
+/** CSS colour of a packed colour. */
+export function cssOf(packed: number): string {
+  return `rgba(${packed & 255}, ${(packed >> 8) & 255}, ${(packed >> 16) & 255}, ${((packed >>> 24) / 255).toFixed(3)})`;
 }
