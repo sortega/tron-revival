@@ -1,8 +1,9 @@
 // `npm run sim:human`: before/after statistics of the bot humanisation layer
 // (design/bots-human.md). Not part of the regular test run.
 //
-//   HUMAN_REPORT=1            all sections (slow), or a comma-separated list of
-//                             survival,straight,ladder,weapons,cost,strength
+//   HUMAN_REPORT=1            all sections (slow: about an hour), or a comma-separated list of
+//                             survival,early,straight,ladder,versus,weapons,range,reversal,cost,strength
+//   LADDER_LEVELS=<a,b>       levels of the `ladder` section (default blank,bricks,selva)
 //   OUT=<file>                also write the report there
 //   ROUNDS=<n>                scale the number of rounds (default 1 = as documented)
 
@@ -41,32 +42,34 @@ function many(level: string, drivers: DriverSpec[], n: number, seeds: number[], 
 }
 
 describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
-  it.runIf(want('survival'))('survival and early deaths per level', () => {
-    say('## Survival when left alone (calm mirror matches; median seconds until a bot dies) and deaths before 3 s');
-    say('level         |      easy          normal          hard     | early deaths (<3 s), normal+hard');
-    say('              |   raw  human     raw  human     raw  human  |   raw      human');
-    const totals = { raw: [0, 0], human: [0, 0] };
+  it.runIf(want('survival'))('survival when left alone', () => {
+    // Survival times in this game have a very long tail, so medians of a few dozen rounds
+    // swing by tens of seconds; the share of bots dead within 20 s is a steadier measure.
+    say('## Survival when left alone (calm mirror matches cut at 45 s, 24 rounds = 48 bots per cell)');
+    say('   share of bots dead within 20 s, and (median seconds survived)');
+    say('level         |          easy                 normal                 hard');
+    say('              |     raw        human       raw        human       raw        human');
+    const dead = [0, 0, 0, 0, 0, 0];
+    let n = 0;
     for (const level of LEVELS) {
       const cells: string[] = [];
-      const early = { raw: 0, human: 0 };
-      let n = 0;
+      let k = 0;
+      let count = 0;
       for (const d of DIFFS) {
         for (const v of VARIANTS) {
           const spec = `${v}calm-${d}` as DriverSpec;
-          const r = many(level, [spec, spec], rounds(6), [11, 12], 90);
-          const s = [...survival(r, 0), ...survival(r, 1)];
-          cells.push(secs(median(s)));
-          if (d !== 'easy') {
-            early[v === '' ? 'human' : 'raw'] += s.filter(t => t < 3 * TICK_RATE).length;
-            if (v === '') n += s.length;
-          }
+          const r = many(level, [spec, spec], rounds(8), [11, 12, 13], 45);
+          const t = [...survival(r, 0), ...survival(r, 1)];
+          const early = t.filter(x => x < 20 * TICK_RATE).length;
+          dead[k++]! += early;
+          count = t.length;
+          cells.push(`${pct(early / t.length)} (${secs(median(t)).trim().padStart(4)})`);
         }
       }
-      totals.raw[0]! += early.raw; totals.raw[1]! += n;
-      totals.human[0]! += early.human; totals.human[1]! += n;
-      say(`${level.padEnd(13)} | ${cells[0]} ${cells[1]}  ${cells[2]} ${cells[3]}  ${cells[4]} ${cells[5]}  |  ${String(early.raw).padStart(2)}/${n}    ${String(early.human).padStart(2)}/${n}`);
+      n += count;
+      say(`${level.padEnd(13)} | ${cells.join('  ')}`);
     }
-    say(`early deaths overall: raw ${totals.raw[0]}/${totals.raw[1]}, human ${totals.human[0]}/${totals.human[1]}`);
+    say(`all levels    | ${dead.map(x => `${pct(x / n)}       `).join('  ')}  (of ${n} bots per cell)`);
     say();
   }, 3_600_000);
 
@@ -104,14 +107,14 @@ describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
   }, 3_600_000);
 
   it.runIf(want('ladder'))('ordering of the profiles', () => {
-    say('## Duels (win rate of the first; draws and time-outs count for nobody)');
+    say('## Duels, 80 rounds each, both seatings (win rate of the first; draws and time-outs count for nobody)');
     say('level    match-up            |   raw  human');
-    for (const level of ['blank', 'bricks', 'selva']) {
+    for (const level of (process.env.LADDER_LEVELS ?? 'blank,bricks,selva').split(',')) {
       for (const [a, b] of [['hard', 'easy'], ['hard', 'normal'], ['normal', 'easy']] as const) {
         const cells = VARIANTS.map(v => {
           // Both seatings, so that the starting corner does not matter
-          const r1 = many(level, [`${v}${a}` as DriverSpec, `${v}${b}` as DriverSpec], rounds(12), [5, 6]);
-          const r2 = many(level, [`${v}${b}` as DriverSpec, `${v}${a}` as DriverSpec], rounds(12), [7, 8]);
+          const r1 = many(level, [`${v}${a}` as DriverSpec, `${v}${b}` as DriverSpec], rounds(20), [5, 6]);
+          const r2 = many(level, [`${v}${b}` as DriverSpec, `${v}${a}` as DriverSpec], rounds(20), [7, 8]);
           const wins = r1.filter(r => r.winner === 0).length + r2.filter(r => r.winner === 1).length;
           const losses = r1.filter(r => r.winner === 1).length + r2.filter(r => r.winner === 0).length;
           return `${pct(wins / (r1.length + r2.length))} (lost${pct(losses / (r1.length + r2.length))})`;
@@ -120,18 +123,21 @@ describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
       }
     }
     say();
-    say('## Human vs raw of the same profile (win rate of the human version; blank)');
+  }, 3_600_000);
+
+  it.runIf(want('versus'))('human against raw, and a free-for-all', () => {
+    say('## Human vs raw of the same profile (win rate of the human version; blank, 80 rounds)');
     for (const d of DIFFS) {
-      const r1 = many('blank', [d, `raw-${d}`], rounds(12), [5, 6]);
-      const r2 = many('blank', [`raw-${d}`, d], rounds(12), [7, 8]);
+      const r1 = many('blank', [d, `raw-${d}`], rounds(20), [5, 6]);
+      const r2 = many('blank', [`raw-${d}`, d], rounds(20), [7, 8]);
       const wins = r1.filter(r => r.winner === 0).length + r2.filter(r => r.winner === 1).length;
       const losses = r1.filter(r => r.winner === 1).length + r2.filter(r => r.winner === 0).length;
       say(`${d.padEnd(7)} human wins ${pct(wins / (r1.length + r2.length))}, raw wins ${pct(losses / (r1.length + r2.length))}`);
     }
     say();
-    say('## 4-player FFA on blank (easy, normal, hard, hard): win rates');
+    say('## 4-player FFA on blank (easy, normal, hard, hard), 80 rounds: win rates');
     for (const v of VARIANTS) {
-      const r = many('blank', DIFFS.map(d => `${v}${d}` as DriverSpec).concat(`${v}hard` as DriverSpec), rounds(20), [3, 4]);
+      const r = many('blank', DIFFS.map(d => `${v}${d}` as DriverSpec).concat(`${v}hard` as DriverSpec), rounds(40), [3, 4]);
       say(`${v === '' ? 'human' : 'raw  '}: ${[0, 1, 2, 3].map(i => pct(winRate(r, i))).join(' ')}   median round ${secs(median(r.map(x => x.ticks)))} s`);
     }
     say();
@@ -289,12 +295,18 @@ describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
   }, 3_600_000);
 
   it.runIf(want('strength'))('strength dial', () => {
-    say('## Strength dial: hard at strength s against raw normal (blank; win rate of hard), and its calm survival');
-    for (const s of [0, 0.5, 1, 1.5, 2]) {
-      const spec = `h${s}-hard` as DriverSpec;
-      const r = many('blank', [spec, 'raw-normal'], rounds(12), [5, 6]);
-      const calm = many('blank', [`h${s}-calm-hard` as DriverSpec, `h${s}-calm-hard` as DriverSpec], rounds(6), [11], 90);
-      say(`s=${s}: wins ${pct(winRate(r, 0))}, loses ${pct(winRate(r, 1))}; calm mirror survival ${secs(median([...survival(calm, 0), ...survival(calm, 1)]))} s`);
+    say('## Strength dial: hard at strength s');
+    say('   against the old normal bot on blank and bricks (win / lose), and left alone on blank (dead within 20 s)');
+    for (const st of [0, 0.5, 1, 1.5, 2]) {
+      const spec = `h${st}-hard` as DriverSpec;
+      const r1 = ['blank', 'bricks'].flatMap(level => many(level, [spec, 'raw-normal'], rounds(10), [5, 6]));
+      const r2 = ['blank', 'bricks'].flatMap(level => many(level, ['raw-normal', spec], rounds(10), [7, 8]));
+      const wins = r1.filter(r => r.winner === 0).length + r2.filter(r => r.winner === 1).length;
+      const losses = r1.filter(r => r.winner === 1).length + r2.filter(r => r.winner === 0).length;
+      const total = r1.length + r2.length;
+      const calm = many('blank', [`h${st}-calm-hard` as DriverSpec, `h${st}-calm-hard` as DriverSpec], rounds(8), [11, 12, 13], 45);
+      const t = [...survival(calm, 0), ...survival(calm, 1)];
+      say(`s=${String(st).padEnd(3)}: wins ${pct(wins / total)}, loses ${pct(losses / total)} (of ${total});  dead within 20 s ${pct(t.filter(x => x < 20 * TICK_RATE).length / t.length)} (of ${t.length})`);
     }
     say();
   }, 3_600_000);

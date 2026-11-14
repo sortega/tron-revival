@@ -42,7 +42,7 @@ export const HUMAN_PROFILES: Record<BotDifficulty, HumanProfile> = {
     disorient: [30, 50],
   },
   normal: {
-    trackDelay: 15, surprise: [22, 32], attention: 2, glance: [35, 60], aimSigma: 2.2,
+    trackDelay: 15, surprise: [22, 32], attention: 2, glance: [35, 60], aimSigma: 2,
     fireHesitation: [7, 14], tapPeriod: [10, 13], steerLag: [0, 2], minPress: 4, sideMargin: 2, headMargin: 7,
     panicDist: 20, panicOversteer: [0, 1],
     reverse: { notice: [22, 34], slip: 0.75, adapt: 150, catch: [10, 16], overCorrect: 0.6 },

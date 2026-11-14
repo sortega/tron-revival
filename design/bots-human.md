@@ -229,7 +229,7 @@ Ranges are uniform, in ticks unless noted (1 tick = 14.3 ms).
 | `surprise` (new item, shot, weapon change) | 35–55 (500–790 ms) | 22–32 (315–460 ms) | 16–22 (230–315 ms) |
 | `attention` (enemies tracked continuously) | 1 | 2 | 3 |
 | `glance` (unattended enemies) | 50–90 | 35–60 | — |
-| `aimSigma` (degrees) | 4 | 2.2 | 1.2 |
+| `aimSigma` (degrees) | 4 | 2 | 1.2 |
 | `fireHesitation` | 14–30 | 7–14 | 4–9 |
 | `tapPeriod` | 13–20 | 10–13 | 8–10 |
 | `steerLag` | 0–2 | 0–2 | 0–1 |
