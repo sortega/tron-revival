@@ -12,6 +12,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "sim": "SIM_REPORT=1 vitest run tests/bots.test.ts --silent=false",
+    "bots:trace": "BOT_TRACE=1 vitest run tests/bot-trace.test.ts --silent=false",
+    "sim:human": "HUMAN_REPORT=${HUMAN_REPORT:-1} vitest run tests/human-report.test.ts --silent=false",
     "test:e2e": "node tests/e2e/touch.e2e.mjs && node tests/e2e/network.e2e.mjs",
     "test:e2e:touch": "node tests/e2e/touch.e2e.mjs",
     "lint": "eslint ."

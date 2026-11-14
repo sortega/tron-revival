@@ -9,7 +9,8 @@ import type { Rng } from '../rng';
 import { encodeSnapshot, serializeState } from '../../network/serialization';
 import type { WireState } from '../../network/serialization';
 import { TICK_RATE } from '../constants';
-import { BotController } from '../ai/BotController';
+import { createBot } from '../ai/HumanBot';
+import type { HumanBot } from '../ai/HumanBot';
 import { createRng } from '../rng';
 import { ByteRate } from './GameSession';
 import type { GameSession, HostTransport, NetworkStats, ViewState } from './GameSession';
@@ -19,6 +20,8 @@ export interface HostSessionOptions {
   rng?: Rng;
   /** Millisecond clock (injectable for tests). */
   now?: () => number;
+  /** Strength of the bots' human imperfections: 0 = none, 1 = as designed (design/bots-human.md). */
+  botHumanisation?: number;
 }
 
 export class HostSession implements GameSession {
@@ -31,7 +34,7 @@ export class HostSession implements GameSession {
   private readonly now: () => number;
   private readonly inputs = new Map<SlotIndex, TronInput>();
   private readonly localSlots = new Set<SlotIndex>();
-  private readonly bots: BotController[] = [];
+  private readonly bots: HumanBot[] = [];
   private lastFrame: TronGameStateData;
   private readonly bytesOut = new ByteRate();
   private readonly pings = new Map<SlotIndex, { t: number; receivedAt: number }>();
@@ -53,7 +56,7 @@ export class HostSession implements GameSession {
       } else if (player.control.type === 'ai') {
         // Each bot gets its own random stream so bots don't perturb each other
         const botRng = createRng(Math.floor(rng() * 0x100000000));
-        this.bots.push(new BotController(player.slotIndex, player.control.difficulty, botRng));
+        this.bots.push(createBot(player.slotIndex, player.control.difficulty, botRng, options.botHumanisation));
       }
     }
 
