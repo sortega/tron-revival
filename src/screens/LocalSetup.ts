@@ -7,7 +7,7 @@ import { LEVELS } from '../types/game';
 import { CONTROL_SCHEMES } from '../game/input/controlSchemes';
 import { SLOTS, SLOT_KINDS, assignSchemes, buildLocalConfig, canStartLocal, defaultLocalSetup } from '../game/localSetup';
 import type { LocalSetupState, LocalSlotKind } from '../game/localSetup';
-import { createLocalSession } from '../game/session/WorkerHostSession';
+import { createHostSession } from '../game/session/WorkerHostSession';
 
 const STORAGE_KEY = 'teratron-local-setup';
 
@@ -114,7 +114,7 @@ export class LocalSetup implements Screen {
     document.getElementById('startBtn')?.addEventListener('click', () => {
       if (!canStartLocal(setup)) return;
       const config = buildLocalConfig(setup);
-      this.screenManager.showGame(config, createLocalSession(config));
+      this.screenManager.showGame(config, createHostSession(config));
     });
     document.getElementById('backBtn')?.addEventListener('click', () => this.screenManager.showMainMenu());
   }

@@ -76,6 +76,28 @@ that calls `session.step()` the right number of times and then renders once.
 - Catch-up is capped (10 steps per wake-up); beyond that the clock is resynchronised rather
   than fast-forwarding.
 
+### Simulation in a Web Worker
+
+The authoritative session (`HostSession`: simulation, bots and, for a network game, the
+encoding of states for the guests) runs in a **Web Worker** by default, for local games
+and for the host of a network game (`WorkerHostSession`, `createHostSession`). The worker
+ticks on its own clock and posts every frame to the page; the page forwards the inputs
+that changed and draws. A slow tick (bots) can then no longer delay a display frame.
+
+- **Network host**: the room (WebRTC) stays on the page. The page relays guest inputs to
+  the worker and broadcasts the encoded states the worker hands back. A snapshot for a
+  player joining mid-game is requested from the worker and answered asynchronously.
+- **Hidden tab**: a local game pauses the worker; a network game keeps it running (worker
+  timers are not throttled, and its messages still wake the page to broadcast).
+- **The local player's input** reaches the simulation one message later than before
+  (frames arrive 0.2-0.6 ms after they were simulated in the benchmarks).
+- **Fallback**: with `?worker=0`, or if the worker cannot be created or fails before its
+  first frame, the same `HostSession` runs on the page's thread as before. A worker that
+  fails mid-game ends the game.
+- Guests do not use a worker (`GuestSession` runs on the page).
+- `window.__teratron.inWorker()` tells which it is; `?perf=1` shows the worker's timings
+  as `w.step` / `w.bots` / `w.sim` and the frame delay as `workerLag`.
+
 ## Player control types
 
 Every player in a `GameConfig` declares how it is controlled *from this machine's point of

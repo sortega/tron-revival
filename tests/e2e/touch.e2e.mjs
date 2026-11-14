@@ -40,6 +40,7 @@ try {
   await page.tap('#startBtn');
   await page.waitForSelector('#steerZone');
   check('phone layout with a steering area', true);
+  check('local game simulates in a worker', await page.evaluate(() => window.__teratron.inWorker()));
 
   const cdp = await context.newCDPSession(page);
   let touchId = 0;
@@ -58,9 +59,11 @@ try {
     return () => touch('touchEnd', 0, 0, id);
   }
   const me = () => page.evaluate(() => {
-    const round = window.__teratron.view().round;
-    const p = round.players[0];
-    return { phase: round.phase, alive: p.alive, direction: p.direction, ready: window.__teratron.view().match.playersReady.includes(0) };
+    // Null until the simulation worker has sent its first frame
+    const view = window.__teratron.view();
+    if (!view) return { phase: 'loading', alive: false, direction: 0, ready: false };
+    const p = view.round.players[0];
+    return { phase: view.round.phase, alive: p.alive, direction: p.direction, ready: view.match.playersReady.includes(0) };
   });
   const action = await page.locator('#actionButton').boundingBox();
   /** Wait until our player can be steered (readying up for a new round if needed); returns its heading. */

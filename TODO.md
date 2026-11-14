@@ -261,11 +261,13 @@ Method, numbers and recommendations: `design/research/performance.md`.
 - [x] Renderer: status panel cached, tracer paths erased in one fill (pixel-identical)
 - [x] Display frames with nothing new are not redrawn (90/120 Hz screens)
 - [x] Prototypes, not for merging as they are: WebGL2 arena, `ImageData`, AssemblyScript
-      kernels (`scripts/bench/`), simulation in a Web Worker (`?worker=1`)
+      kernels (`scripts/bench/`)
+- [x] Simulation and bots in a Web Worker by default, for local games and network hosting
+      (`?worker=0` turns it off; falls back to the page's thread if the worker cannot start)
+- [ ] Worker: the fallback path and a worker failing mid-game are untested; measure on phones
 - [ ] **Check on real phones** (list at the end of the research doc): low-end Android
       hosting 3 hard bots on Portals, a firefight, iOS Safari, a 120 Hz screen, heat
-- [ ] If phones show bot spikes: finish the worker (network hosting through it) or cap the
-      bot plans per tick
+- [ ] If phones still show bot spikes inside the worker: cap the bot plans per tick
 - [ ] Load the networking code on demand (it is ~214 kB of the 389 kB bundle)
 - [ ] Uzi tracers are still 45 KB/s per firing player on the wire
 

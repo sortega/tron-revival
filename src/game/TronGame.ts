@@ -242,6 +242,8 @@ export class TronGame implements Screen {
       config: this.config,
       view: () => this.session.getViewState(),
       stats: () => this.session.getNetworkStats(),
+      /** True if the simulation runs in a Web Worker */
+      inWorker: () => (this.session as { inWorker?: boolean }).inWorker === true,
       ...(perf && { perf: perfDump, session: this.session }),
     };
 
@@ -801,12 +803,12 @@ export class TronGame implements Screen {
     this.perfHud = hud;
     const cursor = new Map<string, number>();
     // With `?worker=1` the simulation's timers are in the worker
-    const worker = this.session as { workerSummary?: () => Promise<{ summary: PerfSummary; droppedTicks: number }> };
+    const worker = this.session as { inWorker?: boolean; workerSummary?: () => Promise<{ summary: PerfSummary; droppedTicks: number }> };
     const row = (name: string, s: PerfSummary[string] | undefined, rate = false): string =>
       s ? `${name.padEnd(11)} ${s.mean.toFixed(2).padStart(6)} ${s.worst.toFixed(1).padStart(6)}${rate ? `  ${s.n}/s` : ''}\n` : '';
     this.perfHudTimer = setInterval(() => {
       const main = perfSince(cursor);
-      void (worker.workerSummary?.() ?? Promise.resolve(null)).then((remote) => {
+      void ((worker.inWorker ? worker.workerSummary?.() : null) ?? Promise.resolve(null)).then((remote) => {
         const sim = remote?.summary ?? main;
         let text = 'ms            mean  worst\n';
         text += row(remote ? 'w.step' : 'step', sim.step, true);

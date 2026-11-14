@@ -115,6 +115,7 @@ try {
   await guest.keyboard.up('ArrowRight');
   await guest.waitForTimeout(400);
   const after = await host.evaluate(() => window.__teratron.view().round.players[1].direction);
+  check('host simulates in a worker, guest does not', await host.evaluate(() => window.__teratron.inWorker()) && !(await guest.evaluate(() => window.__teratron.inWorker())));
   check('guest input steers its player on the host', before !== after, `${before}° -> ${after}°`);
   const stats = await guest.evaluate(() => window.__teratron.stats());
   check('guest receives state and predicts', stats.bytesIn > 1000 && stats.predictedTicks >= 0, JSON.stringify(stats));

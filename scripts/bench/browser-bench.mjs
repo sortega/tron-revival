@@ -6,7 +6,9 @@
 //   npm run bench:browser -- --only=hard4            scenarios whose name contains "hard4"
 //   npm run bench:browser -- --profiles=desktop,mobile-6x
 //   npm run bench:browser -- --seconds=30 --json=out.json
-//   npm run bench:browser -- --query=worker=1        extra URL parameters (prototype flags)
+//   npm run bench:browser -- --query=worker=1        extra URL parameters. The default is
+//                                                    worker=0 (simulation on the page's thread,
+//                                                    which the injected scenes need)
 //   npm run bench:browser -- --headed                a visible window (real GPU compositing)
 //   npm run bench:browser -- --hz=120                display frames from a 120 Hz timer instead
 //                                                    of the (60 Hz) headless compositor
@@ -29,7 +31,7 @@ const args = new Map(process.argv.slice(2).map(a => {
 const seconds = Number(args.get('seconds') ?? 20);
 const warmupSeconds = Number(args.get('warmup') ?? 6);
 const only = args.get('only');
-const extraQuery = args.get('query') ?? '';
+const extraQuery = args.get('query') ?? 'worker=0';
 
 const PROFILES = {
   'desktop': { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, mobile: false, throttle: 1 },

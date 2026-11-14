@@ -11,7 +11,7 @@ import { getSlotColor, canStartGame, getFilledSlotCount } from '../types/lobby';
 import type { BotDifficulty } from '../types/game';
 import { LEVELS } from '../types/game';
 import type { GameSession } from '../game/session/GameSession';
-import { HostSession } from '../game/session/HostSession';
+import { createHostSession } from '../game/session/WorkerHostSession';
 import { GuestSession } from '../game/session/GuestSession';
 import { escapeHtml } from '../util/html';
 import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
@@ -528,7 +528,7 @@ export class NetworkLobby implements Screen {
 
     let session: GameSession;
     if (room.isHost()) {
-      const host = new HostSession(config, { transport });
+      const host = createHostSession(config, transport);
       room.setSnapshotProvider(() => host.makeSnapshot());
       session = host;
     } else {

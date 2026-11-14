@@ -122,7 +122,7 @@ export class RoomConnection {
   private transport: GameTransport | null = null;
   private bufferedStates: Uint8Array[] = [];
   private ignoreStatesUntil = 0;
-  private snapshotProvider: (() => Uint8Array) | null = null;
+  private snapshotProvider: (() => Uint8Array | Promise<Uint8Array>) | null = null;
 
   private hostPresent = true;
   private hostGoneTimer: ReturnType<typeof setTimeout> | null = null;
@@ -559,7 +559,7 @@ export class RoomConnection {
   }
 
   /** Host: how to produce a snapshot for players joining mid-game. */
-  setSnapshotProvider(provider: (() => Uint8Array) | null): void {
+  setSnapshotProvider(provider: (() => Uint8Array | Promise<Uint8Array>) | null): void {
     this.snapshotProvider = provider;
   }
 
