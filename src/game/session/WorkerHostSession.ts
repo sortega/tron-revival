@@ -7,7 +7,7 @@ import type { SlotIndex } from '../../types/lobby';
 import type { GameConfig, TronGameStateData, TronInput } from '../../types/game';
 import type { PixelGrid } from '../PixelGrid';
 import { perfEnd, perfSample, perfStart } from '../perf';
-import type { PerfDump } from '../perf';
+import type { PerfDump, PerfSummary } from '../perf';
 import { HostSession } from './HostSession';
 import type { GameSession, NetworkStats, ViewState } from './GameSession';
 import type { FromWorker, ToWorker } from './worker/protocol';
@@ -22,6 +22,7 @@ export class WorkerHostSession implements GameSession {
   private lastFrame: TronGameStateData | null = null;
   private readonly sent = new Map<SlotIndex, TronInput>();
   private perfWaiters: ((dump: PerfDump) => void)[] = [];
+  private summaryWaiters: ((result: { summary: PerfSummary; droppedTicks: number }) => void)[] = [];
 
   constructor(config: GameConfig) {
     this.worker = new Worker(new URL('./worker/hostWorker.ts', import.meta.url), { type: 'module' });
@@ -42,6 +43,11 @@ export class WorkerHostSession implements GameSession {
     if (message.type === 'perf') {
       for (const resolve of this.perfWaiters) resolve(message.dump);
       this.perfWaiters = [];
+      return;
+    }
+    if (message.type === 'perfSummary') {
+      for (const resolve of this.summaryWaiters) resolve(message);
+      this.summaryWaiters = [];
       return;
     }
     perfSample('workerLag', performance.timeOrigin + performance.now() - message.sentAt);
@@ -84,6 +90,14 @@ export class WorkerHostSession implements GameSession {
     return new Promise(resolve => {
       this.perfWaiters.push(resolve);
       this.post({ type: 'perf' });
+    });
+  }
+
+  /** What the worker's phase timers recorded since the last call (live readout). */
+  workerSummary(): Promise<{ summary: PerfSummary; droppedTicks: number }> {
+    return new Promise(resolve => {
+      this.summaryWaiters.push(resolve);
+      this.post({ type: 'perfSummary' });
     });
   }
 

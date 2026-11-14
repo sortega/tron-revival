@@ -70,3 +70,31 @@ export function perfDump(reset = true): PerfDump {
   if (reset && samples) perfEnable();
   return dump;
 }
+
+export type PerfSummary = Record<string, { n: number; mean: number; worst: number }>;
+
+/**
+ * Mean and worst of the samples recorded since the previous call with the same
+ * `cursor` (which this updates). For a live readout.
+ */
+export function perfSince(cursor: Map<string, number>): PerfSummary {
+  const summary: PerfSummary = {};
+  for (const [phase, list] of samples ?? []) {
+    // (the samples may have been reset since)
+    const from = Math.min(cursor.get(phase) ?? 0, list.length);
+    cursor.set(phase, list.length);
+    let sum = 0;
+    let worst = 0;
+    for (let i = from; i < list.length; i++) {
+      sum += list[i]!;
+      if (list[i]! > worst) worst = list[i]!;
+    }
+    const n = list.length - from;
+    if (n > 0) summary[phase] = { n, mean: sum / n, worst };
+  }
+  return summary;
+}
+
+export function perfCounter(name: string): number {
+  return counters.get(name) ?? 0;
+}

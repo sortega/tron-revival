@@ -6,7 +6,7 @@ import type { SlotIndex } from '../../../types/lobby';
 import type { TronGameStateData, TronInput } from '../../../types/game';
 import { TICK_MS } from '../../constants';
 import { PixelGrid } from '../../PixelGrid';
-import { perfCount, perfDump, perfEnable, perfEnd, perfStart } from '../../perf';
+import { perfCount, perfCounter, perfDump, perfEnable, perfEnd, perfSince, perfStart } from '../../perf';
 import { HostSession } from '../HostSession';
 import type { FromWorker, ToWorker } from './protocol';
 
@@ -24,6 +24,7 @@ let pending: TronGameStateData[] = [];
 let lastTime = 0;
 let accumulator = 0;
 let paused = false;
+const summaryCursor = new Map<string, number>();
 
 function advance(): void {
   if (!session || paused) return;
@@ -73,6 +74,9 @@ scope.onmessage = (event) => {
       break;
     case 'perf':
       scope.postMessage({ type: 'perf', dump: perfDump() });
+      break;
+    case 'perfSummary':
+      scope.postMessage({ type: 'perfSummary', summary: perfSince(summaryCursor), droppedTicks: perfCounter('droppedTicks') });
       break;
   }
 };

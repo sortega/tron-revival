@@ -15,7 +15,8 @@ import { Ticker } from './Ticker';
 import type { GameSession } from './session/GameSession';
 import { HOST_SILENCE_MS } from './session/GameSession';
 import { escapeHtml } from '../util/html';
-import { perfDump, perfEnable, perfEnd, perfStart } from './perf';
+import { perfCounter, perfDump, perfEnable, perfEnd, perfSince, perfStart } from './perf';
+import type { PerfSummary } from './perf';
 
 export class TronGame implements Screen {
   private container: HTMLElement;
@@ -34,6 +35,10 @@ export class TronGame implements Screen {
   private lastFpsUpdate: number = 0;
   private showFps: boolean = localStorage.getItem('showFps') === 'true';
   private fpsKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+
+  // `?perf=1`: on-screen readout of the phase timers, for devices without a console
+  private perfHud: HTMLElement | null = null;
+  private perfHudTimer: ReturnType<typeof setInterval> | null = null;
 
   // Double-tap detection for mobile FPS toggle
   private lastTapTime: number = 0;
@@ -227,7 +232,10 @@ export class TronGame implements Screen {
     // `?perf=1`: record phase timings for the benchmark harness
     // (design/research/performance.md)
     const perf = new URLSearchParams(location.search).has('perf');
-    if (perf) perfEnable();
+    if (perf) {
+      perfEnable();
+      this.showPerfHud();
+    }
 
     // Debug / end-to-end test hook
     (window as unknown as { __teratron?: unknown }).__teratron = {
@@ -783,8 +791,40 @@ export class TronGame implements Screen {
     });
   }
 
+  // Once a second: ticks per second and, per phase, mean / worst milliseconds of the
+  // last second (design/research/performance.md)
+  private showPerfHud(): void {
+    const hud = document.createElement('pre');
+    hud.style.cssText = 'position:fixed;right:4px;bottom:4px;margin:0;padding:3px 5px;z-index:1000;' +
+      'font:10px/1.25 monospace;color:#0f0;background:rgba(0,0,0,0.65);pointer-events:none;';
+    document.body.appendChild(hud);
+    this.perfHud = hud;
+    const cursor = new Map<string, number>();
+    // With `?worker=1` the simulation's timers are in the worker
+    const worker = this.session as { workerSummary?: () => Promise<{ summary: PerfSummary; droppedTicks: number }> };
+    const row = (name: string, s: PerfSummary[string] | undefined, rate = false): string =>
+      s ? `${name.padEnd(11)} ${s.mean.toFixed(2).padStart(6)} ${s.worst.toFixed(1).padStart(6)}${rate ? `  ${s.n}/s` : ''}\n` : '';
+    this.perfHudTimer = setInterval(() => {
+      const main = perfSince(cursor);
+      void (worker.workerSummary?.() ?? Promise.resolve(null)).then((remote) => {
+        const sim = remote?.summary ?? main;
+        let text = 'ms            mean  worst\n';
+        text += row(remote ? 'w.step' : 'step', sim.step, true);
+        for (const phase of ['bots', 'sim', 'serialize']) text += row(remote ? `w.${phase}` : phase, sim[phase]);
+        for (const phase of ['events', 'render', 'frame', 'workerLag']) text += row(phase, main[phase]);
+        text += `dropped ticks: ${remote ? remote.droppedTicks : perfCounter('droppedTicks')}`;
+        hud.textContent = text;
+      });
+    }, 1000);
+  }
+
   cleanup(): void {
     getSoundManager().stopAllLoops();
+
+    if (this.perfHudTimer !== null) clearInterval(this.perfHudTimer);
+    this.perfHudTimer = null;
+    this.perfHud?.remove();
+    this.perfHud = null;
 
     this.ticker?.stop();
     this.ticker = null;
