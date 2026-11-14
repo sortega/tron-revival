@@ -10,6 +10,8 @@ High-level architecture of the web revival of Teratron. Detailed designs:
 - [bodyguards.md](./bodyguards.md) — satellites: what they block, attack and how they wear out
 - [teams.md](./teams.md) — team mode: scoring and how it is shown
 - [touch-controls.md](./touch-controls.md) — steering on phones
+- [display-layer.md](./display-layer.md) — the display bitmap, kept apart from the collision
+  bitmap: trail shade, head markers, levels with a background
 - [refactoring-proposal-effects-weapons.md](./refactoring-proposal-effects-weapons.md) — pending
   proposal to split weapons/effects out of the simulation class
 
@@ -27,7 +29,7 @@ High-level architecture of the web revival of Teratron. Detailed designs:
 | Concern | Choice |
 |---------|--------|
 | Language / build | TypeScript (strict), Vite |
-| Rendering | Canvas 2D: off-screen level + trail canvases composited every frame |
+| Rendering | Canvas 2D: level + trail layers derived from a display bitmap, composited every frame |
 | Multiplayer transport | Trystero (WebRTC data channels, Nostr signaling), optional TURN |
 | Wire format | MessagePack with compact positional encodings |
 | Touch input | Own touch handling with selectable steering modes ([touch-controls.md](./touch-controls.md)); nipplejs only for the legacy stick |
@@ -78,13 +80,19 @@ Rules of the layering:
 
 ## Rendering
 
-`TronRenderer` keeps two off-screen canvases — level and trails — and composites them with
-portals, items, projectiles, explosions, bodyguards, heads, the sidebar and overlays each
-display frame. Trails are persistent pixels; provisional (predicted) trail pixels are drawn
-on top every frame without being stored. The sidebar is a third off-screen canvas, redrawn
-only when what it shows changes (about once a second, for the timers). Measurements and
-the alternatives that were tried (WebGL, `ImageData`) are in
-[research/performance.md](./research/performance.md).
+What is drawn is not the collision map. `ArenaDisplay` (`src/game/display/`) keeps a
+**display bitmap** — colour and kind (trail / level) per cell — fed by the same one-shot
+events, and derives from it two off-screen layers, level and trails, including any shade
+around them (a pure function of the neighbouring cells, so erasing leaves no ghosts).
+`TronRenderer` composites background, level layer and trail layer with portals, items,
+projectiles, explosions, bodyguards, heads, the sidebar and overlays each display frame.
+Provisional (predicted) trail pixels are drawn on top every frame without being stored.
+A level may have a display-only background image. Variants, costs and the reasoning are in
+[display-layer.md](./display-layer.md).
+
+The sidebar is a third off-screen canvas, redrawn only when what it shows changes (about
+once a second, for the timers). Measurements and the renderer alternatives that were tried
+(WebGL, `ImageData`) are in [research/performance.md](./research/performance.md).
 
 The sidebar has one panel per slot, showing the player's active effect and weapon with the
 time or ammunition left. A player who dies **loses the weapon and effects** (in the

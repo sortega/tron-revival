@@ -227,7 +227,30 @@ Audit and design: `design/touch-controls.md`.
 - [x] 1 s lock on "ready" after a round ends
 - [ ] **Play-test on a real phone**, pick a winner, tune it, remove the losers (and nipplejs
       with the old stick)
-- [ ] Trails are 1 px wide and hard to see on a phone screen
+- [~] Trails are 1 px wide and hard to see on a phone screen → research branch
+      `research/display-shading`, see "Display layer" below
+
+## Display layer (research/display-shading)
+
+Design, measurements and recommendation: `design/display-layer.md`; screenshots in
+`design/research/display-shading/`.
+
+- [x] Display bitmap separate from the collision bitmap (`src/game/display/`); shade is
+      derived, so erasing cannot leave ghosts (unit-tested against a from-scratch derivation)
+- [x] Shade variants switchable at run time: `?shade=off|glow|fringe|half|outline|auto|crisp`
+      (key 1), head markers `?head=glow|ring|box|dot` (key 2), extras
+      `?fx=shadow,tracer,fade,pattern` (key 3)
+- [x] Levels can have a display-only background (`backgroundFile`); new levels Blueprint
+      (dark navy) and Paper (light)
+- [x] `tools/display-lab.mjs`: comparison sheets and render cost per variant
+- [ ] **Owner: look at it on a real phone and pick the default** (the branch keeps `off` +
+      `glow` head, i.e. the old look, as the default; recommendation is `auto` + `ring`)
+- [ ] Remove the variants that lose (and the 1/2/3 keys) once a default is chosen
+- [ ] Provisional (predicted) trail pixels of a guest are drawn without shade until the
+      host confirms them
+- [ ] Lock-border pixels in a rejoin snapshot are taken for trails (same colour as the player)
+- [ ] Paper: decide whether a light level stays in the cycle; item sprites with a white
+      box look pasted on it
 
 ## Projectile collisions (reported)  ✅
 
