@@ -73,7 +73,7 @@ function blueprint(): void {
     let r = 10 * lift, g = 26 * lift, b = 52 * lift;
     if (x % 50 === 0 || y % 50 === 0) { r += 10; g += 18; b += 30; }
     else if (x % 10 === 0 || y % 10 === 0) { r += 3; g += 6; b += 10; }
-    const n = (noise(x, y) - 0.5) * 4;
+    const n = (noise(x >> 2, y >> 2) - 0.5) * 4;   // 4×4 grain: compresses far better than per-pixel
     return [Math.round(r + n), Math.round(g + n), Math.round(b + n)];
   });
   bg.save('blueprint-bg.png');
@@ -103,7 +103,7 @@ function paper(): void {
   const bg = new Canvas((x, y) => {
     let r = 217, g = 211, b = 189;
     if (x % 25 === 0 || y % 25 === 0) { r = 186; g = 198; b = 205; }
-    const n = (noise(x, y) - 0.5) * 6;
+    const n = (noise(x >> 2, y >> 2) - 0.5) * 6;
     return [Math.round(r + n), Math.round(g + n), Math.round(b + n)];
   });
   bg.save('paper-bg.png');
