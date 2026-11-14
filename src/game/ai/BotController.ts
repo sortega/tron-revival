@@ -90,7 +90,7 @@ const BAD_ITEMS = new Set(['reverse', 'automatic_slow']);
 const MARGIN_FROM = 3;               // `sideMargin` is minded between these steps of a path:
 const MARGIN_STEPS = 40;             // what is nearer cannot be helped, what is further will be re-planned
 const MARGIN_PENALTY = 6;            // Cost of each step that passes too close...
-const MARGIN_MAX_STEPS = 5;          // ...up to this many: a tight path still beats a shorter one
+const MARGIN_SHARE = 12;             // ...for up to 1/12 of the lookahead: a tight path still beats a much shorter one
 
 interface Hazard {
   x: number;
@@ -426,6 +426,7 @@ export class BotController {
     const { pixels, me, hazards, ignoreSteps, crossingSteps, badItems, portals, doors, doorTick, guns, linesOfFire } = ctx;
     const clearanceSteps = this.profile.clearanceSteps;
     const sideMargin = this.profile.sideMargin ?? 0;
+    const maxTight = Math.round(this.profile.lookahead / MARGIN_SHARE);
     let { x, y, dir } = start;
     let portalCooldown = start.portalCooldown;
     let px = Math.floor(x);
@@ -481,7 +482,7 @@ export class BotController {
               (blocked(px + dx, py) || blocked(px, py + dy))) break;
 
           // Imprecise hands: a path that brushes past something is a bad path
-          if (sideMargin > 0 && tight < MARGIN_MAX_STEPS && step > MARGIN_FROM && step <= MARGIN_STEPS) {
+          if (sideMargin > 0 && tight < maxTight && step > MARGIN_FROM && step <= MARGIN_STEPS) {
             const ox = -sin * sideMargin;
             const oy = cos * sideMargin;
             if (blocked(wrapX(Math.floor(x + ox)), wrapY(Math.floor(y + oy))) ||
