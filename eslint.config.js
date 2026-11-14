@@ -14,6 +14,6 @@ export default tseslint.config(
   {
     // Node scripts
     files: ['tests/e2e/**', 'tools/**', 'scripts/**', '*.config.*'],
-    languageOptions: { globals: { process: 'readonly', console: 'readonly', fetch: 'readonly', Response: 'readonly', URL: 'readonly', window: 'readonly', document: 'readonly', localStorage: 'readonly', setTimeout: 'readonly' } },
+    languageOptions: { globals: { process: 'readonly', console: 'readonly', fetch: 'readonly', Response: 'readonly', URL: 'readonly', window: 'readonly', document: 'readonly', localStorage: 'readonly', setTimeout: 'readonly', performance: 'readonly', requestAnimationFrame: 'readonly' } },
   },
 );
