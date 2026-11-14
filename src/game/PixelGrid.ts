@@ -4,7 +4,8 @@
 import { PLAY_WIDTH, PLAY_HEIGHT } from './constants';
 
 function wrap(v: number, size: number): number {
-  return ((v % size) + size) % size;
+  // Nearly always inside already: the modulo is the slow part of a line walk
+  return v >= 0 && v < size ? v : ((v % size) + size) % size;
 }
 
 /**
