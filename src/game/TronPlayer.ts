@@ -51,9 +51,6 @@ export class TronPlayer {
   color: string;
   nickname: string;
 
-  // Trail segments (screen pixels) - positions the player has LEFT, not the head
-  trail: TrailSegment[] = [];
-
   // Track previous screen position for diagonal collision detection
   prevScreenX: number = -1;
   prevScreenY: number = -1;
@@ -134,9 +131,7 @@ export class TronPlayer {
     // If we moved to a new pixel, the OLD position becomes part of the trail
     if (newScreenX !== this.prevScreenX || newScreenY !== this.prevScreenY) {
       // Add the position we just LEFT to the trail (not the head)
-      const segment = { x: this.prevScreenX, y: this.prevScreenY };
-      this.trail.push(segment);
-      newSegments.push(segment);
+      newSegments.push({ x: this.prevScreenX, y: this.prevScreenY });
     }
 
     return newSegments;
@@ -190,7 +185,6 @@ export class TronPlayer {
     this.y = y * FIXED_POINT_SCALE;
     this.direction = direction;
     this.alive = true;
-    this.trail = [];
     this.equippedWeapon = null;
     this.activeEffects = [];
     this.moveFrameCounter = 0;

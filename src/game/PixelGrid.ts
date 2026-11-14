@@ -128,9 +128,21 @@ export class PixelGrid {
 
   /** Clear every pixel on a line (wrapping). */
   clearLine(x0: number, y0: number, x1: number, y1: number): void {
-    forEachLinePixel(x0, y0, x1, y1, (x, y) => {
-      this.write(y * PLAY_WIDTH + x, 0);
-    });
+    // Bresenham, as in forEachLinePixel
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    let x = x0;
+    let y = y0;
+    for (;;) {
+      this.write(wrap(y, PLAY_HEIGHT) * PLAY_WIDTH + wrap(x, PLAY_WIDTH), 0);
+      if (x === x1 && y === y1) return;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x += sx; }
+      if (e2 < dx) { err += dx; y += sy; }
+    }
   }
 
   /**
@@ -140,15 +152,24 @@ export class PixelGrid {
   firstHitOnLine(
     x0: number, y0: number, x1: number, y1: number
   ): { x: number; y: number; rawX: number; rawY: number } | null {
-    let hit: { x: number; y: number; rawX: number; rawY: number } | null = null;
-    forEachLinePixel(x0, y0, x1, y1, (x, y, rawX, rawY) => {
-      if (this.cells[y * PLAY_WIDTH + x] !== 0) {
-        hit = { x, y, rawX, rawY };
-        return true;
-      }
-      return false;
-    });
-    return hit;
+    // Bresenham, as in forEachLinePixel (this runs for every projectile every tick)
+    const cells = this.cells;
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    let x = x0;
+    let y = y0;
+    for (;;) {
+      const wx = wrap(x, PLAY_WIDTH);
+      const wy = wrap(y, PLAY_HEIGHT);
+      if (cells[wy * PLAY_WIDTH + wx] !== 0) return { x: wx, y: wy, rawX: x, rawY: y };
+      if (x === x1 && y === y1) return null;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x += sx; }
+      if (e2 < dx) { err += dx; y += sy; }
+    }
   }
 
   /** Replace the contents of this grid with a copy of another. */

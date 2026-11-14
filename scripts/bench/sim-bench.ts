@@ -270,23 +270,38 @@ async function run(s: Scenario, ticks: number, warmup: number, seed = 12345): Pr
   };
 }
 
-/** Hash of every frame of seeded bot matches: identical before and after an exact optimisation. */
+/**
+ * Hashes of seeded bot matches, to prove that an optimisation changed nothing:
+ *   state   what is simulated: players, projectiles, items... of every tick, and the
+ *           final collision grid. Must never change.
+ *   frames  the whole frame of every tick, one-shot events included (trail pixels,
+ *           cleared areas, sounds). Changes only if the events are reported differently.
+ *   wire    every packet a guest would receive.
+ */
 function fingerprint(): Record<string, string> {
   const out: Record<string, string> = {};
-  const cases: { name: string; players: Kind[]; level: string; seed: number; ticks: number }[] = [
+  const cases: { name: string; players: Kind[]; level: string; seed: number; ticks: number; script?: Scenario['script'] }[] = [
     { name: 'hard-normal-easy@bus', players: ['hard', 'normal', 'easy'], level: 'bus', seed: 77, ticks: 6000 },
     { name: '4hard@cycle', players: ['hard', 'hard', 'hard', 'hard'], level: 'cycle', seed: 3, ticks: 12000 },
     { name: 'normal-hard@portals', players: ['normal', 'hard'], level: 'portals', seed: 9, ticks: 6000 },
     { name: '3normal+human@warzone', players: ['human', 'normal', 'normal', 'normal'], level: 'warzone', seed: 21, ticks: 6000 },
     { name: 'hard-easy@dentistry', players: ['hard', 'easy'], level: 'dentistry', seed: 5, ticks: 6000 },
+    // The scripted weapon scenes of the benchmark
+    ...SCENARIOS.filter(s => s.script && !s.network).map(s => ({
+      name: s.name, players: s.players, level: s.level, seed: 31, ticks: 2100, script: s.script,
+    })),
   ];
   for (const c of cases) {
     const hash = createHash('sha256');
+    const stateHash = createHash('sha256');
     const wireHash = createHash('sha256');
     const transport: HostTransport = { onInput: null, broadcastState: (data) => { wireHash.update(data); }, close: () => {} };
     // A fixed clock: pongs and byte rates must not leak wall time into the wire hash
     const session = new HostSession(makeConfig({ ...c }), { rng: createRng(c.seed), transport, now: () => 0 });
-    session.onFrame = (frame: TronGameStateData) => { hash.update(JSON.stringify(frame)); };
+    session.onFrame = (frame: TronGameStateData) => {
+      hash.update(JSON.stringify(frame));
+      stateHash.update(JSON.stringify([frame.round, frame.match, frame.deaths, frame.soundEvents]));
+    };
     const game = session.game;
     const human = wanderer(createRng(c.seed + 1));
     const inputs = new Map<SlotIndex, TronInput>();
@@ -297,10 +312,11 @@ function fingerprint(): Record<string, string> {
         session.setLevelObstacles(loadedLevel, loadLevelGrid(LEVELS[loadedLevel]!.id));
       }
       c.players.forEach((kind, i) => { if (kind === 'human') inputs.set(i as SlotIndex, human(tick)); });
+      if (c.script && game.phase === 'playing') c.script(game, tick, inputs);
       session.step(inputs);
     }
-    hash.update(JSON.stringify(game.pixels.toRuns()));
-    out[c.name] = `frames:${hash.digest('hex').slice(0, 16)} wire:${wireHash.digest('hex').slice(0, 16)} rounds:${game.currentRound}`;
+    stateHash.update(JSON.stringify(game.pixels.toRuns()));
+    out[c.name] = `state:${stateHash.digest('hex').slice(0, 16)} frames:${hash.digest('hex').slice(0, 16)} wire:${wireHash.digest('hex').slice(0, 16)} rounds:${game.currentRound}`;
   }
   return out;
 }

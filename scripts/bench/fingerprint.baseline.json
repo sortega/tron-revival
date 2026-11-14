@@ -1,7 +1,12 @@
 {
-  "hard-normal-easy@bus": "frames:9829cd7c055066e1 wire:ece9ad8f501a22f2 rounds:3",
-  "4hard@cycle": "frames:14a949177a5d74f6 wire:f83fb5f2bac16105 rounds:6",
-  "normal-hard@portals": "frames:d5b4c98fdc060f62 wire:b84c7019421d18e5 rounds:2",
-  "3normal+human@warzone": "frames:924660009bc5eb57 wire:58607cd050abb588 rounds:3",
-  "hard-easy@dentistry": "frames:5c835f1f91bc8349 wire:fce8edf6ec6e72e5 rounds:4"
+  "hard-normal-easy@bus": "state:b009691614f794e5 frames:7bc6c60212367720 wire:ece9ad8f501a22f2 rounds:3",
+  "4hard@cycle": "state:96e33a1ed90956ae frames:e0e432d3639b0d81 wire:f83fb5f2bac16105 rounds:6",
+  "normal-hard@portals": "state:0220e5a5ff50c150 frames:1bd32ef47003a17b wire:b84c7019421d18e5 rounds:2",
+  "3normal+human@warzone": "state:ac3ce01f1f8a0481 frames:60d8b4b3572e56d1 wire:58607cd050abb588 rounds:3",
+  "hard-easy@dentistry": "state:2b06d7608f26fbd2 frames:a08ae9a18f3280fd wire:fce8edf6ec6e72e5 rounds:4",
+  "heavy-uzi-4p": "state:383f7927d08b5145 frames:fb8e91927908eb47 wire:e13135151bd62a0d rounds:1",
+  "heavy-rifle-shotgun-4p": "state:59462bd4422172cb frames:1dd7e00c302055b9 wire:44ed6d847be268bf rounds:1",
+  "heavy-hbombs-4p": "state:7010630dbfb70e95 frames:c36d4f0cfa5b9ab5 wire:e58d5cd51ccb3f53 rounds:1",
+  "heavy-megabomb": "state:bfacdcb8d6e1deaa frames:8d1022399c37ab7b wire:1aa058dfedae636e rounds:2",
+  "heavy-satellites-12": "state:fa2657ddaee3436a frames:6745ddee38d9eea7 wire:567147c368b5a05c rounds:2"
 }
