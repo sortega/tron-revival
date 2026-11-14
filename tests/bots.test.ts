@@ -46,10 +46,14 @@ if (process.env.SIM_REPORT) {
       let early = 0;
       let total = 0;
       for (const level of LEVELS) {
-        // Rounds are cut at 8s; count bots dead before 3s
-        const r = runMatch({ level, drivers: ['calm-normal', 'calm-hard'], rounds: 4, seed: 9, maxRoundSeconds: 8 });
-        early += r.flatMap(x => x.deathTick).filter(t => t !== null && t < 3 * TICK_RATE).length;
-        total += r.length * 2;
+        // Rounds are cut at 4s; count bots dead before 3s. Several seeds: a seed lays out
+        // the items the same way on every level, so with a single one the same unlucky
+        // race for an item is counted once per level.
+        for (const seed of [9, 10, 11]) {
+          const r = runMatch({ level, drivers: ['calm-normal', 'calm-hard'], rounds: 3, seed, maxRoundSeconds: 4 });
+          early += r.flatMap(x => x.deathTick).filter(t => t !== null && t < 3 * TICK_RATE).length;
+          total += r.length * 2;
+        }
       }
       expect(early / total).toBeLessThanOrEqual(0.05);
     }, 120_000);

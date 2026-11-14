@@ -10,7 +10,12 @@ import { writeFileSync } from 'node:fs';
 import { describe, it } from 'vitest';
 import { LEVEL_DEFINITIONS } from '../src/types/game';
 import { TICK_RATE } from '../src/game/constants';
-import { median, newStats, runMatch, survival, winRate } from './sim';
+import { PixelGrid } from '../src/game/PixelGrid';
+import { createRng } from '../src/game/rng';
+import type { SlotIndex } from '../src/types/lobby';
+import type { TronInput } from '../src/types/game';
+import { makeGame, place, skipCountdown } from './helpers';
+import { makeDriver, median, newStats, runMatch, survival, winRate } from './sim';
 import type { DriverSpec, MatchStats, RoundResult } from './sim';
 
 const LEVELS = LEVEL_DEFINITIONS.map(l => l.id);
@@ -62,6 +67,29 @@ describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
       say(`${level.padEnd(13)} | ${cells[0]} ${cells[1]}  ${cells[2]} ${cells[3]}  ${cells[4]} ${cells[5]}  |  ${String(early.raw).padStart(2)}/${n}    ${String(early.human).padStart(2)}/${n}`);
     }
     say(`early deaths overall: raw ${totals.raw[0]}/${totals.raw[1]}, human ${totals.human[0]}/${totals.human[1]}`);
+    say();
+  }, 3_600_000);
+
+  it.runIf(want('early'))('deaths in the opening seconds', () => {
+    say('## Deaths before 3 s (calm normal against calm hard, rounds cut at 8 s, every level, 10 seeds x 4 rounds)');
+    say('level         |   raw: normal hard |  human: normal hard');
+    const total = [0, 0, 0, 0];
+    let n = 0;
+    const seeds = Array.from({ length: Math.max(1, Math.round(10 * SCALE)) }, (_, i) => 9 + i);
+    for (const level of LEVELS) {
+      const cells: number[] = [];
+      let rounds = 0;
+      for (const v of VARIANTS) {
+        const r = many(level, [`${v}calm-normal` as DriverSpec, `${v}calm-hard` as DriverSpec], 4, seeds, 8);
+        rounds = r.length;
+        for (const i of [0, 1]) cells.push(r.filter(x => x.deathTick[i] != null && x.deathTick[i]! < 3 * TICK_RATE).length);
+      }
+      cells.forEach((c, i) => { total[i]! += c; });
+      n += rounds;
+      say(`${level.padEnd(13)} |       ${String(cells[0]).padStart(3)}  ${String(cells[1]).padStart(3)}      |        ${String(cells[2]).padStart(3)}  ${String(cells[3]).padStart(3)}     (of ${rounds} each)`);
+    }
+    say(`total         |       ${String(total[0]).padStart(3)}  ${String(total[1]).padStart(3)}      |        ${String(total[2]).padStart(3)}  ${String(total[3]).padStart(3)}     (of ${n} each)`);
+    say(`rate: raw ${pct((total[0]! + total[1]!) / (2 * n))}, human ${pct((total[2]! + total[3]!) / (2 * n))}`);
     say();
   }, 3_600_000);
 
@@ -143,6 +171,72 @@ describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
     say();
   }, 3_600_000);
 
+  it.runIf(want('range'))('shooting range', () => {
+    // One armed bot and one unarmed, harmless target wandering 120-260 px away (40-90 for
+    // the Uzi) in an empty arena, for 8 s. Every pull of the trigger here is an aimed one.
+    say('## Shooting range (armed bot against an unarmed wandering target in an empty arena, 8 s per trial)');
+    say('   error = |heading - direction to the target| when the trigger is pulled; shots = pulls (ticks held for rifle and Uzi)');
+    say('weapon   bot           | trials  fired in  first shot  shots/trial  error: median   p90   | kills  per trial  per 100 shots');
+    const trials = rounds(150);
+    const HOLD = new Set(['rifle', 'uzi']);
+    for (const weapon of ['glock', 'shotgun', 'rifle', 'uzi']) {
+      for (const d of ['normal', 'hard'] as const) {
+        for (const v of VARIANTS) {
+          let fired = 0;
+          let shots = 0;
+          let kills = 0;
+          const first: number[] = [];
+          const errors: number[] = [];
+          for (let trial = 0; trial < trials; trial++) {
+            const rng = createRng(5000 + trial);
+            const g = makeGame(2, 100 + trial);
+            g.setLevelObstacles(new PixelGrid());
+            skipCountdown(g);
+            const dist = weapon === 'uzi' ? 40 + rng() * 50 : 120 + rng() * 140;
+            const bearing = (rng() * 100 - 50) * Math.PI / 180;
+            place(g, 0, 375, 300, 0);
+            place(g, 1, 375 + Math.cos(bearing) * dist, 300 + Math.sin(bearing) * dist, Math.floor(rng() * 90) * 4);
+            g.players[0]!.equipWeapon(weapon, weapon === 'glock' || weapon === 'shotgun' ? 20 : weapon === 'rifle' ? 200 : undefined, weapon === 'uzi' ? 700 : undefined);
+            const bots = [makeDriver(`${v}${d}` as DriverSpec, 0, createRng(trial * 7 + 1)), makeDriver('raw-calm-normal', 1, createRng(trial * 7 + 2))];
+            const inputs = new Map<SlotIndex, TronInput>();
+            let prev = false;
+            let firstShot = -1;
+            for (let t = 0; t < 560 && g.phase === 'playing'; t++) {
+              g.items.length = 0;
+              g.portals.length = 0;
+              const me = g.players[0]!;
+              const it = g.players[1]!;
+              bots.forEach((b, i) => inputs.set(i as SlotIndex, b.decide(g)));
+              const input = inputs.get(0)!;
+              if (me.alive && it.alive && me.equippedWeapon?.sprite === weapon && input.action && (HOLD.has(weapon) || !prev)) {
+                shots++;
+                if (firstShot < 0) firstShot = t;
+                // (the arena wraps: the shortest way to the target)
+                const wrap = (d: number, size: number): number => (d > size / 2 ? d - size : d < -size / 2 ? d + size : d);
+                const to = Math.atan2(wrap((it.y - me.y) / 1000, 600), wrap((it.x - me.x) / 1000, 750)) * 180 / Math.PI;
+                errors.push(Math.abs(((to - me.direction + 540) % 360) - 180));
+              }
+              prev = input.action;
+              g.tick(inputs);
+              const frame = g.serialize();
+              for (const death of frame.deaths ?? []) {
+                if (death.slotIndex === 1 && death.by === 0 && death.cause !== 'trail' && death.cause !== 'crossing') kills++;
+              }
+            }
+            if (firstShot >= 0) {
+              fired++;
+              first.push(firstShot);
+            }
+          }
+          errors.sort((a, b) => a - b);
+          const q = (p: number): string => (errors.length ? errors[Math.min(errors.length - 1, Math.floor(errors.length * p))]! : 0).toFixed(1).padStart(5);
+          say(`${weapon.padEnd(8)} ${((v === '' ? 'human ' : 'raw ') + d).padEnd(13)} | ${String(trials).padStart(5)}   ${pct(fired / trials)}    ${secs(median(first))} s   ${(shots / trials).toFixed(1).padStart(8)}        ${q(0.5)}° ${q(0.9)}°  | ${String(kills).padStart(4)}    ${(kills / trials).toFixed(2)}      ${(shots ? (kills / shots) * 100 : 0).toFixed(2)}`);
+        }
+      }
+    }
+    say();
+  }, 3_600_000);
+
   it.runIf(want('cost'))('cost per tick', () => {
     say('## Cost of a decision (ms per bot and tick; duels on blank and bricks)');
     say('profile |    raw   human   overhead');
@@ -155,6 +249,41 @@ describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
         cells.push((stats.decideMs[0]! + stats.decideMs[1]!) / (stats.decideCalls[0]! + stats.decideCalls[1]!));
       }
       say(`${d.padEnd(7)} | ${cells[0]!.toFixed(4)}  ${cells[1]!.toFixed(4)}  ${((cells[1]! / cells[0]! - 1) * 100).toFixed(0)}%`);
+    }
+    say();
+  }, 3_600_000);
+
+  it.runIf(want('reversal'))('Control Reversal', () => {
+    say('## Control Reversal: a calm bot gets it 2 s into the round (bricks and blank, against an old calm hard bot)');
+    say('   deaths during the 10 s it lasts / rounds in which the bot was alive when it started; "none" = same rounds without the item');
+    say('profile |  raw: none  reversed  |  human: none  reversed');
+    for (const d of DIFFS) {
+      const cells: string[] = [];
+      for (const v of VARIANTS) {
+        for (const reversed of [false, true]) {
+          let deaths = 0;
+          let n = 0;
+          for (const level of ['bricks', 'blank']) {
+            for (const seed of [41, 42, 43]) {
+              const r = runMatch({
+                level, drivers: [`${v}calm-${d}` as DriverSpec, 'raw-calm-hard'], rounds: rounds(8), seed, maxRoundSeconds: 14,
+                during: (game, tick) => {
+                  if (reversed && tick === 140 && game.players[0]!.alive) game.players[0]!.activateEffect('reverse', 700);
+                },
+              });
+              for (const x of r) {
+                const died = x.deathTick[0] ?? null;
+                if (died !== null && died <= 140) continue;
+                if (x.ticks <= 140) continue;
+                n++;
+                if (died !== null && died <= 840) deaths++;
+              }
+            }
+          }
+          cells.push(`${String(deaths).padStart(3)}/${String(n).padEnd(3)}`);
+        }
+      }
+      say(`${d.padEnd(7)} |   ${cells[0]}  ${cells[1]}   |   ${cells[2]}  ${cells[3]}`);
     }
     say();
   }, 3_600_000);

@@ -8,9 +8,13 @@ import type { HumanProfile } from './humanProfiles';
 
 const HOLD_WEAPONS = new Set(['rifle', 'uzi', 'turbo', 'slow']);
 const PLANNER_PULSE = 8;      // The planner taps single-shot weapons every 8 ticks
+const COMMIT = 24;            // A shot decided on goes out if the chance passed less than this ago
+const MIN_HOLD = 6;           // ...and a hold-weapon is then held at least this long
 const SAME_ENGAGEMENT = 15;   // Wanting to fire again this soon is the same engagement
 const TAP_TICKS = 3;         // How long a tap keeps the button down
 const PANIC_SLIP_FACTOR = 1.5;
+const ON_GUARD = 60;          // Right after catching a slip the player is careful...
+const ON_GUARD_FACTOR = 0.25; // ...and slips this much less
 const AFTER_EFFECT = { notice: 0.5, slip: 0.5, adapt: 0.3 };
 
 export class Motor {
@@ -38,6 +42,7 @@ export class Motor {
   private adapt = 1;
   private catchAt = Infinity;   // When the current wrong-way press will be noticed
   private wrongSince = 0;
+  private guardUntil = 0;
 
   // Trigger
   private weapon: string | null = null;
@@ -49,6 +54,8 @@ export class Motor {
   private pressed = false;
   private releaseAt = 0;
   private wantEnded = -1000;
+  private owed = false;         // The first shot of the engagement has not gone out yet
+  private holdUntil = 0;
 
   /** Counters for tests and tuning. */
   stats = { presses: 0, slips: 0, wrongTicks: 0, catches: 0 };
@@ -73,6 +80,7 @@ export class Motor {
     this.noticed = true;
     this.slipBase = 0;
     this.catchAt = Infinity;
+    this.guardUntil = 0;
     this.resetTrigger(null);
   }
 
@@ -102,19 +110,16 @@ export class Motor {
       this.noticeAt = tick + Math.round(drawTicks(profile.reverse.notice, rng) * k);
       this.slipBase = profile.reverse.slip * (reversed ? 1 : AFTER_EFFECT.slip);
       this.adapt = Math.max(1, profile.reverse.adapt * (reversed ? 1 : AFTER_EFFECT.adapt));
-      this.catchAt = Infinity;
-      // The hands carry on with the mapping they were using - now the wrong one
+      // The hands carry on with the mapping they were using - now the wrong one.
+      // With a key down the bike visibly turns the other way: caught like any slip
       this.mapping = reversed ? 1 : -1;
       this.wrongSince = tick;
+      this.catchAt = this.committed !== 0 ? tick + drawTicks(profile.reverse.catch, rng) : Infinity;
     }
     const correct = this.reversed ? -1 : 1;
     if (!this.noticed && tick >= this.noticeAt) {
       this.noticed = true;
       this.noticedTick = tick;
-      // A key held the wrong way is caught like any other slip
-      if (this.mapping !== correct && this.committed !== 0) {
-        this.catchAt = tick + drawTicks(profile.reverse.catch, rng);
-      }
     }
     if (this.frozen) return this.key;
 
@@ -123,6 +128,12 @@ export class Motor {
       this.catchAt = Infinity;
       this.mapping = correct;
       this.stats.catches++;
+      // Seeing the bike turn the wrong way is also how one finds out
+      if (!this.noticed) {
+        this.noticed = true;
+        this.noticedTick = tick;
+      }
+      this.guardUntil = tick + ON_GUARD;
       this.holdExtra = Math.round(profile.reverse.overCorrect * (tick - this.wrongSince));
     }
 
@@ -163,14 +174,16 @@ export class Motor {
     this.catchAt = Infinity;
     if (!this.noticed) {
       // Does not know yet: the old mapping
-      if (this.mapping === correct) this.wrongSince = tick;
+      this.wrongSince = tick;
       this.mapping = -correct;
+      this.catchAt = tick + drawTicks(this.profile.reverse.catch, this.rng);
       return;
     }
     let slip = false;
     if (this.slipBase > 0) {
       let p = this.slipBase * Math.exp(-(tick - this.noticedTick) / this.adapt);
       if (panic) p *= PANIC_SLIP_FACTOR;
+      if (tick < this.guardUntil) p *= ON_GUARD_FACTOR;
       if (p < 0.01) this.slipBase = 0;   // Adapted: no more draws
       else slip = this.rng() < p;
     }
@@ -192,6 +205,8 @@ export class Motor {
     this.tapUntil = 0;
     this.releaseAt = 0;
     this.wantEnded = -1000;
+    this.owed = false;
+    this.holdUntil = 0;
   }
 
   /**
@@ -209,21 +224,35 @@ export class Motor {
     const want = hold ? raw : tick - this.lastRaw < PLANNER_PULSE;
     if (want && !this.wanting) {
       this.wanting = true;
-      // Still engaged from a moment ago: no new hesitation
-      this.readyAt = tick - this.wantEnded <= SAME_ENGAGEMENT ? tick : tick + drawTicks(profile.fireHesitation, rng);
+      if (tick - this.wantEnded > SAME_ENGAGEMENT) {
+        // A new engagement: the decision takes a moment, and is then carried out
+        this.readyAt = tick + drawTicks(profile.fireHesitation, rng);
+        this.owed = true;
+      } else {
+        this.readyAt = tick;
+      }
       this.nextTap = Math.max(this.nextTap, this.readyAt);
     } else if (!want && this.wanting) {
       this.wanting = false;
       this.wantEnded = tick;
       this.releaseAt = tick + drawTicks(profile.steerLag, rng) + 2;
     }
+    // The first shot of an engagement goes out even if the chance has just passed
+    if (this.owed && !this.wanting && tick - this.lastRaw >= COMMIT) this.owed = false;
     if (this.frozen) return false;
+    const due = tick >= this.readyAt && (this.wanting || this.owed);
 
     if (hold) {
-      this.pressed = (this.wanting && tick >= this.readyAt) || (this.pressed && !this.wanting && tick < this.releaseAt);
+      if (due && this.owed) {
+        this.owed = false;
+        this.holdUntil = tick + MIN_HOLD;
+      }
+      this.pressed = (this.wanting && tick >= this.readyAt) || tick < this.holdUntil
+        || (this.pressed && !this.wanting && tick < this.releaseAt);
       return this.pressed;
     }
-    if (this.wanting && tick >= this.readyAt && tick >= this.nextTap) {
+    if (due && tick >= this.nextTap) {
+      this.owed = false;
       this.tapUntil = tick + TAP_TICKS;
       this.nextTap = tick + Math.max(TAP_TICKS + 1, drawTicks(profile.tapPeriod, rng));
     }

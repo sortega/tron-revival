@@ -131,7 +131,7 @@ key presses:
 - **Lag**: each *change* of intention reaches the key `steerLag` ticks later (drawn per
   change). A change that is withdrawn before it lands never happens.
 - **Minimum press**: once pressed, a key stays down at least `minPress` ticks (a tap
-  cannot be shorter than ≈ 45–70 ms → 12–20° of turn); once released it stays up at
+  cannot be shorter than ≈ 45–60 ms → 12–16° of turn); once released it stays up at
   least 1 tick.
 - **Panic over-steer**: when panicking, releases are `panicOversteer` ticks later —
   people hold the turn too long when a wall is close.
@@ -146,14 +146,20 @@ under Turbo the same lag is twice as many pixels, and under Slow half.
 The planner never learns about the reversal (the perceived self has no `reverse`
 effect); it keeps asking for "left". Which key that means is the motor's problem:
 
-1. **Not noticed yet**: for `reverse.notice` ticks after the effect starts, every press
-   uses the old mapping → the bike turns the wrong way.
+1. **Not noticed yet**: until the bot notices, every press uses the old mapping → the
+   bike turns the wrong way. It notices `reverse.notice` ticks after the effect starts
+   (it saw what it picked up) or, if it steers before that, when it catches its first
+   wrong-way turn (see 3).
 2. **Knows, but the habit is strong**: afterwards each new press *slips* (uses the old
    mapping) with probability `p(t) = slip × exp(−t / adapt)`, `t` being the time since
-   noticing. Panic multiplies `p` by 1.5 (capped at 1).
-3. **Catching a slip**: a wrong-way press is noticed `reverse.catch` ticks later and
-   flipped. The player then **over-corrects**: the corrected press is held
-   `overCorrect × (ticks spent going the wrong way)` ticks longer than intended.
+   noticing. Panic multiplies `p` by 1.5 (capped at 1). For 60 ticks after catching a
+   slip the player is on guard and `p` is a quarter of that.
+3. **Catching a slip**: a wrong-way press is noticed `reverse.catch` ticks later (the
+   bike is visibly turning the other way) and flipped. The player then
+   **over-corrects**: the corrected press is held
+   `overCorrect × (ticks spent going the wrong way)` ticks longer than intended. A press
+   released before it is caught is not corrected at all — short taps under reversal
+   simply go the wrong way.
 4. **After-effect**: when the reversal ends the same thing happens in the other
    direction, shorter: notice × 0.5, `slip × 0.5`, `adapt × 0.3`.
 
@@ -169,12 +175,16 @@ itself again: the keys are frozen in their current state and it does not fire fo
 ### Trigger
 
 - **Hesitation**: when the planner starts wanting to fire, the first press comes
-  `fireHesitation` ticks later (drawn per engagement).
+  `fireHesitation` ticks later (drawn per engagement; wanting to fire again within 15
+  ticks is the same engagement and needs no new hesitation).
+- **Commitment**: that first shot goes out even if the chance has passed in the
+  meantime (up to 24 ticks ago) — people shoot where the target *was*. Later shots of
+  the engagement are only fired while the planner still wants them.
 - **Tap rate**: single-shot weapons (Glock, shotgun, H-bomb, Lock Borders) are tapped
   every `tapPeriod` ticks (drawn per tap), each press lasting 3 ticks, instead of the
   planner's metronomic 8.
-- **Hold weapons** (rifle, Uzi, Turbo, Slow): pressed after the hesitation, released
-  `steerLag + 2` ticks after the planner stops wanting to fire.
+- **Hold weapons** (rifle, Uzi, Turbo, Slow): pressed after the hesitation for at least
+  6 ticks, released `steerLag + 2` ticks after the planner stops wanting to fire.
 - Ready-up between rounds is passed through untouched.
 
 ## Parameters per profile
@@ -188,22 +198,27 @@ Ranges are uniform, in ticks unless noted (1 tick = 14.3 ms).
 | `attention` (enemies tracked continuously) | 1 | 2 | 3 |
 | `glance` (unattended enemies) | 50–90 | 35–60 | — |
 | `aimSigma` (degrees) | 4 | 2.2 | 1.2 |
-| `fireHesitation` | 18–40 | 10–20 | 6–12 |
+| `fireHesitation` | 14–30 | 7–14 | 4–9 |
 | `tapPeriod` | 13–20 | 10–13 | 8–10 |
-| `steerLag` | 1–4 | 0–2 | 0–1 |
-| `minPress` | 5 | 4 | 3 |
+| `steerLag` | 0–2 | 0–2 | 0–1 |
+| `minPress` | 4 | 4 | 3 |
 | `panicDist` (px) | 28 | 20 | 14 |
-| `panicOversteer` | 0–4 | 0–2 | 0–1 |
+| `panicOversteer` | 0–1 | 0–1 | 0–1 |
 | `reverse.notice` | 40–70 | 22–34 | 14–20 |
-| `reverse.slip` (probability right after noticing) | 0.9 | 0.75 | 0.5 |
-| `reverse.adapt` (time constant) | 420 (6 s) | 150 (2.1 s) | 50 (0.7 s) |
-| `reverse.catch` | 16–28 | 10–16 | 7–11 |
-| `reverse.overCorrect` | 1.0 | 0.6 | 0.3 |
+| `reverse.slip` (probability right after noticing) | 0.8 | 0.75 | 0.5 |
+| `reverse.adapt` (time constant) | 300 (4.3 s) | 150 (2.1 s) | 50 (0.7 s) |
+| `reverse.catch` | 12–20 | 10–16 | 7–11 |
+| `reverse.overCorrect` | 0.6 | 0.6 | 0.3 |
 | `disorient` | 30–50 | 18–28 | 10–16 |
 
 (Control Reversal lasts 700 ticks: `hard` is fluent after about two seconds, `normal`
-makes mistakes for most of the first half, `easy` slips on a quarter of its presses even
-at the end.)
+makes mistakes for most of the first half, `easy` still slips now and then at the end.)
+
+The motor figures of `easy` and `normal` are deliberately close. `easy` is already
+clumsy at the wheel through its planner (60 px lookahead, a decision every 6 ticks,
+random mistakes); with slower hands on top it crashed in more than half of its first
+12 seconds (see Results). What sets `easy` apart in this layer is how late it notices
+things, how badly it aims and how long reversed controls confuse it.
 
 The planner's profile (`BotProfile`: lookahead, re-plan interval, mistakes…) is
 unchanged, except that `reverseReactionTicks` is no longer used when the layer is active.

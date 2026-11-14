@@ -34,21 +34,21 @@ export interface HumanProfile {
 export const HUMAN_PROFILES: Record<BotDifficulty, HumanProfile> = {
   easy: {
     trackDelay: 24, surprise: [35, 55], attention: 1, glance: [50, 90], aimSigma: 4,
-    fireHesitation: [18, 40], tapPeriod: [13, 20], steerLag: [1, 4], minPress: 5,
-    panicDist: 28, panicOversteer: [0, 4],
-    reverse: { notice: [40, 70], slip: 0.9, adapt: 420, catch: [16, 28], overCorrect: 1 },
+    fireHesitation: [14, 30], tapPeriod: [13, 20], steerLag: [0, 2], minPress: 4,
+    panicDist: 28, panicOversteer: [0, 1],
+    reverse: { notice: [40, 70], slip: 0.8, adapt: 300, catch: [12, 20], overCorrect: 0.6 },
     disorient: [30, 50],
   },
   normal: {
     trackDelay: 15, surprise: [22, 32], attention: 2, glance: [35, 60], aimSigma: 2.2,
-    fireHesitation: [10, 20], tapPeriod: [10, 13], steerLag: [0, 2], minPress: 4,
-    panicDist: 20, panicOversteer: [0, 2],
+    fireHesitation: [7, 14], tapPeriod: [10, 13], steerLag: [0, 2], minPress: 4,
+    panicDist: 20, panicOversteer: [0, 1],
     reverse: { notice: [22, 34], slip: 0.75, adapt: 150, catch: [10, 16], overCorrect: 0.6 },
     disorient: [18, 28],
   },
   hard: {
     trackDelay: 11, surprise: [16, 22], attention: 3, glance: [35, 60], aimSigma: 1.2,
-    fireHesitation: [6, 12], tapPeriod: [8, 10], steerLag: [0, 1], minPress: 3,
+    fireHesitation: [4, 9], tapPeriod: [8, 10], steerLag: [0, 1], minPress: 3,
     panicDist: 14, panicOversteer: [0, 1],
     reverse: { notice: [14, 20], slip: 0.5, adapt: 50, catch: [7, 11], overCorrect: 0.3 },
     disorient: [10, 16],

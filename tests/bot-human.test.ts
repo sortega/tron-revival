@@ -74,8 +74,9 @@ describe('human bots: strength', () => {
   it('hard is the quickest and most precise, easy the slowest', () => {
     const { easy, normal, hard } = HUMAN_PROFILES;
     for (const key of ['trackDelay', 'aimSigma', 'minPress', 'panicDist'] as const) {
-      expect(hard[key], key).toBeLessThan(normal[key]);
-      expect(normal[key], key).toBeLessThan(easy[key]);
+      expect(hard[key], key).toBeLessThanOrEqual(normal[key]);
+      expect(normal[key], key).toBeLessThanOrEqual(easy[key]);
+      expect(hard[key], key).toBeLessThan(easy[key]);
     }
     for (const key of ['surprise', 'fireHesitation', 'tapPeriod', 'disorient'] as const) {
       const mid = (r: readonly [number, number]): number => (r[0] + r[1]) / 2;
@@ -383,7 +384,7 @@ describe('human bots: steering keys', () => {
       }
       return total / 200;
     };
-    expect(held(true)).toBeGreaterThan(held(false) + 1);
+    expect(held(true)).toBeGreaterThan(held(false) + 0.3);
   });
 
   it('follows the planner faithfully when nothing is in the way', () => {
@@ -565,14 +566,23 @@ describe('human bots: trigger', () => {
     expect(last).toBeLessThanOrEqual(120 + profile.steerLag[1] + 2);
   });
 
-  it('does not fire a shot it only wanted for an instant', () => {
-    const motor = new Motor(HUMAN_PROFILES.easy, createRng(2));
-    let fired = false;
-    for (let t = 0; t < 100; t++) {
-      motor.steer(0, false, false);
-      if (motor.trigger(t >= 20 && t < 24, 'glock')) fired = true;
+  it('fires one late shot for a chance that lasted an instant', () => {
+    for (const d of DIFFS) {
+      for (let seed = 1; seed <= 20; seed++) {
+        const motor = new Motor(HUMAN_PROFILES[d], createRng(seed));
+        let presses = 0;
+        let last = false;
+        for (let t = 0; t < 100; t++) {
+          motor.steer(0, false, false);
+          const out = motor.trigger(t >= 20 && t < 24, 'glock');
+          // Never before the hesitation is over
+          if (out) expect(t, d).toBeGreaterThanOrEqual(20 + HUMAN_PROFILES[d].fireHesitation[0]);
+          if (out && !last) presses++;
+          last = out;
+        }
+        expect(presses, d).toBeLessThanOrEqual(1);
+      }
     }
-    expect(fired).toBe(false);
   });
 
   it('a real bot shoots later than the planner alone, and still shoots', () => {

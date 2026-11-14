@@ -70,6 +70,8 @@ export interface MatchOptions {
   seed: number;
   mode?: GameMode;
   maxRoundSeconds?: number;
+  /** Called before every tick of the playing phase (`tick` counts from 0 each round). */
+  during?: (game: TronGameState, tick: number) => void;
   /** Builds the drivers instead of `makeDriver` (experiments with custom profiles). */
   makeDriver?: (spec: DriverSpec, slot: SlotIndex, rng: Rng) => Driver;
   /** Filled in with details of how the drivers played, when given. */
@@ -81,7 +83,7 @@ export interface MatchStats {
   playTicks: number[];                 // Ticks alive in the playing phase
   steerChanges: number[];              // Times the steering key changed state
   turnTicks: number[];                 // Ticks spent steering
-  squeezeTicks: number[];              // Ticks with something within 2 px on both sides
+  squeezeTicks: number[];              // Ticks with something within 2 px on both sides (and survived)
   pulls: Record<string, number>[];     // Per weapon: trigger pulls (ticks held, for hold weapons)
   kills: Record<string, number>[];     // Per weapon: enemies killed with it
   aimErrors: number[][];               // |heading - bearing to the target| at each aimed pull, degrees
@@ -107,7 +109,7 @@ function wrapDelta(d: number, size: number): number {
 }
 
 // Record what driver `i` did this tick (before the simulation applies it)
-function observe(stats: MatchStats, game: TronGameState, i: number, input: TronInput, prev: TronInput, lastFired: (string | null)[]): void {
+function observe(stats: MatchStats, game: TronGameState, i: number, input: TronInput, prev: TronInput, lastFired: (string | null)[], squeezing: number[][]): void {
   const me = game.players[i]!;
   if (!me.alive) return;
   stats.playTicks[i]!++;
@@ -126,7 +128,14 @@ function observe(stats: MatchStats, game: TronGameState, i: number, input: TronI
     }
     return false;
   };
-  if (near(1) && near(-1)) stats.squeezeTicks[i]!++;
+  // (counted only if the bot is still alive a moment later: crashing into a corner is
+  // not threading a gap)
+  const pending = squeezing[i] ??= [];
+  while (pending.length > 0 && pending[0]! < stats.playTicks[i]! - 15) {
+    pending.shift();
+    stats.squeezeTicks[i]!++;
+  }
+  if (near(1) && near(-1)) pending.push(stats.playTicks[i]!);
 
   const weapon = me.equippedWeapon?.sprite;
   if (!weapon || !input.action) return;
@@ -164,6 +173,7 @@ export function runMatch(opts: MatchOptions): RoundResult[] {
   const stats = opts.stats;
   const prev: TronInput[] = drivers.map(() => ({ steer: 0, action: false }));
   const lastFired: (string | null)[] = drivers.map(() => null);
+  const squeezing: number[][] = drivers.map(() => []);
 
   for (let round = 0; round < opts.rounds; round++) {
     const startRound = game.currentRound;
@@ -175,6 +185,7 @@ export function runMatch(opts: MatchOptions): RoundResult[] {
 
     while (game.currentRound === startRound) {
       const wasPlaying = game.phase === 'playing';
+      if (wasPlaying && !finished) opts.during?.(game, ticks);
       if (stats) {
         drivers.forEach((d, i) => {
           const t0 = performance.now();
@@ -182,7 +193,7 @@ export function runMatch(opts: MatchOptions): RoundResult[] {
           if (wasPlaying && game.players[i]!.alive) {
             stats.decideMs[i]! += performance.now() - t0;
             stats.decideCalls[i]!++;
-            observe(stats, game, i, input, prev[i]!, lastFired);
+            observe(stats, game, i, input, prev[i]!, lastFired, squeezing);
           }
           prev[i] = input;
           inputs.set(i as SlotIndex, input);
@@ -195,6 +206,7 @@ export function runMatch(opts: MatchOptions): RoundResult[] {
       for (const d of frame.deaths ?? []) {
         const fx = game.players[d.slotIndex]!.activeEffects.map(e => e.sprite).join('+');
         deathCause[d.slotIndex] = d.cause + (fx ? ` [${fx}]` : '');
+        if (stats) squeezing[d.slotIndex]!.length = 0;
         if (stats && d.by !== undefined && d.by >= 0 && d.by !== d.slotIndex && SHOT_CAUSES.has(d.cause)) {
           const weapon = lastFired[d.by] ?? 'unknown';
           stats.kills[d.by]![weapon] = (stats.kills[d.by]![weapon] ?? 0) + 1;
