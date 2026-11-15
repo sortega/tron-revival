@@ -1892,6 +1892,10 @@ export class TronGameState {
   private activateEraser(): void {
     // Reset collision map to only level obstacles
     this.pixels.copyFrom(this.levelObstacles);
+    // What was drawn earlier in this tick went with the rest: views apply the eraser
+    // before the frame's segments, and would otherwise show pixels that are not there
+    this.frameTrailSegments.clear();
+    this.frameBorderSegments.length = 0;
 
     // Stop any active border locks
     if (this.borderLocks.size > 0) {
