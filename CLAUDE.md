@@ -49,6 +49,8 @@ All design decisions, specifications, and architectural documentation live here:
 
 Contains the original Div2 source code and assets from the MS-DOS version. This is reference material only - not executed code.
 
+To play the original for comparison: `npm run original` (runs `old-tron/compiled/TRON.EXE` in DOSBox Staging; `npm run original -- SETUP.EXE` for its sound set-up).
+
 ### Source Code
 
 (Structure TBD - will be defined in `design/architecture.md`)
