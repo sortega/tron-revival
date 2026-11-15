@@ -279,7 +279,6 @@ export const LEVEL_DEFINITIONS: { id: string; name: string; imageFile: string; b
   // Levels with a display-only background (design/display-layer.md); images generated
   // by scripts/build-research-levels.ts
   { id: 'blueprint', name: 'Blueprint', imageFile: 'blueprint.png', backgroundFile: 'blueprint-bg.png' },
-  { id: 'paper', name: 'Paper', imageFile: 'paper.png', backgroundFile: 'paper-bg.png', lightBackground: true },
 ];
 
 // Level order (cycles after last level) - constructed with full paths
@@ -368,5 +367,4 @@ export const WEAPON_ITEMS: ItemDefinition[] = [
 
 // Item constants
 export const ITEM_COLLISION_RADIUS = 15;   // Pickup radius in pixels
-export const MAX_ITEMS_ON_FIELD = 6;       // Maximum spawned items at once
 export const ITEM_SPAWN_MARGIN = 80;       // Min distance from players when spawning

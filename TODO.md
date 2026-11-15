@@ -281,8 +281,8 @@ Design: `design/display-layer.md`.
 
 - [x] Display bitmap separate from the collision bitmap (`src/game/display/`); shade is
       derived, so erasing cannot leave ghosts (unit-tested against a from-scratch derivation)
-- [x] Levels can have a display-only background (`backgroundFile`); new levels Blueprint
-      (dark navy) and Paper (light)
+- [x] Levels can have a display-only background (`backgroundFile`); new level Blueprint
+      (dark navy). Paper (light) was tried and removed
 - [x] Two rounds of selectable shade / halo / extras variants tried by the owner on an
       iPhone and scrapped (variants, URL parameters, chips, keys, lab tool, pictures)
 - [x] One look: hard 1 px trail softened by semi-transparent pixels of its colour (more in
@@ -300,8 +300,6 @@ Design: `design/display-layer.md`.
       the twinkle in `TronRenderer.drawPlayerHead`
 - [ ] Remove what the derivation no longer needs (several bands, 2× layers)
 - [ ] Lock-border pixels in a rejoin snapshot are taken for trails (same colour as the player)
-- [ ] Paper: decide whether a light level stays in the cycle; item sprites with a white
-      box look pasted on it
 - [ ] If tablets / ≥ 3 device px per logical px matter: a 2× `bold` with a two-step fringe
 
 ## Projectile collisions (reported)  ✅

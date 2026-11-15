@@ -102,7 +102,7 @@ This document describes the complete mechanics of the original Teratron game wri
 
 ## Items
 
-Items spawn randomly throughout the match. Initial spawn: 6 items. Then random spawning every 200-800 frames.
+Items spawn randomly throughout the match. Initial spawn: 6 items. Then random spawning every 200-800 frames. There is no limit to how many lie around at once (the rewrite capped them at 6 until Nov 2026).
 
 ### Spawn Probability
 

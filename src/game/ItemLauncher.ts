@@ -1,7 +1,7 @@
 // ItemLauncher - Handles item spawning during gameplay
 
 import type { GameItem, ItemCategory, ItemDefinition } from '../types/game';
-import { AUTOMATIC_ITEMS, WEAPON_ITEMS, MAX_ITEMS_ON_FIELD, ITEM_SPAWN_MARGIN } from '../types/game';
+import { AUTOMATIC_ITEMS, WEAPON_ITEMS, ITEM_SPAWN_MARGIN } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT } from './constants';
 import type { Rng } from './rng';
 
@@ -31,15 +31,15 @@ export class ItemLauncher {
     this.resetSpawnTimer();
   }
 
-  // Called each frame during playing phase
+  // Called each frame during playing phase. As in the original, items keep appearing
+  // (one every 200-800 ticks) however many are already lying around.
   tick(
     items: GameItem[],
     getPlayerPositions: () => { x: number; y: number }[]
   ): void {
     this.spawnTimer++;
 
-    const activeCount = items.filter(i => i.active).length;
-    if (this.spawnTimer >= this.nextSpawnInterval && activeCount < MAX_ITEMS_ON_FIELD) {
+    if (this.spawnTimer >= this.nextSpawnInterval) {
       const item = this.createItem(getPlayerPositions);
       if (item) {
         items.push(item);

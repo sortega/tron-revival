@@ -98,27 +98,5 @@ function blueprint(): void {
   walls.save('blueprint.png');
 }
 
-function paper(): void {
-  // Background: cream squared paper. The deliberately hard case for bright trails.
-  const bg = new Canvas((x, y) => {
-    let r = 217, g = 211, b = 189;
-    if (x % 25 === 0 || y % 25 === 0) { r = 186; g = 198; b = 205; }
-    const n = (noise(x >> 2, y >> 2) - 0.5) * 6;
-    return [Math.round(r + n), Math.round(g + n), Math.round(b + n)];
-  });
-  bg.save('paper-bg.png');
-
-  // Walls: ink doodles — rings with an opening, and two rules
-  const ink: Rgb = [30, 42, 110];
-  const walls = new Canvas(() => BLACK);
-  walls.ring(200, 300, 45, 2, ink, 180);
-  walls.ring(550, 300, 45, 2, ink, 0);
-  walls.ring(375, 140, 40, 2, ink, 270);
-  walls.ring(375, 460, 40, 2, ink, 90);
-  walls.rect(330, 299, 90, 2, ink);
-  walls.save('paper.png');
-}
-
 console.log('Building research levels...');
 blueprint();
-paper();
