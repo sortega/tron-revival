@@ -24,6 +24,8 @@ import type { HandView } from './hand';
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
+/** Width / height of the canvas: what a full-screen layout leaves beside it follows from this. */
+export const CANVAS_ASPECT = CANVAS_WIDTH / CANVAS_HEIGHT;
 const STATUS_WIDTH = 50;
 const PLAYER_HEAD_SIZE = 1;
 

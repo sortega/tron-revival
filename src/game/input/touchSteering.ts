@@ -2,13 +2,12 @@
 
 import { TURN_SPEED } from '../TronPlayer';
 
-export type TouchMode = 'buttons' | 'heading' | 'swipe' | 'classic';
+export type TouchMode = 'buttons' | 'heading' | 'classic';
 
-export const TOUCH_MODES: readonly TouchMode[] = ['buttons', 'heading', 'swipe', 'classic'];
+export const TOUCH_MODES: readonly TouchMode[] = ['buttons', 'heading', 'classic'];
 export const TOUCH_MODE_LABELS: Record<TouchMode, string> = {
   buttons: 'BUTTONS',
   heading: 'POINT',
-  swipe: 'SWIPE',
   classic: 'STICK',
 };
 export const DEFAULT_TOUCH_MODE: TouchMode = 'buttons';
@@ -19,11 +18,7 @@ export const HEADING_GAIN = 3;
 export const HEADING_DEADZONE = 14;
 /** `heading` mode: the stick centre follows the thumb beyond this distance (px). */
 export const HEADING_RADIUS = 50;
-/** `swipe` mode: degrees turned per pixel dragged. */
-export const SWIPE_DEGREES_PER_PX = 1.2;
-/** `swipe` mode: the target never gets further than this from the current heading. */
-export const SWIPE_MAX_LEAD = 170;
-/** `classic` mode: stick travel (px) and response curve. */
+/** `classic` mode: stick travel (px) at its full size, and response curve. */
 export const CLASSIC_TRAVEL = 45;
 const CLASSIC_EXPONENT = 2.5;
 

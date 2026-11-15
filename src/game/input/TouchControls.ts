@@ -1,11 +1,10 @@
-// On-screen steering for touch devices: four selectable modes.
+// On-screen steering for touch devices: three selectable modes, and the action button.
 // See design/touch-controls.md.
 
 import nipplejs from 'nipplejs';
 import {
-  DEFAULT_TOUCH_MODE, HEADING_DEADZONE, HEADING_RADIUS, SWIPE_DEGREES_PER_PX, SWIPE_MAX_LEAD,
-  TOUCH_MODES, TOUCH_MODE_LABELS,
-  angleDiff, classicSteer, steerTowards,
+  CLASSIC_TRAVEL, DEFAULT_TOUCH_MODE, HEADING_DEADZONE, HEADING_RADIUS, TOUCH_MODES, TOUCH_MODE_LABELS,
+  classicSteer, steerTowards,
 } from './touchSteering';
 import type { TouchMode } from './touchSteering';
 
@@ -13,7 +12,6 @@ const STORAGE_KEY = 'teratron-touch-mode';
 const HINTS: Record<TouchMode, string> = {
   buttons: '',
   heading: 'drag towards where you want to go',
-  swipe: 'swipe left / right to turn',
   classic: '',
 };
 
@@ -39,19 +37,18 @@ export class TouchControls {
   private readonly fingers = new Map<number, number>();
   private pads: HTMLElement | null = null;
 
-  // `heading` and `swipe`: the finger that steers, and the heading to turn to
+  // `heading`: the finger that steers, and the heading to turn to
   private steerTouch: number | null = null;
   private originX = 0;
   private originY = 0;
-  private lastX = 0;
   private target: number | null = null;
-  private lastHeading: number | null = null;
   private stick: HTMLElement | null = null;
   private knob: HTMLElement | null = null;
 
   // `classic`
   private joystick: nipplejs.JoystickManager | null = null;
   private classicValue = 0;
+  private classicSize = 0;
 
   constructor(
     private readonly zone: HTMLElement,
@@ -70,7 +67,14 @@ export class TouchControls {
     actionButton.addEventListener('touchcancel', this.handleActionEnd);
 
     modeButton?.addEventListener('click', this.handleModeClick);
+    window.addEventListener('resize', this.handleResize);
     this.build();
+  }
+
+  /** What a press of the action button does right now; `enabled` false dims it. */
+  showAction(label: string, enabled: boolean): void {
+    if (this.actionButton.textContent !== label) this.actionButton.textContent = label;
+    this.actionButton.classList.toggle('idle', !enabled);
   }
 
   getMode(): TouchMode {
@@ -86,7 +90,6 @@ export class TouchControls {
    * null when there is nothing to steer (not playing, dead).
    */
   getSteer(heading: number | null): number {
-    this.lastHeading = heading;
     switch (this.mode) {
       case 'buttons': {
         const mid = this.padsCentre();
@@ -100,19 +103,7 @@ export class TouchControls {
       case 'classic':
         return this.classicValue;
       case 'heading':
-      case 'swipe': {
-        if (heading === null) {
-          // A turn left over from a previous round must not carry into the next one
-          if (this.mode === 'swipe') this.target = null;
-          return 0;
-        }
-        if (this.target === null) return 0;
-        const steer = steerTowards(heading, this.target);
-        if (this.mode === 'swipe' && this.steerTouch === null && Math.abs(angleDiff(heading, this.target)) < 0.5) {
-          this.target = null; // Flick completed
-        }
-        return steer;
-      }
+        return heading === null || this.target === null ? 0 : steerTowards(heading, this.target);
     }
   }
 
@@ -161,19 +152,23 @@ export class TouchControls {
       const joystickZone = document.createElement('div');
       joystickZone.className = 'joystick-zone';
       this.zone.appendChild(joystickZone);
+      // As large as the zone the layout leaves it (the margin beside the arena)
+      const size = Math.max(40, joystickZone.getBoundingClientRect().width - 10);
+      this.classicSize = size;
       this.joystick = nipplejs.create({
         zone: joystickZone,
         mode: 'static',
         position: { left: '50%', top: '50%' },
         color: '#0ff',
-        size: 90,
+        size,
         restOpacity: 0.7,
         lockX: true,
       });
       this.joystick.on('move', (_evt, data) => {
         const distance = data.distance ?? 0;
         const angle = data.angle?.degree ?? 0;
-        this.classicValue = classicSteer(Math.cos((angle * Math.PI) / 180) * distance);
+        // (a smaller stick has less travel: the same share of it is the same steer)
+        this.classicValue = classicSteer(Math.cos((angle * Math.PI) / 180) * distance * CLASSIC_TRAVEL / (size / 2));
       });
       this.joystick.on('end', () => {
         this.classicValue = 0;
@@ -216,9 +211,9 @@ export class TouchControls {
         this.fingers.set(touch.identifier, touch.clientX);
       } else if (this.steerTouch === null) {
         this.steerTouch = touch.identifier;
-        this.originX = this.lastX = touch.clientX;
+        this.originX = touch.clientX;
         this.originY = touch.clientY;
-        if (this.mode === 'heading') this.showStick(touch.clientX, touch.clientY);
+        this.showStick(touch.clientX, touch.clientY);
       }
     }
     this.showPads();
@@ -231,8 +226,7 @@ export class TouchControls {
       if (this.mode === 'buttons') {
         if (this.fingers.has(touch.identifier)) this.fingers.set(touch.identifier, touch.clientX);
       } else if (touch.identifier === this.steerTouch) {
-        if (this.mode === 'heading') this.moveHeading(touch.clientX, touch.clientY);
-        else this.moveSwipe(touch.clientX);
+        this.moveHeading(touch.clientX, touch.clientY);
       }
     }
     this.showPads();
@@ -244,10 +238,8 @@ export class TouchControls {
       this.fingers.delete(touch.identifier);
       if (touch.identifier === this.steerTouch) {
         this.steerTouch = null;
-        if (this.mode === 'heading') {
-          this.target = null; // Releasing = straight on
-          if (this.stick) this.stick.style.display = 'none';
-        }
+        this.target = null; // Releasing = straight on
+        if (this.stick) this.stick.style.display = 'none';
       }
     }
     this.showPads();
@@ -272,27 +264,22 @@ export class TouchControls {
     this.showStick(x, y);
   }
 
-  // Horizontal distance dragged = angle to turn
-  private moveSwipe(x: number): void {
-    const delta = (x - this.lastX) * SWIPE_DEGREES_PER_PX;
-    this.lastX = x;
-    if (this.lastHeading === null) return;
-    const lead = this.target === null ? 0 : angleDiff(this.lastHeading, this.target);
-    const newLead = Math.max(-SWIPE_MAX_LEAD, Math.min(SWIPE_MAX_LEAD, lead + delta));
-    this.target = (this.lastHeading + newLead + 360) % 360;
-  }
-
   private handleActionStart = (e: TouchEvent): void => {
     e.preventDefault();
     this.action = true;
-    this.actionButton.style.transform = 'scale(0.9)';
-    this.actionButton.style.opacity = '1';
+    this.actionButton.classList.add('active');
   };
 
   private handleActionEnd = (): void => {
     this.action = false;
-    this.actionButton.style.transform = 'scale(1)';
-    this.actionButton.style.opacity = '0.7';
+    this.actionButton.classList.remove('active');
+  };
+
+  // The stick is sized by the layout: build it again when that changes
+  private handleResize = (): void => {
+    if (this.mode !== 'classic') return;
+    const zone = this.zone.querySelector('.joystick-zone');
+    if (zone && Math.abs(zone.getBoundingClientRect().width - 10 - this.classicSize) > 1) this.build();
   };
 
   private handleModeClick = (): void => {
@@ -311,5 +298,6 @@ export class TouchControls {
     this.actionButton.removeEventListener('touchend', this.handleActionEnd);
     this.actionButton.removeEventListener('touchcancel', this.handleActionEnd);
     this.modeButton?.removeEventListener('click', this.handleModeClick);
+    window.removeEventListener('resize', this.handleResize);
   }
 }

@@ -6,7 +6,7 @@ import type { GameConfig, TronGameStateData, SoundEvent, RoundPhase } from '../t
 import type { SlotIndex } from '../types/lobby';
 import { LEVELS } from '../types/game';
 import { TICK_RATE } from './constants';
-import { TronRenderer } from './TronRenderer';
+import { CANVAS_ASPECT, TronRenderer } from './TronRenderer';
 import { InputManager, isTouchDevice, isIOS } from './input/InputManager';
 import { CONTROL_SCHEMES } from './input/controlSchemes';
 import type { InputBinding } from './input/InputManager';
@@ -44,6 +44,10 @@ export class TronGame implements Screen {
 
   // Double-tap detection for mobile FPS toggle
   private lastTapTime: number = 0;
+  // Phone layout: the player the on-screen controls drive, and the handler that measures
+  // the margins beside the canvas
+  private touchSlot: SlotIndex | null = null;
+  private mobileLayoutHandler: (() => void) | null = null;
 
   // `?botdebug=...`: the bots' territory map over the arena
   private botDebug: TerritoryOverlay | null = TerritoryOverlay.fromUrl(location.search);
@@ -121,6 +125,7 @@ export class TronGame implements Screen {
       const actionButton = document.getElementById('actionButton');
       if (steerZone && actionButton) {
         const slot = bindings[0].slot;
+        this.touchSlot = slot;
         this.input.initTouchControls(
           slot, steerZone, actionButton, document.getElementById('touchModeBtn'),
           () => this.steerableHeading(slot),
@@ -362,8 +367,8 @@ export class TronGame implements Screen {
           z-index: 10;
         }
         .control-zone-right {
-          right: 5px;
-          bottom: 5px;
+          right: 6px;
+          bottom: 8px;
         }
         .steer-zone {
           position: absolute;
@@ -385,14 +390,17 @@ export class TronGame implements Screen {
         }
         .steer-pads {
           position: absolute;
-          left: 8px;
+          left: 6px;
           bottom: 8px;
           display: flex;
-          gap: 10px;
+          gap: 6px;
           pointer-events: none;
         }
-        .steer-pad {
-          width: 84px;
+        /* The on-screen controls live in the margin beside the canvas (--side, measured by
+           layoutMobile) and shrink with it down to a minimum; only then do they overlap
+           the arena. See design/touch-controls.md */
+        .steer-pad, .action-button {
+          width: clamp(52px, calc((var(--side) - 18px) / 2), 84px);
           height: 84px;
           border-radius: 14px;
           background: rgba(0, 255, 255, 0.12);
@@ -402,8 +410,9 @@ export class TronGame implements Screen {
           display: flex;
           align-items: center;
           justify-content: center;
+          box-sizing: border-box;
         }
-        .steer-pad.active {
+        .steer-pad.active, .action-button.active {
           background: rgba(0, 255, 255, 0.4);
           border-color: #0ff;
         }
@@ -427,15 +436,16 @@ export class TronGame implements Screen {
           position: absolute;
           left: 5px;
           bottom: 5px;
-          width: 100px;
-          height: 100px;
-          background: rgba(0, 255, 255, 0.15);
+          width: clamp(72px, calc(var(--side) - 10px), 100px);
+          aspect-ratio: 1;
+          background: rgba(0, 255, 255, 0.12);
           border-radius: 50%;
           border: 2px solid rgba(0, 255, 255, 0.4);
         }
         .touch-mode-button {
           position: absolute;
-          top: 5px;
+          top: 42px;
+          left: 5px;
           height: 32px;
           padding: 0 8px;
           font-family: monospace;
@@ -447,22 +457,18 @@ export class TronGame implements Screen {
           z-index: 100;
           cursor: pointer;
         }
+        /* (the rest of its looks are the steering pads') */
         .action-button {
-          width: 60px;
-          height: 60px;
-          border-radius: 50%;
-          background: rgba(0, 255, 0, 0.25);
-          border: 3px solid rgba(0, 255, 0, 0.6);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #0f0;
+          width: clamp(60px, calc(var(--side) - 12px), 84px);
           font-family: monospace;
-          font-size: 0.6rem;
+          font-size: 0.7rem;
           font-weight: bold;
-          text-shadow: 0 0 5px #0f0;
-          opacity: 0.8;
-          transition: transform 0.1s, opacity 0.1s;
+          line-height: 1.2;
+          text-align: center;
+          transition: opacity 0.15s;
+        }
+        .action-button.idle {
+          opacity: 0.35;
         }
         .canvas-container {
           position: absolute;
@@ -622,7 +628,7 @@ export class TronGame implements Screen {
           <!-- Top buttons -->
           <button id="backBtn" class="back-button-mobile">✕</button>
           ${this.options.onBackToLobby ? '<button id="lobbyBtn" class="back-button-mobile" style="left: 42px; color: #fc4; border-color: #fc4;" title="Back to lobby">⌂</button>' : ''}
-          <button id="touchModeBtn" class="touch-mode-button" style="left: ${this.options.onBackToLobby ? 84 : 47}px;" title="Steering mode"></button>
+          <button id="touchModeBtn" class="touch-mode-button" title="Steering mode"></button>
           <button id="muteBtn" class="top-button mute-button">${soundManager.isMuted() ? '🔇' : '🔊'}</button>
           <button id="fullscreenBtn" class="top-button fullscreen-button">⛶</button>
 
@@ -658,6 +664,27 @@ export class TronGame implements Screen {
     // Initialize renderer (mobile fullscreen mode)
     const canvasContainer = document.getElementById('gameCanvas')!;
     this.renderer = new TronRenderer(canvasContainer, this.config.players, true);
+
+    // What is left of the screen on each side of the canvas: the room for the controls
+    const layout = this.container.querySelector<HTMLElement>('.mobile-game-layout')!;
+    this.mobileLayoutHandler = () => {
+      const side = Math.max(0, (layout.clientWidth - layout.clientHeight * CANVAS_ASPECT) / 2);
+      layout.style.setProperty('--side', `${side.toFixed(1)}px`);
+    };
+    this.mobileLayoutHandler();
+    window.addEventListener('resize', this.mobileLayoutHandler);
+  }
+
+  // The on-screen action button says what a press does now (design/touch-controls.md)
+  private showTouchAction(view: NonNullable<ReturnType<GameSession['getViewState']>>): void {
+    if (this.touchSlot === null || !this.input) return;
+    const slot = this.touchSlot;
+    if (view.round.phase === 'waiting_ready') {
+      this.input.showTouchAction(view.match.playersReady.includes(slot) ? 'NOT READY' : 'READY', true);
+    } else {
+      const alive = view.round.players.find(p => p.slotIndex === slot)?.alive === true;
+      this.input.showTouchAction('ACTION', view.round.phase === 'playing' && alive);
+    }
   }
 
   // One simulation tick
@@ -686,6 +713,8 @@ export class TronGame implements Screen {
       this.renderer.renderMessage('Waiting for host...');
       return;
     }
+
+    this.showTouchAction(view);
 
     // Load the level image when the level changes
     const levelIndex = view.match.currentLevelIndex;
@@ -850,6 +879,10 @@ export class TronGame implements Screen {
 
     this.input?.cleanup();
     this.input = null;
+    if (this.mobileLayoutHandler) {
+      window.removeEventListener('resize', this.mobileLayoutHandler);
+      this.mobileLayoutHandler = null;
+    }
 
     this.renderer?.destroy();
     this.renderer = null;

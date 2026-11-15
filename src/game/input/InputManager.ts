@@ -82,6 +82,11 @@ export class InputManager {
     this.touch = new TouchControls(steerZone, actionButton, modeButton);
   }
 
+  /** What the on-screen action button does right now (see TouchControls.showAction). */
+  showTouchAction(label: string, enabled: boolean): void {
+    this.touch?.showAction(label, enabled);
+  }
+
   private handleKeyDown = (e: KeyboardEvent): void => {
     if (!this.gameKeys.has(e.code)) return;
     // Don't steal keys while typing in a form field

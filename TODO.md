@@ -264,7 +264,10 @@ Design: `design/networking.md` (rewritten)
 Audit and design: `design/touch-controls.md`.
 
 - [x] Audit of the stick (tiny, `^2.5` curve, slower than keys; latency is not the cause)
-- [x] Four steering modes selectable in-game (🕹 button): BUTTONS, POINT, SWIPE, STICK
+- [x] Steering modes selectable in-game (🕹 button): BUTTONS, POINT, STICK (SWIPE removed)
+- [x] Controls sized by the margin beside the canvas so they stay off the arena (minimum
+      sizes on screens without margin); action button styled as the pads, labelled by what
+      a press does (ACTION / READY / NOT READY)
 - [x] Phone-emulation browser test (`npm run test:e2e:touch`)
 - [x] 1 s lock on "ready" after a round ends
 - [ ] **Play-test on a real phone**, pick a winner, tune it, remove the losers (and nipplejs
