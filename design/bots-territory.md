@@ -183,7 +183,8 @@ before exactly (`npm run bench:fingerprint -- --no-territory` matches the old ba
   headless Chrome.
 - **`?botdebug=1`** in the game URL (local game or host): the territory layer over the
   arena, with the cells each player owns and can reach; `?botdebug=risk`, `=clearance`; the
-  **B** key cycles the layers.
+  **B** key cycles the layers. With it the simulation runs on the page and not in the
+  worker, as the overlay reads it.
 
 ## Results
 

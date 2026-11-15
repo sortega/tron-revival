@@ -200,10 +200,13 @@ export class WorkerHostSession implements AuthoritativeSession {
 
 /**
  * The authoritative session of a local game, or of a network game when `transport` is
- * given: in a worker unless `?worker=0` or workers are unavailable.
+ * given: in a worker unless `?worker=0` or workers are unavailable. `?botdebug` also keeps
+ * it on the page: its overlay reads the simulation (design/bots-territory.md).
  */
 export function createHostSession(config: GameConfig, transport: HostTransport | null = null): AuthoritativeSession {
-  const off = new URLSearchParams(location.search).get('worker') === '0';
+  const params = new URLSearchParams(location.search);
+  const debug = params.get('botdebug');
+  const off = params.get('worker') === '0' || (debug !== null && debug !== '0');
   if (!off && typeof Worker !== 'undefined') {
     try {
       return new WorkerHostSession(config, transport);
