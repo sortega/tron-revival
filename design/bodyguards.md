@@ -28,8 +28,18 @@ Every `playing` tick each satellite gets a job, in this order of priority:
    In team mode team-mates are neither attacked nor harmed.
 3. **Orbit.**
 
-A satellite moves at up to 10 px per tick and never leaves the area of action (targets are
-clamped to it). Satellites freeze when the round ends and disappear with their owner.
+A satellite moves at up to 10 px per tick and its targets never leave the area of action
+(they are clamped to it).
+
+**Edges: the orbiting bug, on purpose.** A satellite knows nothing about the edges of the
+arena. When its target lies beyond one (the owner is near an edge, or has just gone
+through it), the target is the wrapped position on the other side, and the satellite
+flies there **straight across the screen** instead of taking the short way through the
+edge — about a second for the full width — and comes back the same way. This is how the
+owner remembers the original behaving (the `TRON.PRG` kept in `old-tron/` has no
+satellite to check against), and it is kept as a feature: while crossing, the satellite
+protects nobody and kills any enemy on its way; an owner hugging an edge has satellites
+that keep darting across the arena. Satellites freeze when the round ends and disappear with their owner.
 
 ## Contact
 

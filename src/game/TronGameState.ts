@@ -1992,23 +1992,26 @@ export class TronGameState {
     return d;
   }
 
-  // Move a satellite towards a position (shortest way round). Returns the path travelled,
-  // in pixels; its end may lie beyond an edge.
+  // Move a satellite towards a position. As in the original, it knows nothing about the
+  // edges: a target beyond one is the wrapped position on the other side of the arena,
+  // and the satellite flies to it straight across the screen instead of taking the
+  // short way through the edge (design/bodyguards.md). Returns the path travelled.
   private moveBodyguardToward(
     bg: Bodyguard, targetX: number, targetY: number
   ): { x0: number; y0: number; x1: number; y1: number } {
     const x0 = bg.x / 1000;
     const y0 = bg.y / 1000;
-    const dx = this.wrapDelta(targetX - x0, PLAY_WIDTH);
-    const dy = this.wrapDelta(targetY - y0, PLAY_HEIGHT);
+    const dx = ((targetX % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH - x0;
+    const dy = ((targetY % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT - y0;
     const dist = Math.hypot(dx, dy);
     if (dist < 0.001) return { x0, y0, x1: x0, y1: y0 };
 
     const step = Math.min(dist, this.BODYGUARD_SPEED / 1000);
     const x1 = x0 + (dx / dist) * step;
     const y1 = y0 + (dy / dist) * step;
-    bg.x = ((x1 + PLAY_WIDTH) % PLAY_WIDTH) * 1000;
-    bg.y = ((y1 + PLAY_HEIGHT) % PLAY_HEIGHT) * 1000;
+    // Float error at most: the target is inside the arena
+    bg.x = Math.min(PLAY_WIDTH - 0.001, Math.max(0, x1)) * 1000;
+    bg.y = Math.min(PLAY_HEIGHT - 0.001, Math.max(0, y1)) * 1000;
     return { x0, y0, x1, y1 };
   }
 

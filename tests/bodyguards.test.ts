@@ -224,3 +224,33 @@ describe('satellites under shotgun fire', () => {
     expect(destroyed).toBe(0);
   });
 });
+
+describe('satellites and the edges of the arena', () => {
+  it('fly across the screen to the wrapped position instead of through the edge, as in the original', () => {
+    const g = arena();
+    guardedOwner(g, 1, 20);
+    place(g, OWNER, 700, 300, 0);   // Heading for the right edge
+    const owner = g.players[OWNER]!;
+    let crossedMiddle = 0;
+    let wrapped = false;
+    let lastX = owner.getScreenX();
+    for (let i = 0; i < 400 && owner.alive; i++) {
+      g.tick(new Map());
+      g.items.length = 0;
+      g.serialize();
+      const x = owner.getScreenX();
+      if (x < lastX - 700) wrapped = true;
+      lastX = x;
+      const sat = g.getBodyguards()[0]!;
+      const sx = sat.x / 1000;
+      // The edge is between them, yet the satellite is in the middle of the screen
+      if (wrapped && sx > 200 && sx < 550) crossedMiddle++;
+      if (wrapped && x > 120) break;
+    }
+    expect(wrapped).toBe(true);
+    expect(crossedMiddle).toBeGreaterThan(10);
+    // And it gets there: back in orbit on the other side
+    const sat = g.getBodyguards()[0]!;
+    expect(Math.hypot(sat.x / 1000 - owner.getScreenX(), sat.y / 1000 - owner.getScreenY())).toBeLessThan(40);
+  });
+});

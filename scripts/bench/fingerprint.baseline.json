@@ -1,6 +1,6 @@
 {
-  "hard-normal-easy@bus": "state:68a20d57a0ab59c2 frames:5276836c512c48cd wire:c0ef753eff33fa02 rounds:3",
-  "4hard@cycle": "state:6c1f5b5caf8fe67a frames:b58ac698162d73c9 wire:998955a36f0daf52 rounds:4",
+  "hard-normal-easy@bus": "state:d8d9734165f2a497 frames:4e791a3b6f9b6df5 wire:3fab2f6e0783513e rounds:3",
+  "4hard@cycle": "state:8a32f8ef02244bf4 frames:26027ab3ba960d28 wire:b5a25d1449eee14b rounds:4",
   "normal-hard@portals": "state:04e16d4deb88262a frames:1c19e4451d36ebb6 wire:c8ba662023d06de5 rounds:4",
   "3normal+human@warzone": "state:9caa5ccfdadbc63a frames:6837b8a8905b9ec7 wire:07919270af8f346b rounds:2",
   "hard-easy@dentistry": "state:782173b865a2209f frames:cc92020cdbb16f81 wire:8ac443526a80c335 rounds:5",
