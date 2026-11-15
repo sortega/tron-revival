@@ -33,8 +33,6 @@ a real device
 ## Gameplay
 
 - [ ] Items can spawn hidden under a closed door (faithful, but maybe not fun)
-- [ ] Warzone / Portals contain nearly-black (e.g. `#010101`) pixels that are invisible but
-      solid: clean the images or use a brightness threshold
 - [ ] Match length setting
 - [ ] Keep scores across "back to lobby" (optional setting)
 - [ ] Gamepad support

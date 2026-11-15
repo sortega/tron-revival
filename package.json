@@ -10,6 +10,7 @@
     "deploy": "npm run build && gh-pages -d dist",
     "sprites": "npx tsx scripts/build-sprites.ts",
     "levels:research": "npx tsx scripts/build-research-levels.ts",
+    "levels:clean": "node scripts/clean-levels.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "sim": "SIM_REPORT=1 vitest run tests/bots.test.ts --silent=false",

@@ -138,6 +138,15 @@ a fallback when the file cannot be decoded. With `?perf=1` the readout shows how
 pixels the canvas read-back would have got wrong on this device. `tests/png.test.ts`
 checks the decoder against `pngjs` on every level.
 
+**No invisible walls.** The original maps carried fringes of nearly-black pixels around
+their walls (anti-aliasing and shadows: 27 000 pixels on Warzone, 11 500 on Portals, a
+few thousand on four others), solid but impossible to see. `npm run levels:clean`
+(`scripts/clean-levels.mjs`) turns into pure black every pixel whose brightest channel is
+below 32 and that touches free space, directly or through other such pixels; dark pixels
+shut inside a wall stay, so that walls get no pin-holes. The level images in the
+repository are the cleaned ones (the five palette images were written back as palette
+PNGs with ImageMagick, checked pixel for pixel); a test keeps them clean.
+
 ## Multiplayer in one paragraph
 
 The host simulates; guests send sequence-numbered inputs and receive a compact state every
