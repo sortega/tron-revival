@@ -288,3 +288,9 @@ Method, numbers and recommendations: `design/research/performance.md`.
 - [ ] Host migration
 - [ ] Gamepad support
 - [ ] Spectator-friendly late join (full trail snapshot)
+
+## Bugs found on devices
+- [x] iOS Safari: a player died at once "crashing into the scenery" on the Blank level.
+      Level obstacles are now decoded from the PNG file instead of read back from a canvas
+      (suspected cause: Safari's noise on canvas read-backs; to confirm on the phone with
+      `?perf=1`, line "canvas read-back off by N px")

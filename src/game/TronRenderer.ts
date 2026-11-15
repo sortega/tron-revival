@@ -1,5 +1,6 @@
 // TronRenderer - Canvas rendering for the Tron game
 
+import { decodePng } from './png';
 import type { GameMode, SlotIndex } from '../types/lobby';
 import { FFA_COLORS, TEAM_COLORS, getSlotColor, getSlotColorName } from '../types/lobby';
 import { NO_OWNER } from '../types/game';
@@ -473,13 +474,39 @@ export class TronRenderer {
       this.doorImage = doorImage;
     }
 
-    // Read the obstacles from a scratch canvas (the level canvas may be showing a
-    // damaged level, or be hidden behind a snapshot)
+    if (!this.levelHidden) this.drawLevelImage();
+
+    // The obstacles are the pixels of the file, decoded here. Reading them back from a
+    // canvas is not exact everywhere: Safari adds noise to canvas read-backs, which put
+    // stray obstacles on black ground (see png.ts)
+    let obstacles: PixelGrid | null = null;
+    try {
+      const response = await fetch(level.imagePath);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const decoded = await decodePng(new Uint8Array(await response.arrayBuffer()));
+      if (decoded.width !== PLAY_WIDTH || decoded.height !== PLAY_HEIGHT) throw new Error('unexpected size');
+      obstacles = PixelGrid.fromRgba(decoded.rgba);
+    } catch (error) {
+      console.warn(`Level ${level.id}: reading obstacles from the canvas instead (${String(error)})`);
+    }
+    if (!obstacles || this.checkCanvasReadback) {
+      const fromCanvas = this.obstaclesFromCanvas(img);
+      if (!obstacles) return fromCanvas;
+      this.canvasReadbackDifference = obstacles.differenceFrom(fromCanvas);
+    }
+    return obstacles;
+  }
+
+  /** `?perf=1`: also read the level back from a canvas and count how far off it is. */
+  checkCanvasReadback = false;
+  /** Pixels that are an obstacle in only one of file and canvas read-back (last level). */
+  canvasReadbackDifference: number | null = null;
+
+  // Fallback (no DecompressionStream, unusual PNG): the image as a canvas reports it
+  private obstaclesFromCanvas(img: HTMLImageElement): PixelGrid {
     this.tintCtx.globalCompositeOperation = 'copy';
     this.tintCtx.drawImage(img, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    const imageData = this.tintCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    if (!this.levelHidden) this.drawLevelImage();
-    return PixelGrid.fromRgba(imageData.data);
+    return PixelGrid.fromRgba(this.tintCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT).data);
   }
 
   // The dentist's hand hides what is under it, unless a player is there

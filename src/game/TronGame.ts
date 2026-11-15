@@ -233,6 +233,7 @@ export class TronGame implements Screen {
     // (design/research/performance.md)
     const perf = new URLSearchParams(location.search).has('perf');
     if (perf) {
+      if (this.renderer) this.renderer.checkCanvasReadback = true;
       perfEnable();
       this.showPerfHud();
     }
@@ -815,6 +816,8 @@ export class TronGame implements Screen {
         for (const phase of ['bots', 'sim', 'serialize']) text += row(remote ? `w.${phase}` : phase, sim[phase]);
         for (const phase of ['events', 'render', 'frame', 'workerLag']) text += row(phase, main[phase]);
         text += `dropped ticks: ${remote ? remote.droppedTicks : perfCounter('droppedTicks')}`;
+        const off = this.renderer?.canvasReadbackDifference;
+        if (off !== null && off !== undefined) text += `\ncanvas read-back off by ${off} px`;
         hud.textContent = text;
       });
     }, 1000);

@@ -189,6 +189,15 @@ export class PixelGrid {
     }
   }
 
+  /** Number of pixels occupied in exactly one of this grid and `other`. */
+  differenceFrom(other: PixelGrid): number {
+    let n = 0;
+    for (let i = 0; i < this.cells.length; i++) {
+      if ((this.cells[i] !== 0) !== (other.cells[i] !== 0)) n++;
+    }
+    return n;
+  }
+
   /** Replace the contents of this grid with a copy of another. */
   copyFrom(other: PixelGrid): void {
     this.palette = [...other.palette];

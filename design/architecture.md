@@ -105,6 +105,17 @@ player responsible, which can be the victim:
 | `crossing` | the other player | *head-on collision with Ana* |
 | `own-trail`, `level`, `door` | — | *crashed into their own trail*, … |
 
+### Levels
+
+A level is one 750×600 PNG: it is drawn as the background, and every pixel of it that is
+not pure black is an obstacle of that colour. The obstacle grid is **decoded from the
+file** (`src/game/png.ts`, a small decoder using `DecompressionStream`), not read back
+from a canvas: browsers may alter canvas read-backs (Safari adds noise as a fingerprinting
+protection), and a single off-black pixel is a wall. Reading from a canvas remains only as
+a fallback when the file cannot be decoded. With `?perf=1` the readout shows how many
+pixels the canvas read-back would have got wrong on this device. `tests/png.test.ts`
+checks the decoder against `pngjs` on every level.
+
 ## Multiplayer in one paragraph
 
 The host simulates; guests send sequence-numbered inputs and receive a compact state every
