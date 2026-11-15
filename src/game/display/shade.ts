@@ -23,13 +23,14 @@ export interface ShadeStyle {
   scale: number;
   /** Fringe around trails, from the trail outwards. Empty: none. */
   bands: readonly FringeBand[];
-  /** Draw the dark trail colours (blue, purple) lighter. */
-  boost: boolean;
-  /** Walls cast a shadow down-right. */
-  wallShadow: boolean;
+  /**
+   * Soft shade: the opacity of a fringe pixel is not the band's but the sum of these for
+   * every trail pixel touching it (side by side / corner to corner), up to `max`. A pixel
+   * in the notch of a staircase touches more trail than one beside a straight line, so
+   * slanted trails are smoothed more than they are thickened. Needs one band of width 1.
+   */
+  soft?: { orthogonal: number; diagonal: number; max: number };
 }
-
-const SHADOW = packRgba(0, 0, 0, 120);
 
 export function packRgba(r: number, g: number, b: number, a = 255): number {
   return ((a << 24) | (b << 16) | (g << 8) | r) >>> 0;
@@ -56,17 +57,6 @@ export function luminance(packed: number): number {
     return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   };
   return 0.2126 * lin(packed & 255) + 0.7152 * lin((packed >> 8) & 255) + 0.0722 * lin((packed >> 16) & 255);
-}
-
-/** Trail colours darker than this are lightened by `boost`. */
-export const BOOST_BELOW = 0.15;
-const BOOST_MIX = 0.3;
-
-/** The colour a trail of the given colour is drawn in. */
-export function trailColor(style: ShadeStyle, packed: number): number {
-  if (!style.boost || luminance(packed) >= BOOST_BELOW) return packed;
-  const mix = (v: number): number => Math.round(v + (255 - v) * BOOST_MIX);
-  return packRgba(mix(packed & 255), mix((packed >> 8) & 255), mix((packed >> 16) & 255), packed >>> 24);
 }
 
 /** Packed colour of a fringe band next to a trail drawn in the given packed colour. */
@@ -201,7 +191,7 @@ export function shadeCells(
   const bands = style.bands;
   const reach = fringeWidth(style);
   const R = fringeCells(style);   // Cells to look around (7×7 at most)
-  const shadowWidth = Math.ceil(S / 2);
+  const soft = style.soft;
 
   // Band colours of the trail colour seen last (trails come in long same-coloured runs)
   let cachedFor = -1;
@@ -210,7 +200,7 @@ export function shadeCells(
   const prepare = (c: number): void => {
     if (c === cachedFor) return;
     cachedFor = c;
-    cachedCore = trailColor(style, c);
+    cachedCore = c;
     for (let b = 0; b < bands.length; b++) cachedBands[b] = bandColor(bands[b]!, cachedCore);
   };
 
@@ -295,12 +285,7 @@ export function shadeCells(
         const d = u > 0 ? trailWithin(kind, i, W, 2 * R, H - 1 - y) : 0;
         if ((r > 0 && l + r - 1 <= 2 * R) || (d > 0 && u + d - 1 <= 2 * R)) near = 0;
       }
-      // Wall shadow, cast down-right: walls up, left and up-left
-      const wallL = style.wallShadow && x > 0 && kind[i - 1] === KIND_LEVEL;
-      const wallU = style.wallShadow && y > 0 && kind[i - W] === KIND_LEVEL;
-      const wallUL = style.wallShadow && x > 0 && y > 0 && kind[i - W - 1] === KIND_LEVEL;
-
-      if (near === 0 && !wallL && !wallU && !wallUL) {
+      if (near === 0) {
         for (let sy = 0; sy < S; sy++) {
           const o = base + sy * stride;
           for (let sx = 0; sx < S; sx++) {
@@ -309,6 +294,17 @@ export function shadeCells(
           }
         }
         continue;
+      }
+
+      // Soft shade: how much trail touches this cell
+      let softAlpha = 0;
+      if (soft) {
+        let sum = 0;
+        for (let t = 0; t < near; t++) {
+          if (Math.abs(nearDx[t]!) > 1 || Math.abs(nearDy[t]!) > 1) continue;
+          sum += nearDx[t] === 0 || nearDy[t] === 0 ? soft.orthogonal : soft.diagonal;
+        }
+        softAlpha = Math.round(255 * Math.min(soft.max, sum));
       }
 
       for (let sy = 0; sy < S; sy++) {
@@ -340,11 +336,9 @@ export function shadeCells(
               }
             }
           }
+          if (soft && pixel !== 0) pixel = ((pixel & 0x00ffffff) | (softAlpha << 24)) >>> 0;
           outTrail[o + sx] = pixel;
-
-          const shadow = (wallL && sx < shadowWidth) || (wallU && sy < shadowWidth)
-            || (wallUL && sx < shadowWidth && sy < shadowWidth);
-          outLevel[o + sx] = shadow ? SHADOW : 0;
+          outLevel[o + sx] = 0;
         }
       }
     }

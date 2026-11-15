@@ -255,31 +255,19 @@ Audit and design: `design/touch-controls.md`.
 
 ## Display layer (research/display-shading)
 
-Design, measurements and recommendation: `design/display-layer.md`; screenshots in
-`design/research/display-shading/`.
+Design: `design/display-layer.md`.
 
 - [x] Display bitmap separate from the collision bitmap (`src/game/display/`); shade is
       derived, so erasing cannot leave ghosts (unit-tested against a from-scratch derivation)
 - [x] Levels can have a display-only background (`backgroundFile`); new levels Blueprint
       (dark navy) and Paper (light)
-- [x] First round (seven variants, half-pixel fringe) tried by the owner on an iPhone: no
-      visible difference between the trail options — half a logical pixel is one device
-      pixel there. Reworked:
-- [x] Trail shade `?shade=auto|off|thin|bold|wide`: `bold` is a full logical pixel per
-      side; `auto` = `bold` on phones, `thin` on desktops. Gaps between trails are never
-      shaded shut (rule in the derivation, tested)
-- [x] Heads: solid white pixel + white transparent halo, `?head=auto|ring|soft|wide`
-      (dark halo on light levels); no `shadowBlur`
-- [x] Extras `?fx=tracer,boost,shadow,fade`: tracer streak, lighter blue/purple
-- [x] `?displaydebug=1`: on-screen chips to cycle the variants on a phone; keys 1/2/3
-- [x] `tools/display-lab.mjs`: phone pictures at true device-pixel scale and at physical
-      size, render cost, checks
-- [ ] **Owner: second look on the iPhone** — `?displaydebug=1`, compare `off` / `bold` /
-      `wide` and the halos, confirm or change the default
-- [ ] Remove the variants that lose, the 1/2/3 keys and the chips once a default is chosen
-- [ ] Provisional (predicted) trail pixels of a guest get unclipped shade until the host
-      confirms them
-- [ ] `fade` extra has not been watched in motion
+- [x] Two rounds of selectable shade / halo / extras variants tried by the owner on an
+      iPhone and scrapped (variants, URL parameters, chips, keys, lab tool, pictures)
+- [x] One look: hard 1 px trail softened by semi-transparent pixels of its colour (more in
+      the notches of slanted trails); head = solid white pixel with a faint twinkling glow
+- [ ] **Owner: look at it on the iPhone**; tune the opacities in `display/settings.ts` and
+      the twinkle in `TronRenderer.drawPlayerHead`
+- [ ] Remove what the derivation no longer needs (several bands, 2× layers)
 - [ ] Lock-border pixels in a rejoin snapshot are taken for trails (same colour as the player)
 - [ ] Paper: decide whether a light level stays in the cycle; item sprites with a white
       box look pasted on it
