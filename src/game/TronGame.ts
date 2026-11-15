@@ -67,7 +67,8 @@ export class TronGame implements Screen {
 
   // Network games: last rendered state of the join badge / spectator bar (design/spectators.md)
   private roomUiKey = '';
-  private showJoinQr: boolean = localStorage.getItem('showJoinQr') === 'true';
+  private roomUiPhase: RoundPhase | null = null;
+  private showJoinQr = false;   // The QR code is shown only while asked for (a click on the room code)
   private readonly resizeRoomUi = (): void => this.updateRoomUi(true);
   // One listener for the buttons of the join badge and the seat bar, which are
   // re-rendered as the audience changes
@@ -81,7 +82,6 @@ export class TronGame implements Screen {
     else if (id === 'stay') room.stayIn();
     else if (id === 'qr') {
       this.showJoinQr = !this.showJoinQr;
-      localStorage.setItem('showJoinQr', this.showJoinQr ? 'true' : 'false');
     }
     this.updateRoomUi(true);
   };
@@ -332,7 +332,8 @@ export class TronGame implements Screen {
     const me = playing ? (audience.me === 'leaving' ? 'leaving' : 'playing')
       : audience.me === 'waiting' ? 'waiting'
         : audience.me === 'joining' || audience.me === 'playing' ? 'joining' : 'watching';
-    const key = JSON.stringify([audience.spectators, me, audience.queuePosition, this.showJoinQr, window.innerWidth, window.innerHeight]);
+    const phase = this.session.getViewState()?.round.phase;
+    const key = JSON.stringify([audience.spectators, me, audience.queuePosition, this.showJoinQr, phase === 'waiting_ready', window.innerWidth, window.innerHeight]);
     if (key === this.roomUiKey && !force) return;
     this.roomUiKey = key;
 
@@ -343,7 +344,11 @@ export class TronGame implements Screen {
 
     // --- What this user can do about their seat ---
     let seat = '';
-    if (me === 'watching') {
+    const betweenRounds = this.session.getViewState()?.round.phase === 'waiting_ready';
+    if (me === 'playing' && betweenRounds) {
+      // On the round summary: the moment to stop
+      seat = button('watch', '👁 WATCH THE NEXT ROUND', '#8cf');
+    } else if (me === 'watching') {
       seat = `<span id="spectatorLabel" style="color: #8cf;">👁 SPECTATING</span> ${button('ask', 'PLAY NEXT ROUND', '#0f0')}`;
     } else if (me === 'joining') {
       seat = `<span id="spectatorLabel" style="color: #0c8;">You play from the next round</span> ${button('cancel', 'CANCEL', '#fa0')}`;
@@ -364,53 +369,49 @@ export class TronGame implements Screen {
     // --- How to join ---
     const count = `<span id="watchCount" title="Spectators">👁 ${audience.spectators}</span>`;
     const badge = document.getElementById('joinBadge');
-    const corner = document.getElementById('joinCorner');
     if (!badge) return;
     // Where to type the code: the address of the game without the room parameter
     const site = room.link.replace(/^https?:\/\//, '').replace(/\?.*$/, '').replace(/\/$/, '');
+    const qrBox = (size: string): string => `<div style="background: #fff; padding: 6px; border-radius: 3px; margin-bottom: 4px;
+      width: ${size}; box-sizing: border-box;">${qrSvg(room.link)}</div>`;
     if (!touch) {
-      // Desktop: text in the header; the QR in the page margin when there is one,
-      // otherwise in a pop-over opened from the badge
-      const canvas = this.container.querySelector('canvas');
-      const margin = canvas ? (window.innerWidth - canvas.getBoundingClientRect().width) / 2 : 0;
-      const inCorner = margin >= 130;
+      // Desktop: the code in the header; a click on it opens the QR in a pop-over
+      // (it covers the top of the arena while it is open)
       badge.innerHTML = `
         <button data-room-action="qr" title="Show a QR code to join this room" style="
           padding: 0.4rem 0.7rem; font-family: monospace; cursor: pointer; background: #010; color: #0f0;
           border: 1px solid #063; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
           <span style="color: #888;">JOIN</span> <span id="joinCode">${escapeHtml(room.code)}</span> · ${count}
         </button>
-        ${this.showJoinQr && !inCorner ? `<div id="joinQrPop" style="position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+        ${this.showJoinQr ? `<div id="joinQrPop" style="position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
           z-index: 50; margin-top: 6px; background: #111; border: 1px solid #063; padding: 8px; border-radius: 4px; width: 176px;
           font-family: monospace; font-size: 0.7rem; color: #888; word-break: break-all;">
-          <div style="background: #fff; padding: 6px; border-radius: 3px; margin-bottom: 4px;">${qrSvg(room.link)}</div>
+          ${qrBox('100%')}
           <span id="joinSite">${escapeHtml(site)}</span></div>` : ''}`;
-      if (corner) {
-        corner.style.display = inCorner ? '' : 'none';
-        if (inCorner && !corner.innerHTML) {
-          corner.innerHTML = `<div style="background: #fff; padding: 6px; border-radius: 4px;">${qrSvg(room.link)}</div>
-            <div style="color: #0f0; margin-top: 4px;">${escapeHtml(room.code)}</div>
-            <div style="color: #666; font-size: 0.7rem;">scan, or join with this code at</div>
-            <div id="joinSite" style="color: #888; font-size: 0.7rem; word-break: break-all;">${escapeHtml(site)}</div>`;
-        }
-      }
     } else {
-      // Phone: in the right-hand margin beside the 4:3 canvas, when there is one
+      // Phone: the code in the right-hand margin beside the 4:3 canvas when there is one,
+      // otherwise on one small line among the top buttons. A tap on it opens the QR
       const margin = Math.max(0, (window.innerWidth - (window.innerHeight * 4) / 3) / 2);
-      const qrSize = Math.min(96, Math.floor(margin - 14));
-      if (margin >= 70) {
-        badge.style.cssText = `position: absolute; right: 5px; top: 44px; width: ${Math.floor(margin - 10)}px; z-index: 5;
-          text-align: center; font-family: monospace; font-size: 0.65rem; color: #0f0; pointer-events: none;`;
+      const inMargin = margin >= 70;
+      const pop = this.showJoinQr ? `<div id="joinQrPop" data-room-action="qr" style="position: fixed; left: 50%; top: 50%;
+        transform: translate(-50%, -50%); z-index: 150; background: #111; border: 1px solid #063; padding: 10px; border-radius: 6px;
+        width: min(60vh, 220px); font-family: monospace; font-size: 0.7rem; color: #888; text-align: center; word-break: break-all;">
+        ${qrBox('100%')}
+        <div style="color: #0f0;">${escapeHtml(room.code)}</div>
+        <span id="joinSite">${escapeHtml(site)}</span></div>` : '';
+      if (inMargin) {
+        badge.style.cssText = `position: absolute; right: 5px; top: 44px; width: ${Math.floor(margin - 10)}px; z-index: 105;
+          text-align: center; font-family: monospace; font-size: 0.65rem; color: #0f0;`;
         badge.innerHTML = `
-          ${qrSize >= 56 ? `<div id="joinQr" style="background: #fff; padding: 4px; border-radius: 3px; width: ${qrSize}px; margin: 0 auto 4px; box-sizing: border-box;">${qrSvg(room.link)}</div>` : ''}
-          <div id="joinCode" style="word-break: break-word;">${escapeHtml(room.code)}</div>
-          <div style="color: #8cf; margin-top: 2px;">${count}</div>`;
+          <div data-room-action="qr" style="border: 1px solid #063; border-radius: 4px; padding: 4px 2px; background: rgba(0, 16, 0, 0.6);">
+            <div id="joinCode" style="word-break: break-word;">${escapeHtml(room.code)}</div>
+            <div style="color: #8cf; margin-top: 2px;">${count}</div>
+          </div>${pop}`;
       } else {
-        // No margin (4:3 screens): one small line among the top buttons
-        badge.style.cssText = `position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 5;
-          font-family: monospace; font-size: 0.65rem; color: #0f0; background: rgba(0, 0, 0, 0.5); padding: 2px 6px;
-          border-radius: 3px; white-space: nowrap; pointer-events: none;`;
-        badge.innerHTML = `<span id="joinCode">${escapeHtml(room.code)}</span> · ${count}`;
+        badge.style.cssText = `position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 105;
+          font-family: monospace; font-size: 0.65rem; color: #0f0; white-space: nowrap;`;
+        badge.innerHTML = `<div data-room-action="qr" style="background: rgba(0, 0, 0, 0.5); padding: 2px 6px; border-radius: 3px;">
+          <span id="joinCode">${escapeHtml(room.code)}</span> · ${count}</div>${pop}`;
       }
       if (seatBar) {
         // Spectators have no controls: their bar takes the left margin (or the corner)
@@ -489,8 +490,6 @@ export class TronGame implements Screen {
         ">
           ${this.controlsHint()}
         </div>
-        ${this.options.room ? `<div id="joinCorner" style="display: none; position: fixed; right: 12px; bottom: 12px; width: 118px;
-          font-family: monospace; font-size: 0.8rem; text-align: center; word-break: break-word;"></div>` : ''}
       </div>
     `;
 
@@ -885,6 +884,11 @@ export class TronGame implements Screen {
     }
 
     this.showTouchAction(view);
+    // The seat buttons depend on whether a round is being played
+    if (view.round.phase !== this.roomUiPhase) {
+      this.roomUiPhase = view.round.phase;
+      this.updateRoomUi();
+    }
 
     // Load the level image when the level changes
     const levelIndex = view.match.currentLevelIndex;

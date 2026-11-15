@@ -177,16 +177,21 @@ try {
 
   // --- Join code on the game screen ---
   const badge = (await host.textContent('#joinCode')).trim();
-  const site = (await host.textContent('#joinSite')).trim();
-  check('game screen shows how to join', badge === code && baseUrl.includes(site), `${badge} at ${site}`);
+  check('game screen shows the room code', badge === code, badge);
   check('join badge counts no spectators yet', (await host.textContent('#watchCount')).includes('0'));
-  check('QR code beside the canvas (desktop, wide margin)', await host.locator('#joinCorner svg').count() === 1);
+  check('no QR code until it is asked for', await host.locator('#joinBadge svg, #joinQrPop').count() === 0);
   const overlap = await host.evaluate(() => {
     const canvas = document.querySelector('#gameCanvas canvas').getBoundingClientRect();
-    return ['#joinBadge', '#joinCorner'].map(s => document.querySelector(s).getBoundingClientRect())
-      .some(r => r.width > 0 && r.left < canvas.right && r.right > canvas.left && r.top < canvas.bottom && r.bottom > canvas.top);
+    const r = document.querySelector('#joinBadge').getBoundingClientRect();
+    return r.width > 0 && r.left < canvas.right && r.right > canvas.left && r.top < canvas.bottom && r.bottom > canvas.top;
   });
   check('join code does not cover the canvas', !overlap);
+  await host.click('[data-room-action=qr]');
+  const site = (await host.textContent('#joinSite')).trim();
+  check('a click on the code opens the QR and says where to join', await host.locator('#joinQrPop svg').count() === 1 && baseUrl.includes(site), site);
+  await shot(host, 'desktop-qr-popover');
+  await host.click('[data-room-action=qr]');
+  check('...and another closes it', await host.locator('#joinQrPop').count() === 0);
   check('guest has a WATCH button, no spectator bar', await visible(guest, '#watchBtn') && !(await visible(guest, '#seatBar')));
 
   // --- Host cost without spectators ---
@@ -223,13 +228,18 @@ try {
     const canvas = { left: (window.innerWidth - width) / 2, right: (window.innerWidth + width) / 2 };
     const rects = ['#joinBadge', '#seatBar'].map(s => document.querySelector(s).getBoundingClientRect());
     return {
-      qr: !!document.querySelector('#joinQr svg'),
+      qr: !!document.querySelector('#joinBadge svg'),
       code: document.querySelector('#joinCode')?.textContent,
       rects: rects.map(r => [Math.round(r.left), Math.round(r.right)]),
       overlap: rects.some(r => r.width > 0 && r.left < canvas.right - 1 && r.right > canvas.left + 1),
     };
   });
-  check('phone: room code and QR in the margin, off the canvas', phoneJoin.qr && phoneJoin.code === code && !phoneJoin.overlap, JSON.stringify(phoneJoin));
+  check('phone: room code in the margin, off the canvas, no QR', !phoneJoin.qr && phoneJoin.code === code && !phoneJoin.overlap, JSON.stringify(phoneJoin));
+  await phone.tap('#joinBadge [data-room-action=qr]');
+  check('phone: a tap on the code opens the QR', await phone.locator('#joinQrPop svg').count() === 1);
+  await shot(phone, 'phone-qr-popover');
+  await phone.tap('#joinQrPop');
+  check('phone: a tap on the QR closes it', await phone.locator('#joinQrPop').count() === 0);
   const spec2 = await newUser('Watchy');
   await spec2.goto(roomUrl);
   await inGame(spec2, 60000);
@@ -337,15 +347,6 @@ try {
   await waitFor(() => label(guest), l => l.includes('Waiting for a free seat'));
   check('with four humans to be, the next one waits', true, await label(guest));
 
-  // Narrow desktop window: no margin for the QR, it opens from the badge
-  await spec2.setViewportSize({ width: 1000, height: 800 });
-  await spec2.waitForTimeout(300);
-  const cornerHidden = !(await visible(spec2, '#joinCorner'));
-  await spec2.click('[data-room-action=qr]');
-  check('narrow window: QR opens from the badge', cornerHidden && await spec2.locator('#joinQrPop svg').count() === 1);
-  await shot(spec2, 'desktop-narrow-qr-popover');
-  await spec2.click('[data-room-action=qr]');
-  await spec2.setViewportSize({ width: 1200, height: 800 });
 
   // --- Everybody back to the lobby ---
   await host.click('#lobbyBtn');
@@ -369,29 +370,32 @@ try {
   await host.waitForFunction(() => !document.querySelector('#startGameBtn')?.disabled, null, { timeout: 15000 });
   await host.click('#startGameBtn');
   await Promise.all([host, guest, spec, phone, spec2].map(p => inGame(p)));
-  check('second game: players play, spectators watch',
-    (await mySlot(host)) === 0 && (await mySlot(phone)) === 1 && (await mySlot(spec)) === 3 && (await mySlot(guest)) === null && (await mySlot(spec2)) === null);
+  // (Watchy and Guesty asked to play during the first game and are still in the queue.
+  // Seats change hands during the countdown too: Watchy replaces the bot at once)
+  await spec2.waitForFunction(() => window.__teratron.config.players.some(p => p.control.type === 'local'), null, { timeout: 15000 });
+  check('second game: players play, the first in the queue replaces the bot during the countdown, the rest watch',
+    (await mySlot(host)) === 0 && (await mySlot(phone)) === 1 && (await mySlot(spec2)) === 2 && (await mySlot(spec)) === 3 && (await mySlot(guest)) === null);
 
   // --- The host steps down: it keeps simulating, and those who were waiting get in ---
-  // (Watchy and Guesty asked to play during the first game and are still in the queue:
-  // one takes the host's seat, the other replaces the bot)
-  await host.click('#watchBtn');
+  // (from the round summary, which offers it; Guesty, still queued, takes the seat)
+  await endRound(host, [host, phone, spec, spec2]);
+  await host.waitForSelector('#seatBar [data-room-action=watch]', { timeout: 10000 });
+  check('the round summary offers to watch the next round', true);
+  await host.click('#seatBar [data-room-action=watch]');
   await waitFor(() => audience(host), a => a.leaving.includes('Hosty'));
-  await endRound(host, [host, phone, spec]);
-  await nextRound(host, [phone, spec]);
+  await nextRound(host, [phone, spec, spec2]);
   await host.waitForFunction(() => !window.__teratron.config.players.some(p => p.control.type === 'local'), null, { timeout: 15000 });
   const hostless = await view(host);
   const names = hostless.players.map(p => `${p.slot}:${p.name}`).join(' ');
   check('the host can step down and watch', (await label(host)).includes('SPECTATING') && !names.includes('Hosty'), names);
-  check('the queue outlives the game: free seat first, then the bot', names === '0:Watchy 1:Phony 2:Guesty 3:Specky', names);
-  await spec2.waitForFunction(() => window.__teratron.config.players.some(p => p.control.type === 'local'), null, { timeout: 15000 });
+  check('the queue outlives the game: the bot first, then the free seat', names === '0:Guesty 1:Phony 2:Watchy 3:Specky', names);
   await host.waitForFunction(() => window.__teratron.view()?.round.phase === 'playing', null, { timeout: 15000 });
-  const dirBefore = (await view(host)).players.find(p => p.slot === 0).direction;
+  const dirBefore = (await view(host)).players.find(p => p.slot === 2).direction;
   await spec2.keyboard.down('ArrowRight');
   await spec2.waitForTimeout(400);
   await spec2.keyboard.up('ArrowRight');
   await spec2.waitForTimeout(300);
-  check('the game goes on without the host playing', (await view(host)).players.find(p => p.slot === 0).direction !== dirBefore);
+  check('the game goes on without the host playing', (await view(host)).players.find(p => p.slot === 2).direction !== dirBefore);
   await host.click('[data-room-action=ask]');
   await waitFor(() => label(host), l => l.includes('Waiting for a free seat'));
   check('the host queues like anybody else', true, await label(host));

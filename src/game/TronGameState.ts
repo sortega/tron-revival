@@ -467,6 +467,12 @@ export class TronGameState {
   }
 
   private tickCountdown(): void {
+    // Seats still change hands while nobody has moved (design/spectators.md): the round
+    // is set up again with the new players and the countdown starts over
+    if (this.nextPlayers) {
+      this.initRound();
+      return;
+    }
     this.countdown -= 1 / TICK_RATE;
 
     if (this.countdown <= 0) {

@@ -210,12 +210,13 @@ describe('seats changing hands at a round start', () => {
       predicted.delete(ack);
     }, 0.5);
 
-    net.runUntil(2000);
+    net.runUntil(4500);   // Past the countdown: the round is being played
+    expect(host.game.phase).toBe('playing');
     expect(session.getMySlot()).toBeNull();
     const roundAsked = host.game.currentRound;
     host.setNextPlayers([bot(0), bot(1), remote(2, 'w')]);
     // Nothing changes until the round is over
-    net.runUntil(2500);
+    net.runUntil(5000);
     expect(host.game.currentRound).toBe(roundAsked);
     expect(host.game.players.length).toBe(2);
     expect(session.getMySlot()).toBeNull();
@@ -238,6 +239,8 @@ describe('seats changing hands at a round start', () => {
     const settled = errors.slice(30);
     expect(settled.filter(e => e < 0.01).length / settled.length).toBeGreaterThan(0.97);
 
+    // (asked while a round is being played: during the countdown it would apply at once)
+    while (host.game.phase !== 'playing' && net.time < 300_000) net.runUntil(net.time + 100);
     host.setNextPlayers([bot(0), bot(1)]);
     const leftAt = host.game.currentRound;
     while (host.game.currentRound === leftAt && net.time < 400_000) net.runUntil(net.time + 100);
@@ -287,6 +290,31 @@ describe('roster rules in the simulation', () => {
   const playing = (game: ReturnType<typeof makeGame>) => { while (game.phase === 'countdown') game.tick(inputs()); };
   const withOwners = (mode: GameMode, owners: string[]): GamePlayer[] =>
     makePlayers(owners.length, mode).map((p, i) => ({ ...p, owner: owners[i]! }));
+
+  it('during the countdown seats still change hands: the round is set up again', () => {
+    const game = new TronGameState(withOwners('ffa', ['a', 'b', 'c']), 'ffa', 'blank', createRng(1));
+    playing(game);
+    finishRound(game, 2);
+    tickUntil(game, () => game.phase === 'countdown', inputs({ action: true }, { action: true }, { action: true }));
+    const round = game.currentRound;
+    for (let i = 0; i < 70; i++) game.tick(inputs());            // A second into the countdown
+    expect(game.serialize().round.countdown).toBeLessThan(2.1);
+    // Slot 1 steps down now
+    game.setNextPlayers(withOwners('ffa', ['a', 'b', 'c']).filter(p => p.slotIndex !== 1));
+    game.tick(inputs());
+    const frame = game.serialize();
+    expect(frame.roundStarted).toBe(true);
+    expect(game.phase).toBe('countdown');
+    expect(frame.round.countdown).toBeGreaterThan(2.9);          // ...which starts over
+    expect(game.currentRound).toBe(round);
+    expect(game.players.map(p => p.slotIndex)).toEqual([0, 2]);
+    expect(game.scores.get(2)).toBe(1);                           // Those who stay keep their wins
+    // Once the round is being played nothing changes until it is over
+    playing(game);
+    game.setNextPlayers(withOwners('ffa', ['a', 'b', 'c']));
+    for (let i = 0; i < 20; i++) game.tick(inputs());
+    expect(game.players.map(p => p.slotIndex)).toEqual([0, 2]);
+  });
 
   it('free-for-all: a newcomer starts at 0, the others keep their wins', () => {
     const game = new TronGameState(withOwners('ffa', ['a', 'b', 'c']), 'ffa', 'blank', createRng(1));

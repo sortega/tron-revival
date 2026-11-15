@@ -16,7 +16,8 @@ Related: [networking.md](./networking.md) (rooms, lobby state, netcode, snapshot
 3. **A spectator costs the host little**, because the host may be a phone.
 4. **The number of spectators is shown** between rounds and next to the join code.
 5. **A spectator can ask to play and enters at the start of the next round** — never in the
-   middle of one. A player can also step down and watch.
+   middle of one. A player can also step down and watch. "The start of a round" includes
+   its countdown: while nobody has moved, seats still change hands.
 
 ## What was already there
 
@@ -28,21 +29,19 @@ host sending everybody back to the lobby, a bound on what spectators cost, and t
 
 ## Join code on the game screen
 
-A DOM element (not drawn on the canvas, so it can never cover the play field):
+A DOM element (not drawn on the canvas). Only the **room code** is shown while playing;
+the QR code appears when the code is clicked or tapped, and goes with the next click. It
+is closed whenever a game screen opens (not remembered): a QR code in view during play
+was distracting.
 
-- **Desktop**: in the header row above the canvas: `JOIN red-bear-moon · 👁 2`. When the
-  page margin beside the canvas is wide enough (≥ 130 px) the QR code of the link is shown
-  permanently in the bottom-right corner of the page, with the code and the address of the
-  game (where the code can be typed: *Network game → Join*). On narrower windows there is
-  no room outside the canvas: clicking the badge opens the same in a pop-over under it,
-  which covers the top of the arena while it is open (closed by default; remembered in
-  `localStorage`).
+- **Desktop**: in the header row above the canvas: `JOIN red-bear-moon · 👁 2`. A click
+  opens a pop-over under it with the QR code of the link and the address of the game
+  (where the code can be typed: *Network game → Join*). It covers the top of the arena
+  while it is open.
 - **Phone (landscape)**: the canvas is 4:3 and centred, which leaves a margin on each side.
-  The right margin shows, under the top buttons: the QR (as large as the margin allows, up
-  to 96 px, hidden under 56 px), the room code and `👁 n`. The steering zone is the left
-  half and the action button sits at the bottom of the right margin, so nothing overlaps.
-  If the margin is too narrow for text, only `👁 n` plus the code in small type on one line
-  at the top centre is shown.
+  The right margin shows, under the top buttons, the room code and `👁 n`; if the margin
+  is too narrow, the code in small type on one line at the top centre. A tap opens the QR
+  in the middle of the screen; a tap on it closes it.
 - Only in network games (`GameScreenOptions.room` present).
 
 `👁 n` is the number of users in the room without a seat.
@@ -59,6 +58,14 @@ A DOM element (not drawn on the canvas, so it can never cover the play field):
 | Player leaves the room deliberately | Says goodbye to the host; the seat is given up at the next round |
 | Player disconnects / reloads | Seat kept for their return (unchanged) |
 | Room goes back to the lobby | Everybody goes with it. Users who want a seat (`want ≠ null`) get free seats as usual, queued spectators first. Bots are not displaced in the lobby (the host put them there), but a request to play stays valid: if the next game starts with a bot, the queued spectator replaces it at the second round |
+
+### When seats change
+
+When a round starts, and **during its countdown**: if the plan changes while the
+countdown runs (somebody pressed READY out of habit and then WATCH, or asks to play just
+as the round begins), the round is set up again with the new players and the countdown
+starts over. Once the round is being played nothing changes until it is over. A game that
+starts with a bot and somebody queued therefore replaces the bot in its first countdown.
 
 ### Seating rules at a round start (`planNextRound`)
 
@@ -230,7 +237,9 @@ the host never sends it the stream); a lower cap.
   "Waiting for a free seat (#2)" with CANCEL). Phone: no steering zone, action button or
   steering-mode button; the banner and button sit in the left margin.
 - **Players** get a small **WATCH** button (header on desktop, top row on phones) to step
-  down; it turns into "Watching from next round · UNDO".
+  down; it turns into "Watching from next round · UNDO". On the **round summary** the
+  same choice is offered in words, **👁 WATCH THE NEXT ROUND** (under the canvas on
+  desktop, in the left margin on phones): that is when one decides to stop.
 - **Round summary** (canvas): under the instructions, `👁 3 watching`, and
   `Ana joins next round` / `Ben is waiting for a seat` / `Cleo leaves` when applicable.
 - **Lobby**: spectators are listed (already), with a count in the heading
@@ -273,4 +282,5 @@ the host never sends it the stream); a lower cap.
 - Not covered by e2e: team mode (rules are unit-tested), and anything across real
   networks or on real phones. The e2e runs with the host's simulation in the worker; the
   in-thread path (`?worker=0`) is covered by the unit tests only.
-- Screenshots in `design/research/spectators/`.
+- Screenshots in `design/research/spectators/` (taken before the QR code became
+  on-demand: the ones showing it beside the canvas are out of date).
