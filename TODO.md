@@ -237,24 +237,30 @@ Design, measurements and recommendation: `design/display-layer.md`; screenshots 
 
 - [x] Display bitmap separate from the collision bitmap (`src/game/display/`); shade is
       derived, so erasing cannot leave ghosts (unit-tested against a from-scratch derivation)
-- [x] Shade variants switchable at run time: `?shade=off|glow|fringe|half|outline|auto|crisp`
-      (key 1), head markers `?head=glow|ring|box|dot` (key 2), extras
-      `?fx=shadow,tracer,fade,pattern` (key 3)
 - [x] Levels can have a display-only background (`backgroundFile`); new levels Blueprint
       (dark navy) and Paper (light)
-- [x] `tools/display-lab.mjs`: comparison sheets and render cost per variant
-- [ ] **Owner: look at it on a real phone and confirm the default** (the branch defaults to
-      the recommendation, `auto` + `ring` + `tracer`; `?shade=off&head=glow&fx=` is the old
-      look). 2× costs 4× the fill: check the frame rate on a mid-range phone
-- [ ] Eraser mid-round re-derives the whole arena (35–55 ms on a slow phone): blit a
-      pre-derived pristine level layer instead if it shows
-- [ ] Remove the variants that lose (and the 1/2/3 keys) once a default is chosen
-- [ ] Provisional (predicted) trail pixels of a guest get an unclipped fringe until the
-      host confirms them
+- [x] First round (seven variants, half-pixel fringe) tried by the owner on an iPhone: no
+      visible difference between the trail options — half a logical pixel is one device
+      pixel there. Reworked:
+- [x] Trail shade `?shade=auto|off|thin|bold|wide`: `bold` is a full logical pixel per
+      side; `auto` = `bold` on phones, `thin` on desktops. Gaps between trails are never
+      shaded shut (rule in the derivation, tested)
+- [x] Heads: solid white pixel + white transparent halo, `?head=auto|ring|soft|wide`
+      (dark halo on light levels); no `shadowBlur`
+- [x] Extras `?fx=tracer,boost,shadow,fade`: tracer streak, lighter blue/purple
+- [x] `?displaydebug=1`: on-screen chips to cycle the variants on a phone; keys 1/2/3
+- [x] `tools/display-lab.mjs`: phone pictures at true device-pixel scale and at physical
+      size, render cost, checks
+- [ ] **Owner: second look on the iPhone** — `?displaydebug=1`, compare `off` / `bold` /
+      `wide` and the halos, confirm or change the default
+- [ ] Remove the variants that lose, the 1/2/3 keys and the chips once a default is chosen
+- [ ] Provisional (predicted) trail pixels of a guest get unclipped shade until the host
+      confirms them
 - [ ] `fade` extra has not been watched in motion
 - [ ] Lock-border pixels in a rejoin snapshot are taken for trails (same colour as the player)
 - [ ] Paper: decide whether a light level stays in the cycle; item sprites with a white
       box look pasted on it
+- [ ] If tablets / ≥ 3 device px per logical px matter: a 2× `bold` with a two-step fringe
 
 ## Projectile collisions (reported)  ✅
 
