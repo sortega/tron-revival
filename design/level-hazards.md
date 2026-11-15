@@ -81,7 +81,8 @@ At 70 ticks/s: closed 2.9 s, moving 0.4 s, open 2.9 s. Doors start every round c
 
 - A player whose head is on a solid door pixel dies (death cause `door`). This is checked
   after every pixel-step, with the frame of the current tick.
-- As in the original, **a shield does not help**: the door kills regardless.
+- **A Shield takes the player through a closed door** (unlike the original, where the door
+  killed regardless). One whose Shield runs out inside the door dies there.
 - Doors are not part of the collision grid. Projectiles, tracers, bombs, satellites and
   items ignore them, and weapons cannot damage them.
 - Trails drawn through an open doorway stay in the collision grid. The closed leaves cover
@@ -114,7 +115,8 @@ linger in one that is about to close.
 ### Validation
 
 - Rule tests: frame sequence over one cycle; geometry against the table above; a player
-  driving into a closed door dies with cause `door`, shield or not; a player crossing an
+  driving into a closed door dies with cause `door`, one with a Shield drives through and
+  dies there only if the Shield runs out inside; a player crossing an
   open doorway survives and wraps around; doors do not advance outside `playing`.
 - Bot matches on `portals`: door deaths stay rare.
 
@@ -179,7 +181,7 @@ A gun is a pair of control points of map 206 in `TRON.FPG` (muzzle → aim):
 - A burst is exactly a Shotgun blast without an owner: 30 pellets from the muzzle, each
   deviating up to ±5° from the gun's direction, speed 10–30 px/tick, lifetime 10 ticks
   (so they reach 100–300 px). Pellets are ordinary `tracer` projectiles: they kill players
-  (death cause `tracer`; a shield protects, as against any tracer), and erase trails and
+  (death cause `tracer`; a Shield does not protect, as against any tracer), and erase trails and
   scenery along their path.
 - Pellets have no owner: `Projectile.ownerSlot` is `NO_OWNER` (-1). Nobody is immune and
   no satellite lets them through.

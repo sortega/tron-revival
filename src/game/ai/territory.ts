@@ -39,7 +39,7 @@ const TURN_COST = [0, 2, 5];
 const ITEM_MARGIN_TICKS = 30;
 /** Ticks of driving per unit of arrival time (a pixel per tick at normal speed). */
 const TICKS_PER_TIME = COARSE_CELL / TIME_PER_CELL;
-/** `blocked` of a cell a door closes (or is about to): nothing gets one through it. */
+/** `blocked` of a cell a door closes (or is about to): only a shield gets one through it. */
 const BLOCKED_DOOR = 2;
 
 /** The four neighbours of every cell (right, left, down, up); the arena wraps. */
@@ -71,7 +71,7 @@ export interface TerritoryPlayer {
   y: number;
   direction: number;   // Degrees
   speed: number;       // 1 = normal, 2 = turbo, 0.5 = slowed
-  shield?: number;     // Ticks left of going through trails and scenery (0 = no shield)
+  shield?: number;     // Ticks left of going through trails, scenery and doors (0 = no shield)
   crossing?: number;   // Ticks left of going through its own trail
   trail?: number;      // What `pixels` holds for its own trail (-1 = not known)
 }
@@ -160,7 +160,7 @@ export class TerritoryMap {
   readonly regionSize = new Int32Array(T_CELLS + 1);
   /**
    * Per slot: when the player can be in each cell (TIME_PER_CELL per cell at normal speed).
-   * A player with a shield gets through trails and scenery while it lasts, one with a
+   * A player with a shield gets through trails, scenery and doors while it lasts, one with a
    * crossing item through its own trail: such cells have a time although they are blocked.
    */
   readonly time: Uint16Array[] = [];
@@ -427,12 +427,11 @@ export class TerritoryMap {
   }
 
   // Does what the player being scanned carries get it through blocked cell `cell` at `t`?
-  // A shield through anything but a door; a crossing item through a cell that holds
-  // nothing but its own trail.
+  // A shield through anything, closed doors too; a crossing item through a cell that
+  // holds nothing but its own trail.
   private goesThrough(cell: number, t: number): boolean {
-    if (this.blocked[cell] === BLOCKED_DOOR) return false;
     if (t <= this.shieldUntil) return true;
-    if (t > this.crossUntil) return false;
+    if (t > this.crossUntil || this.blocked[cell] === BLOCKED_DOOR) return false;
     let own = this.ownOnly[cell]!;
     if (own === 0) {
       own = 1;

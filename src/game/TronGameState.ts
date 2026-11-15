@@ -496,14 +496,26 @@ export class TronGameState {
         const newSegments = movePlayer(player, inputs.get(player.slotIndex) ?? NO_INPUT);
 
         // Check collision immediately after move
+        // Two heads on the same pixel: both die, shield or not (the head's own pixel is
+        // not in the collision grid yet, so this is not a trail collision)
+        const headX = player.getScreenX();
+        const headY = player.getScreenY();
+        const met = this.players.find(p => p !== player && p.alive && p.getScreenX() === headX && p.getScreenY() === headY);
+        if (met) {
+          this.killPlayerWithSound(player, false, 'crossing', met.slotIndex);
+          this.killPlayerWithSound(met, false, 'crossing', player.slotIndex);
+          continue;
+        }
+
         const collisionPixel = player.checkCollision(this.pixels);
+        const hasShield = player.hasEffect('shield');
         if (collisionPixel) {
           const pixelOwner = this.pixels.get(collisionPixel.x, collisionPixel.y);
-          const hasShield = player.hasEffect('shield');
           const hasCrossing = player.hasEffect('crossing');
           const isOwnColor = pixelOwner === player.color;
 
-          // Shield: complete invincibility
+          // Shield: through trails, scenery and closed doors (it stops neither bullets,
+          // bombs nor satellites)
           // Crossing: can pass through own color only
           const isProtected = hasShield || (hasCrossing && isOwnColor);
 
@@ -517,8 +529,8 @@ export class TronGameState {
           }
         }
 
-        // Doors kill on contact, shield or not
-        if (doors && anyDoorSolidAt(doors, frameOfDoors, player.getScreenX(), player.getScreenY())) {
+        // Doors kill on contact, unless a shield takes the player through
+        if (doors && !hasShield && anyDoorSolidAt(doors, frameOfDoors, player.getScreenX(), player.getScreenY())) {
           this.killPlayerWithSound(player, false, 'door');
           continue;
         }
@@ -553,16 +565,12 @@ export class TronGameState {
             p1.prevScreenX, p1.prevScreenY, p1.getScreenX(), p1.getScreenY(),
             p2.prevScreenX, p2.prevScreenY, p2.getScreenX(), p2.getScreenY()
           )) {
-            // Players with shield survive diagonal collision
-            const p1HasShield = p1.hasEffect('shield');
-            const p2HasShield = p2.hasEffect('shield');
-
-            if (!p1HasShield) { p1.kill(); this.recordDeath(p1, 'crossing', p2.slotIndex); }
-            if (!p2HasShield) { p2.kill(); this.recordDeath(p2, 'crossing', p1.slotIndex); }
-
-            if (!p1HasShield || !p2HasShield) {
-              this.queueSound('laughs');
-            }
+            // Head against head: both die, shield or not
+            p1.kill();
+            this.recordDeath(p1, 'crossing', p2.slotIndex);
+            p2.kill();
+            this.recordDeath(p2, 'crossing', p1.slotIndex);
+            this.queueSound('laughs');
           }
         }
       }

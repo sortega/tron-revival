@@ -133,7 +133,7 @@ interface PlanContext {
   pixels: PixelGrid;
   me: TronPlayer;
   hazards: Hazard[];
-  ignoreSteps: number;     // Steps during which trails cannot hurt us (shield)
+  ignoreSteps: number;     // Steps during which trails, scenery and doors cannot hurt us (shield)
   crossingSteps: number;   // Steps during which our own colour is passable (crossing)
   badItems: GameItem[];
   portals: readonly TeleportPortal[];
@@ -522,7 +522,6 @@ export class BotController {
       const ny = Math.floor(y);
 
       if (nx !== px || ny !== py) {
-        if (step <= ignoreSteps && doorBlocked(nx, ny)) break; // No shield against doors
         if (step > ignoreSteps) {
           if (blocked(nx, ny)) break;
           const dx = nx - px;

@@ -286,16 +286,21 @@ describe('territory map: shield and crossing', () => {
     expect(hunted.foeTime[0]![cellOf(420, 300)]).not.toBe(UNREACHED);
   });
 
-  it('no shield gets through a closed door', () => {
+  it('a shield gets through a closed door, a crossing item does not', () => {
     const grid = new PixelGrid();
     frame(grid);
-    vline(grid, 385, 0, 240);
-    vline(grid, 385, 340, PLAY_HEIGHT - 1);
+    vline(grid, 385, 0, 229);
+    vline(grid, 385, 351, PLAY_HEIGHT - 1);
     const doors: DoorDefinition[] = [{ x: 385, y: 290, vertical: true }];
-    const map = build(grid, [{ ...player(0, 340, 290, 0), shield: 400 }], { doors, doorTick: 10 });
-    expect(at(map, 385, 290)).toBe(UNREACHED);             // The door
-    expect(at(map, 385, 100)).not.toBe(UNREACHED);         // The wall beside it
+    // (30 ticks of margin and 80 px: as far as the door, not as far as the wall beside it)
+    const map = build(grid, [{ ...player(0, 340, 290, 0), shield: 110 }], { doors, doorTick: 10 });
+    expect(at(map, 385, 290)).not.toBe(UNREACHED);         // The door
     expect(at(map, 500, 290)).not.toBe(UNREACHED);         // ...and so the other side
+    expect(at(map, 385, 100)).toBe(UNREACHED);
+    const trail = grid.paletteIndexOf(WALL);
+    const cross = build(grid, [{ ...player(0, 340, 290, 0), crossing: 400, trail: trail + 1 }], { doors, doorTick: 10 });
+    expect(at(cross, 385, 290)).toBe(UNREACHED);
+    expect(at(cross, 500, 290)).toBe(UNREACHED);
   });
 
   it('a crossing item goes through cells that hold our own trail and nothing else', () => {

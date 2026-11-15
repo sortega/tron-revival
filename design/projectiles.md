@@ -27,7 +27,7 @@ that row or column — typically its own shooter.)
 | Projectile | Speed (px/tick) | Hits a player within | Effect on the player |
 |------------|-----------------|----------------------|----------------------|
 | Bullet (Glock) | 5 × speed factor | 6 px of the path | Explosion: kills everyone within 6 px, shield or not |
-| Tracer (Rifle, Uzi, Shotgun, level guns) | 5–50 | 1 px of the path on both axes (the 3 × 3 pixels around the head) | Kills that player (a shield protects) |
+| Tracer (Rifle, Uzi, Shotgun, level guns) | 5–50 | 1 px of the path on both axes (the 3 × 3 pixels around the head) | Kills that player, shield or not |
 | H-bomb | 2 | its body, see below | Blast: kills everyone within 50 px |
 
 ## Weapon match-ups

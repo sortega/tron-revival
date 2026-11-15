@@ -117,6 +117,14 @@ player responsible, which can be the victim:
 | `crossing` | the other player | *head-on collision with Ana* |
 | `own-trail`, `level`, `door` | — | *crashed into their own trail*, … |
 
+**What the Shield does.** It takes its player through trails, scenery and closed doors
+(`design/level-hazards.md`), and that is all. It does not stop tracers, bullets, bombs or
+satellites, and it does not go through the head of another player: two heads that come
+to be on the same pixel, or that cross on diagonals, both die (`crossing`, by the other),
+shielded or not. (The pixel a head is on is not in the collision grid yet, so without this
+rule heads would pass through each other and die on the trail behind, which a Shield
+ignores.) In the original the Shield meant complete invincibility but for doors.
+
 ### Levels
 
 A level is one 750×600 PNG: it is drawn as the background, and every pixel of it that is

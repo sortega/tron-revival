@@ -343,7 +343,7 @@ export interface ActiveEffect {
 // Automatic items (round) - instant activation on pickup
 export const AUTOMATIC_ITEMS: ItemDefinition[] = [
   { name: 'Crossing', sprite: 'crossing', category: 'automatic', duration: 2100, pickupSound: 'shield' },    // 30s - cross own trail
-  { name: 'Shield', sprite: 'shield', category: 'automatic', duration: 2100, pickupSound: 'shield' },        // 30s - invincible
+  { name: 'Shield', sprite: 'shield', category: 'automatic', duration: 2100, pickupSound: 'shield' },        // 30s - through trails, scenery and doors
   { name: 'Eraser', sprite: 'eraser', category: 'automatic', duration: 0, pickupSound: 'reset' },            // Instant
   { name: 'Swap', sprite: 'random_item', category: 'automatic', duration: 0, pickupSound: 'teleport' },         // Instant
   { name: 'Bodyguard', sprite: 'bodyguard_item', category: 'automatic', duration: 0, pickupSound: 'item_pickup' }, // Spawns orbiting protector

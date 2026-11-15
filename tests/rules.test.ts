@@ -404,6 +404,63 @@ describe('collisions', () => {
     expect(game.players.some(p => !p.alive)).toBe(true);
   });
 
+  describe('the shield', () => {
+    const deaths = (game: ReturnType<typeof makeGame>, ticks: number, press: Partial<TronInput>[] = []): string[] => {
+      const out: string[] = [];
+      for (let i = 0; i < ticks && game.phase === 'playing'; i++) {
+        game.tick(inputs(...(i === 0 ? press : [])));
+        game.items.length = 0;
+        for (const d of game.serialize().deaths ?? []) out.push(`${d.slotIndex}:${d.cause}:${d.by ?? '-'}`);
+      }
+      return out;
+    };
+    const shielded = (walls = new PixelGrid()): ReturnType<typeof makeGame> => {
+      const game = makeGame(2);
+      game.setLevelObstacles(walls);
+      skipCountdown(game);
+      game.items.length = 0;
+      game.portals.length = 0;
+      place(game, 0, 60.5, 500.5, 0);
+      place(game, 1, 60.5, 100.5, 0);
+      game.players[1]!.activateEffect('shield', 2100);
+      return game;
+    };
+
+    it('goes through level walls and through trails', () => {
+      const game = shielded(wallLevel());
+      place(game, 1, 390.5, 300.5, 0);     // Into the wall at x = 400
+      place(game, 0, 420.5, 280.5, 90);    // ...and then a trail across the way
+      expect(deaths(game, 60)).toEqual([]);
+      expect(game.players[1]!.getScreenX()).toBeGreaterThan(430);
+    });
+
+    it('does not go through the head of another player', () => {
+      // Head-on, whoever gets to move onto the other's head: both die
+      for (const gap of [20, 21]) {
+        const game = shielded();
+        place(game, 0, 300.5, 300.5, 0);
+        place(game, 1, 300.5 + gap, 300.5, 180);
+        expect(deaths(game, 30).sort(), `${gap} px apart`).toEqual(['0:crossing:1', '1:crossing:0']);
+      }
+      // The same on crossing diagonals: both
+      const diagonal = shielded();
+      diagonal.players[0]!.activateEffect('shield', 2100);
+      place(diagonal, 0, 300.1, 300.1, 45);
+      place(diagonal, 1, 301.9, 300.1, 135);
+      expect(deaths(diagonal, 5).sort()).toEqual(['0:crossing:1', '1:crossing:0']);
+    });
+
+    it('stops neither tracers nor bullets', () => {
+      for (const [weapon, cause] of [['rifle', 'tracer'], ['glock', 'bullet']] as const) {
+        const game = shielded();
+        place(game, 0, 200, 300, 0);
+        place(game, 1, 320, 300, 180);
+        game.players[0]!.equipWeapon(weapon, 200);
+        expect(deaths(game, 60, [{ action: true }, {}])).toContain(`1:${cause}:0`);
+      }
+    });
+  });
+
   it('wraps around the arena edges', () => {
     const game = makeGame(2);
     skipCountdown(game);

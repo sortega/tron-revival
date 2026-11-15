@@ -69,10 +69,10 @@ Details of the per-player search:
 - **Doors** count as closed if they are solid now or within the door margin, so a region
   behind a closed door is not reachable and a doorway about to close is not a way out.
 - **Portals** are one extra edge per portal cell.
-- **Shield and Crossing.** A player with a Shield gets into blocked cells (trails and
-  scenery, never doors, as in the game) for as long as the Shield lasts; one with a Crossing
+- **Shield and Crossing.** A player with a Shield gets into blocked cells (trails,
+  scenery and closed doors, as in the game) for as long as the Shield lasts; one with a Crossing
   item into the cells that hold its own trail and nothing else (64 pixels looked at, once
-  per cell and search). "As long as it lasts" is the effect's remaining ticks minus 30, the
+  per cell and search; never a door cell). "As long as it lasts" is the effect's remaining ticks minus 30, the
   planner's margin, at a pixel per tick: a cell entered later than that is a wall again, so
   the item opens what the player can get to in time and nothing further. With either item
   the head also leaves its own cell through what the item passes. This holds for every

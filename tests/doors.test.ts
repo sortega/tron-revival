@@ -87,12 +87,21 @@ describe('doors in the simulation', () => {
     expect(game.players[0]!.getScreenX()).toBe(365); // 385 - 25 + 5 px recess
   });
 
-  it('kill despite a shield', () => {
+  it('let a player with a shield through while closed', () => {
     const game = portalsGame();
     place(game, 0, 300, 290, 0);
     place(game, 1, 100, 500, 0);
     game.players[0]!.activeEffects.push({ sprite: 'shield', remainingFrames: 2000 });
-    expect(run(game, 80)).toContain('0:door');
+    expect(run(game, 120)).toEqual([]);
+    expect(game.players[0]!.getScreenX()).toBeGreaterThan(385 + 25);
+  });
+
+  it('kill a player whose shield runs out inside one', () => {
+    const game = portalsGame();
+    place(game, 0, 300, 290, 0);
+    place(game, 1, 100, 500, 0);
+    game.players[0]!.activeEffects.push({ sprite: 'shield', remainingFrames: 75 });
+    expect(run(game, 100)).toContain('0:door');
   });
 
   it('let a player through while open, wrapping around the edge', () => {
