@@ -37,7 +37,7 @@ if (process.env.SIM_REPORT) {
   describe('bots', () => {
     it('beat a player that drives straight on every level', () => {
       for (const level of LEVELS) {
-        const r = runMatch({ level, drivers: ['normal', 'straight'], rounds: 5, seed: 6, maxRoundSeconds: 60 });
+        const r = runMatch({ level, drivers: ['normal', 'straight'], rounds: 10, seed: 6, maxRoundSeconds: 60 });
         expect(winRate(r, 0), level).toBeGreaterThanOrEqual(0.8);
       }
     }, 120_000);

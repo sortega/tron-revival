@@ -23,6 +23,7 @@ export const UNREACHED = 0xffff;
 export const TIME_PER_CELL = 2;
 /** The map is rebuilt over this many ticks, a slice every other tick. */
 export const REFRESH_PERIOD = 12;
+const SLICES = 2 + MAX_SLOTS;        // The arena, each player, the comparison
 
 const DOOR_SOON_TICKS = 25;       // A door closing this soon is closed for route purposes
 const DOOR_RISK_TICKS = 120;      // ...and one closing this soon makes its doorway risky
@@ -172,6 +173,7 @@ export class TerritoryMap {
   private linked: number[] = [];
   private regionsStale = true;
   private lastTick = -1;
+  private period = REFRESH_PERIOD;   // Ticks a whole refresh takes
   private lastStamp: unknown = null;
 
   constructor() {
@@ -187,8 +189,9 @@ export class TerritoryMap {
    * REFRESH_PERIOD) unless the map is new or ticks were skipped. `stamp` identifies the
    * round: a different one forces a full rebuild.
    */
-  update(world: TerritoryWorld, stamp: unknown = null): void {
+  update(world: TerritoryWorld, stamp: unknown = null, period = REFRESH_PERIOD): void {
     const tick = world.doorTick;
+    this.period = Math.max(REFRESH_PERIOD, period);
     if (tick === this.lastTick && stamp === this.lastStamp) return;
     const continuous = stamp === this.lastStamp && tick === this.lastTick + 1 && this.version > 0;
     this.lastTick = tick;
@@ -198,9 +201,11 @@ export class TerritoryMap {
       return;
     }
     // Slices: the arena, then one player at a time, then the comparison
-    const phase = tick % REFRESH_PERIOD;
-    if (phase % 2 !== 0) return;
-    const slice = phase / 2;
+    // (a slower look at the arena, design/bots-human.md: the same six slices, further apart)
+    const gap = Math.round(this.period / SLICES);
+    const phase = tick % (gap * SLICES);
+    if (phase % gap !== 0) return;
+    const slice = phase / gap;
     if (slice === 0) this.scanArena(world);
     else if (slice <= MAX_SLOTS) this.scanPlayer(world, slice - 1);
     else this.compare(world);
@@ -224,7 +229,7 @@ export class TerritoryMap {
     if (world.doors) {
       const { cells, solid } = doorCells(world.doors);
       const now = doorFrame(world.doorTick);
-      const soon = doorFrame(world.doorTick + DOOR_SOON_TICKS + REFRESH_PERIOD);
+      const soon = doorFrame(world.doorTick + DOOR_SOON_TICKS + this.period);
       const later = doorFrame(world.doorTick + DOOR_RISK_TICKS);
       for (let k = 0; k < cells.length; k++) {
         const at = k * DOOR_FRAME_COUNT;
@@ -555,13 +560,13 @@ class GameWorld implements TerritoryWorld {
 const maps = new WeakMap<object, { map: TerritoryMap; world: GameWorld }>();
 
 /** The territory map of a game, up to date for the current tick. Shared by its bots. */
-export function territoryOf(game: TerritoryGame): TerritoryMap {
+export function territoryOf(game: TerritoryGame, period = REFRESH_PERIOD): TerritoryMap {
   let entry = maps.get(game);
   if (!entry) {
     entry = { map: new TerritoryMap(), world: new GameWorld(game) };
     maps.set(game, entry);
   }
   // (rounds restart the door clock, and so do levels)
-  entry.map.update(entry.world, game.currentRound * 16 + game.currentLevelIndex);
+  entry.map.update(entry.world, game.currentRound * 16 + game.currentLevelIndex, period);
   return entry.map;
 }

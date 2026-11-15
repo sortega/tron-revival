@@ -311,3 +311,39 @@ describe('bots and territory: goals', () => {
     expect(goalOf(walled, 'old-hard')).toBe('item');
   });
 });
+
+describe('bots and territory: seen through human eyes', () => {
+  it('each human-like bot has a map of its own, of the arena as it perceives it, looked over slowly', async () => {
+    const { HumanBot } = await import('../src/game/ai/HumanBot');
+    const { HUMAN_PROFILES } = await import('../src/game/ai/humanProfiles');
+    const grid = new PixelGrid();
+    frame(grid);
+    const g = gameOn(grid);
+    place(g, 0, 150, 300, 0);
+    place(g, 1, 600, 300, 180);
+    const a = new HumanBot(0, 'hard', createRng(1));
+    const b = new HumanBot(1, 'normal', createRng(2));
+    const perfect = new BotController(1, 'hard', createRng(3));
+    const inputs = new Map();
+    for (let t = 0; t < 40; t++) {
+      inputs.set(0, a.decide(g));
+      inputs.set(1, b.decide(g));
+      perfect.decide(g);
+      g.tick(inputs);
+      g.items.length = 0;
+    }
+    const mapA = a.planner.sense!.map!;
+    const mapB = b.planner.sense!.map!;
+    expect(mapA).not.toBe(mapB);
+    expect(mapA).not.toBe(perfect.sense!.map);       // The true one, shared by planners without the human layer
+    expect(perfect.sense!.map).toBe(territoryOf(g));
+    // How often each looks the arena over
+    expect(a.planner.profile.territory!.refreshTicks).toBe(HUMAN_PROFILES.hard.arenaGlance);
+    expect(b.planner.profile.territory!.refreshTicks).toBe(HUMAN_PROFILES.normal.arenaGlance);
+    expect(perfect.profile.territory!.refreshTicks).toBeUndefined();
+    // Strength 0: the planner alone, on the true map
+    const raw = new HumanBot(0, 'hard', createRng(1), { strength: 0 });
+    raw.decide(g);
+    expect(raw.planner.sense!.map).toBe(territoryOf(g));
+  });
+});

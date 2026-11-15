@@ -33,6 +33,12 @@ export interface TerritoryUse {
   intercepts: boolean;
   /** With nothing else to do, heads for the border between its territory and an enemy's. */
   expands: boolean;
+  /**
+   * Ticks the bot takes to look the whole arena over, i.e. how often its map is brought
+   * up to date; default (and least) 12. A human does not re-read the arena six times a
+   * second (design/bots-human.md, "The arena as a whole").
+   */
+  refreshTicks?: number;
 }
 
 /** Room that every path is counted up to, in cells (as in the bots without the map). */
@@ -101,7 +107,7 @@ export class TerritorySense {
 
   /** Call once per decision, before anything else. */
   begin(game: TerritoryGame, slot: number, effects: readonly { sprite: string }[]): void {
-    const map = territoryOf(game);
+    const map = territoryOf(game, this.use.refreshTicks);
     this.map = map;
     this.slot = slot;
     this.step = TIME_PER_CELL / speedOf(effects);

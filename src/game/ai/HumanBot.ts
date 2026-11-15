@@ -68,7 +68,11 @@ export class HumanBot {
     this.rng = rng;
     const plan = options.planner ?? BOT_PROFILES[difficulty];
     // The planner knows whose hands will carry out its plans
-    this.planner = new BotController(slot, this.human ? { ...plan, sideMargin: this.human.sideMargin, headMargin: this.human.headMargin } : plan, rng);
+    // ...and how often its eyes go over the whole arena
+    const territory = plan.territory && this.human
+      ? { ...plan.territory, refreshTicks: plan.territory.refreshTicks ?? this.human.arenaGlance }
+      : plan.territory;
+    this.planner = new BotController(slot, this.human ? { ...plan, territory, sideMargin: this.human.sideMargin, headMargin: this.human.headMargin } : plan, rng);
   }
 
   decide(game: TronGameState): TronInput {

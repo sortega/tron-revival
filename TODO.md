@@ -119,13 +119,14 @@ Design: `design/local-and-ai.md`
 - [x] **Automated gameplay validation**: `tests/sim.ts` headless match runner; `tests/bots.test.ts`
       regression thresholds; `npm run sim` prints a per-level tuning table
 - [ ] Bots: dodge projectiles and bomb blast areas
-- [~] Bots: most remaining deaths are "own trail" in self-made pockets; a Voronoi-style
+- [x] Bots: most remaining deaths are "own trail" in self-made pockets; a Voronoi-style
       territory estimate would help more than longer lookahead
       → **research branch `research/bots-territory`** (design: `design/bots-territory.md`):
       shared territory map (who reaches what first, clearance, regions, risk), room judged
       without counting what lies behind walls or beside the own path, endgame filling,
       item races, cut-off goals; `?botdebug=1` overlay, `npm run bots:strength`,
-      `npm run bots:snapshots`. Not merged; results and recommendation in the design doc
+      `npm run bots:snapshots`. **Merged**, on top of the human-like bots: a map per bot
+      of the world as it perceives it, looked over every 24 (hard) / 36 (normal) ticks
   - [ ] Endgame: a real space-filling planner (finish a side chamber before sealing it;
         handle wedges between non-parallel passes) instead of the wall-hugging bonus
   - [ ] Mid-game: tell which side of a cut is bigger beyond 400 cells without paying for
@@ -153,7 +154,12 @@ Design and measurements: `design/bots-human.md`
       both spend more time squeezed than the old bots; look at replays before tuning more
 - [ ] `easy` is weaker than before (78 % against 69 % dead within 20 s when left alone);
       decide after playing against it whether to lower the strength for easy
-- [ ] Late perception of trail pixels (bots still see every new trail pixel at once)
+- [ ] Late perception of trail pixels (bots still see every new trail pixel at once, on
+      the territory map too)
+- [ ] Human-like bots build their own map on the first tick of a round (2–3 ms once);
+      build it during the countdown instead
+- [ ] Play against the territory bots: wall-hugging endgames and no chasing from behind
+      may feel different
 - [ ] Colour blindness after a Swap does not confuse bots
 - [ ] Bots that know they see late could also *lead* their shots; today the aim error
       only ever hurts

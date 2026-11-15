@@ -356,7 +356,31 @@ being alive for more of the time. Why the cost per live bot is also higher here 
 reason is that the new matches spend more time in tight places, where rollouts cost more
 for old and new alike. Nothing was measured in a browser or on a phone.
 
-## Recommendation
+## With the human-like bots (merged)
+
+The numbers above are for the planner alone. The branch was rebased on the human-like bots
+([bots-human.md](./bots-human.md)) and merged; what changed with it:
+
+- **A map per bot, of the perceived world.** The planner of a human-like bot is handed the
+  world as the bot perceives it, and the map is keyed on that: enemy heads are on it where
+  the bot believes them to be. Planners without the human layer (strength 0, tools) still
+  share the true map of the game.
+- **A slower look.** `TerritoryUse.refreshTicks` (from the human profile's `arenaGlance`:
+  hard 24, normal 36 ticks) spaces the six slices of a refresh further apart. Measured in
+  bots-human.md, "The arena as a whole": no loss against the 12-tick refresh.
+- **Still worth it under the human layer**: with the map hard wins 53.8 % of rounds
+  against 45.8 % for hard without it, normal 56.1 % against 43.5 % (1280 rounds each).
+- **Cost** (`npm run bench:sim`, whole tick, mean / 99th percentile in µs; not like for
+  like, the matches differ): 3 normal 136 / 717 → 179 / 972, 3 hard 182 / 720 → 242 / 870,
+  4 hard 318 / 1115 → 315 / 1278, 3 hard on Portals 403 / 1328 → 453 / 1495. The budget
+  of a tick is 14 286 µs. The worst single tick rises to 2.4–3.5 ms: each bot now builds
+  its own map on the first tick of a round (the build during the countdown is of the true
+  map, which human-like bots do not use).
+- Trails and walls are on the map as they are, not as perceived (nothing in the human
+  layer delays them).
+- Driver specs for experiments: `old-hard` (no map), `g48-hard` (refresh every 48 ticks).
+
+## Recommendation (as written before the merge)
 
 **Merge**, after `research/performance` (this branch is built on it and uses its harness).
 Both profiles that use the map win 54–55 % of rounds against their old selves (43–44 % the

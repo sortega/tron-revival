@@ -22,6 +22,7 @@ import { loadLevelGrid, makePlayers } from './helpers';
 // `raw-`: the planner alone, without the humanisation layer (design/bots-human.md).
 // `h<strength>-`: humanisation strength (default 1).
 // `old-`: as the bots were before they read the territory map (design/bots-territory.md).
+// `g<ticks>-`: looks the whole arena over every so many ticks (the territory map's refresh).
 // `var-<name>`: the experimental profile `PROFILE_VARIANTS[name]`, planner alone.
 export type DriverSpec = BotDifficulty | `${string}-${BotDifficulty}` | `var-${string}` | 'straight' | 'random';
 
@@ -59,6 +60,7 @@ export function makeDriver(spec: DriverSpec, slot: SlotIndex, rng: Rng): Driver 
   for (const part of parts) {
     if (part === 'raw') raw = true;
     else if (part === 'calm') profile = { ...profile, hunts: false, weapons: 'panic' };
+    else if (/^g\d+$/.test(part) && profile.territory) profile = { ...profile, territory: { ...profile.territory, refreshTicks: Number(part.slice(1)) } };
     else if (part === 'old') profile = { ...profile, territory: null };
     else if (part === 'naive') profile = { ...profile, knowsMatchups: false };
     else if (/^h[\d.]+$/.test(part)) strength = Number(part.slice(1));

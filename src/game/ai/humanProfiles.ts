@@ -17,6 +17,7 @@ export interface ReverseProfile {
 
 export interface HumanProfile {
   trackDelay: number;       // Latency of enemies being followed
+  arenaGlance: number;      // Ticks to look the whole arena over (who reaches what, where there is room)
   surprise: Range;          // Latency of unexpected events (new item, shot, weapon change)
   attention: number;        // Enemies followed continuously
   glance: Range;            // Interval between looks at the other enemies
@@ -35,21 +36,21 @@ export interface HumanProfile {
 
 export const HUMAN_PROFILES: Record<BotDifficulty, HumanProfile> = {
   easy: {
-    trackDelay: 24, surprise: [35, 55], attention: 1, glance: [50, 90], aimSigma: 4,
+    trackDelay: 24, arenaGlance: 48, surprise: [35, 55], attention: 1, glance: [50, 90], aimSigma: 4,
     fireHesitation: [14, 30], tapPeriod: [13, 20], steerLag: [0, 2], minPress: 4, sideMargin: 2, headMargin: 10,
     panicDist: 28, panicOversteer: [0, 1],
     reverse: { notice: [40, 70], slip: 0.8, adapt: 300, catch: [12, 20], overCorrect: 0.6 },
     disorient: [30, 50],
   },
   normal: {
-    trackDelay: 15, surprise: [22, 32], attention: 2, glance: [35, 60], aimSigma: 2,
+    trackDelay: 15, arenaGlance: 36, surprise: [22, 32], attention: 2, glance: [35, 60], aimSigma: 2,
     fireHesitation: [7, 14], tapPeriod: [10, 13], steerLag: [0, 2], minPress: 4, sideMargin: 2, headMargin: 7,
     panicDist: 20, panicOversteer: [0, 1],
     reverse: { notice: [22, 34], slip: 0.75, adapt: 150, catch: [10, 16], overCorrect: 0.6 },
     disorient: [18, 28],
   },
   hard: {
-    trackDelay: 11, surprise: [16, 22], attention: 3, glance: [35, 60], aimSigma: 1.2,
+    trackDelay: 11, arenaGlance: 24, surprise: [16, 22], attention: 3, glance: [35, 60], aimSigma: 1.2,
     fireHesitation: [4, 9], tapPeriod: [8, 10], steerLag: [0, 1], minPress: 3, sideMargin: 1, headMargin: 5,
     panicDist: 14, panicOversteer: [0, 1],
     reverse: { notice: [14, 20], slip: 0.5, adapt: 50, catch: [7, 11], overCorrect: 0.3 },
@@ -79,6 +80,7 @@ export function scaleProfile(p: HumanProfile, s: number): HumanProfile {
   if (s === 1) return p;
   return {
     trackDelay: Math.round(p.trackDelay * s),
+    arenaGlance: Math.max(12, Math.round(12 + (p.arenaGlance - 12) * s)),
     surprise: scaleRange(p.surprise, s),
     attention: p.attention,
     glance: scaleRange(p.glance, s),

@@ -93,8 +93,35 @@ Ticks below are simulation ticks (70 per second, 14.3 ms each).
 | Projectiles | Invisible for a `surprise` delay after being fired, then exact. |
 | Own effects | Exact, except *Control Reversal*, which is hidden from the planner and handled by the motor layer. |
 | Satellites, doors, level guns | Exact. |
+| The arena as a whole (territory, room, who gets where first) | The bot's own territory map ([bots-territory.md](./bots-territory.md)), built from the world **as perceived** (enemy heads late and extrapolated, as above) and brought up to date only every `arenaGlance` ticks. See below. |
 
 `surprise` is a range; each event draws its own delay uniformly from it.
+
+### The arena as a whole
+
+Bots that read the territory map do not share the game's true map: each has **its own**,
+computed from its perceived world, so an enemy is on it where the bot believes it to be.
+A person does not re-read the whole arena several times a second either: the map is
+refreshed over `arenaGlance` ticks (the arena, each player and the comparison in turn, the
+same six slices as the planner's own 12-tick refresh, further apart). What the bot knows
+about who reaches what is therefore between a fraction of a period and almost two
+periods old — up to about 0.6 s for hard, 1 s for normal. Collisions are not affected:
+the rollouts always test paths against the current grid.
+
+Measured (1280 rounds per match-up, 8 levels, map against no map, both with the human
+layer; ±3 points):
+
+| Refresh | hard wins / loses | normal wins / loses |
+|---------|------|------|
+| 12 ticks (the planner's own) | 52.9 / 46.8 | 56.0 / 43.3 |
+| **as set** (hard 24, normal 36) | **53.8 / 45.8** | **56.1 / 43.5** |
+| twice that (48 / 72) | 51.2 / 48.2 | 54.0 / 45.5 |
+
+Head to head, the slow look against the fast one: hard 49.2 / 50.3, normal 48.5 / 51.0.
+So the chosen periods cost nothing measurable, and twice as slow begins to.
+
+With strength 0 the bots are the planner alone on the true, shared map, refreshed every
+12 ticks.
 
 ### Aim error
 
@@ -231,6 +258,7 @@ Ranges are uniform, in ticks unless noted (1 tick = 14.3 ms).
 | | easy | normal | hard |
 |-|------|--------|------|
 | `trackDelay` (tracked enemies) | 24 (340 ms) | 15 (215 ms) | 11 (160 ms) |
+| `arenaGlance` (looking the whole arena over) | 48 (unused: easy has no map) | 36 (515 ms) | 24 (340 ms) |
 | `surprise` (new item, shot, weapon change) | 35–55 (500–790 ms) | 22–32 (315–460 ms) | 16–22 (230–315 ms) |
 | `attention` (enemies tracked continuously) | 1 | 2 | 3 |
 | `glance` (unattended enemies) | 50–90 | 35–60 | — |

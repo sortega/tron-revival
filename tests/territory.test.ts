@@ -281,6 +281,39 @@ describe('territory map: refreshing', () => {
     expect(staged.shared[0]).toBeGreaterThan(0);
   });
 
+  it('a slower look at the arena: the same slices further apart, never faster than the default', () => {
+    const grid = new PixelGrid();
+    frame(grid);
+    const players = [player(0, 100, 300, 0), player(1, 650, 300, 180)];
+    const versions = (period: number, ticks: number): number => {
+      const map = new TerritoryMap();
+      const w = world(grid, players);
+      map.update(w, 1, period);
+      for (let tick = 1; tick <= ticks; tick++) {
+        w.doorTick = tick;
+        map.update(w, 1, period);
+      }
+      return map.version - 1;
+    };
+    expect(versions(12, 72)).toBe(6);
+    expect(versions(24, 72)).toBe(3);
+    expect(versions(36, 72)).toBe(2);
+    expect(versions(6, 72)).toBe(6);    // Not faster than the default
+    // What it shows is that old: an obstacle is noticed within a period, not before
+    const map = new TerritoryMap();
+    const w = world(grid, players);
+    map.update(w, 1, 36);
+    vline(grid, 375, 0, PLAY_HEIGHT - 1);
+    w.doorTick = 1;
+    map.update(w, 1, 36);
+    expect(map.shared[0]).toBeGreaterThan(0);          // Still thinks the arena is one
+    for (let tick = 2; tick <= 72; tick++) {
+      w.doorTick = tick;
+      map.update(w, 1, 36);
+    }
+    expect(map.shared[0]).toBe(0);
+  });
+
   it('is deterministic and allocates nothing per refresh', () => {
     const grid = new PixelGrid();
     frame(grid);
