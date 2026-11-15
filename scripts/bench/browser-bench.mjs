@@ -17,7 +17,7 @@
 // Chrome's CPU throttling of the page's main thread. The GPU, the GPU process, memory
 // bandwidth and thermal throttling of a real phone are not emulated.
 
-/* global navigator, performance */
+/* global navigator */
 import { chromium } from 'playwright-core';
 import { build, preview } from 'vite';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';

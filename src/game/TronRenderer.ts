@@ -8,7 +8,15 @@ import { describeDeath } from './deathLabels';
 import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard, DeathCause } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
-import { PixelGrid, forEachLinePixel } from './PixelGrid';
+import { PixelGrid } from './PixelGrid';
+import { ArenaDisplay, CanvasLayerSink } from './display/ArenaDisplay';
+import {
+  DISPLAY_STORAGE_KEY, FX, HEAD_VARIANTS, SHADE_VARIANTS,
+  formatDisplaySettings, haloFor, nextOf, parseDisplaySettings, resolveDisplay, styleFor,
+} from './display/settings';
+import type { DisplayEnv, DisplaySettings } from './display/settings';
+import { bandColor, cssOf, fringeWidth, packCss, trailColor } from './display/shade';
+import type { ShadeStyle } from './display/shade';
 import { SpriteAtlas } from '../sprites';
 import { SPRITE_HASH } from './spriteHash';
 
@@ -22,20 +30,39 @@ const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
 const STATUS_WIDTH = 50;
 const PLAYER_HEAD_SIZE = 1;
+const FADE_FRAMES = 12;
+const TEST_CARD_ROWS = [4, 6, 12, 18, 24, 30];   // Top of each wavy trail of the test card
 
 export class TronRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
 
-  // Off-screen canvas for persistent trails
-  private readonly trailCanvas: HTMLCanvasElement;
-  private trailCtx: CanvasRenderingContext2D;
-
-  // Off-screen canvas for level background
-  private readonly levelCanvas: HTMLCanvasElement;
-  private levelCtx: CanvasRenderingContext2D;
-  private currentLevelImage: HTMLImageElement | null = null;
+  // Display bitmap of the arena (trails, walls) and the layers derived from it; kept
+  // apart from the collision bitmap (design/display-layer.md)
+  private readonly layers: CanvasLayerSink;
+  private readonly display: ArenaDisplay;
+  private settings: DisplaySettings;
+  private style: ShadeStyle;
+  // What the settings are applied to: how big the arena is on screen, light level or not
+  private env: DisplayEnv = { cssPerLogical: 1, lightBackground: false };
+  private halo: readonly number[] = [];   // Opacity of each ring of the heads' halo
+  // Core and fringe colours per trail colour in the current style (provisional trails)
+  private overlayCss = new Map<string, { core: string; bands: string[] }>();
+  private chips: HTMLElement | null = null;   // `?displaydebug=1`: on-screen switches
+  /** Called when the picture changed without a simulation step (a setting was switched). */
+  onInvalidate: (() => void) | null = null;
+  private perfSync = false;
+  private scale = 1;  // Backing-store pixels per logical pixel
+  private backgroundImage: HTMLImageElement | null = null;  // Display only, never a wall
+  private backgroundCanvas: HTMLCanvasElement | null = null;  // The image at the display scale
+  private backgroundKey = '';
   private levelHidden = false;  // True while a snapshot stands in for the level image
+  private fades: { x: number; y: number; w: number; h: number; frames: number }[] = [];
+  private settingsNotice: { text: string; frames: number } | null = null;
+  private readonly displayKeyHandler: (e: KeyboardEvent) => void;
+  private testCard: { x: number; y: number } | null = null;
+  private renderTimes = new Float32Array(600);
+  private renderCount = 0;
 
   // Automatic doors of the current level and their sprite strip (10 frames, stacked)
   private doors: readonly DoorDefinition[] = [];
@@ -79,8 +106,6 @@ export class TronRenderer {
 
     // Create main canvas - scaled to fit viewport while keeping aspect ratio
     this.canvas = document.createElement('canvas');
-    this.canvas.width = CANVAS_WIDTH;
-    this.canvas.height = CANVAS_HEIGHT;
     this.canvas.style.display = 'block';
     this.canvas.style.imageRendering = 'pixelated';
 
@@ -117,20 +142,10 @@ export class TronRenderer {
     }
 
     this.ctx = this.canvas.getContext('2d')!;
-    this.ctx.imageSmoothingEnabled = false;
 
     container.appendChild(this.canvas);
 
-    // Create off-screen trail canvas
-    this.trailCanvas = document.createElement('canvas');
-    this.trailCanvas.width = PLAY_WIDTH;
-    this.trailCanvas.height = PLAY_HEIGHT;
-    this.trailCtx = this.trailCanvas.getContext('2d')!;
-    this.trailCtx.imageSmoothingEnabled = false;
-
     this.tintCanvas = document.createElement('canvas');
-    this.tintCanvas.width = PLAY_WIDTH;
-    this.tintCanvas.height = PLAY_HEIGHT;
     this.tintCtx = this.tintCanvas.getContext('2d')!;
 
     this.sidebarCanvas = document.createElement('canvas');
@@ -139,12 +154,43 @@ export class TronRenderer {
     this.sidebarCtx = this.sidebarCanvas.getContext('2d')!;
     this.sidebarCtx.imageSmoothingEnabled = false;  // Like the main canvas
 
-    // Create off-screen level canvas
-    this.levelCanvas = document.createElement('canvas');
-    this.levelCanvas.width = PLAY_WIDTH;
-    this.levelCanvas.height = PLAY_HEIGHT;
-    this.levelCtx = this.levelCanvas.getContext('2d')!;
-    this.levelCtx.imageSmoothingEnabled = false;
+    let stored: string | null = null;
+    try { stored = localStorage.getItem(DISPLAY_STORAGE_KEY); } catch { /* private mode */ }
+    this.settings = parseDisplaySettings(window.location.search, stored);
+    this.layers = new CanvasLayerSink();
+    this.env = this.measureEnv(false);
+    this.style = styleFor(this.settings, this.env);
+    this.display = new ArenaDisplay(PLAY_WIDTH, PLAY_HEIGHT, this.layers, this.style);
+    this.applyDisplaySettings(this.settings, false);
+
+    // A/B switching: 1 = trail shade, 2 = head halo, 3 = extras; with `?displaydebug=1`
+    // also on-screen chips, for devices without a keyboard
+    this.displayKeyHandler = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.code === 'Digit1') this.cycleDisplay('shade');
+      else if (e.code === 'Digit2') this.cycleDisplay('head');
+      else if (e.code === 'Digit3') this.cycleDisplay('fx');
+    };
+    document.addEventListener('keydown', this.displayKeyHandler);
+    if (new URLSearchParams(window.location.search).has('displaydebug')) this.createChips();
+    // Debug / measurement hook
+    (window as unknown as { __teratronDisplay?: unknown }).__teratronDisplay = {
+      get: () => formatDisplaySettings(this.settings),
+      set: (spec: string) => this.applyDisplaySettings(parseDisplaySettings(spec, formatDisplaySettings(this.settings)), false),
+      testCard: (x: number, y: number) => this.drawTestCard(x, y),
+      perf: () => this.renderPerf(),
+      resetPerf: () => { this.renderCount = 0; },
+      layers: () => ({ level: this.layers.levelCanvas, trail: this.layers.trailCanvas }),
+      // Make render() wait for the canvas to be rasterised, so that its time includes it
+      sync: (on: boolean) => { this.perfSync = on; },
+      // Cost of re-deriving both layers for the whole arena (round start, Eraser), in ms
+      rederive: () => {
+        const start = performance.now();
+        this.display.setStyle(styleFor(this.settings, this.env));
+        this.display.flush();
+        return performance.now() - start;
+      },
+    };
 
     // Load sprite atlas asynchronously - rendering methods check isLoaded() and
     // gracefully skip drawing if sprites aren't ready yet. The countdown phase
@@ -162,37 +208,235 @@ export class TronRenderer {
     }
   }
 
+  // How big a logical pixel is on screen (CSS pixels), and whether the level is light
+  private measureEnv(lightBackground: boolean): DisplayEnv {
+    const rect = this.canvas.getBoundingClientRect();
+    let cssPerLogical = Math.min(rect.width / CANVAS_WIDTH, rect.height / CANVAS_HEIGHT);
+    // Not laid out yet: what the canvas will get at most
+    if (!(cssPerLogical > 0)) cssPerLogical = Math.min(window.innerWidth / CANVAS_WIDTH, window.innerHeight / CANVAS_HEIGHT);
+    return { cssPerLogical, lightBackground };
+  }
+
+  private cycleDisplay(what: 'shade' | 'head' | 'fx'): void {
+    const s = this.settings;
+    if (what === 'shade') this.applyDisplaySettings({ ...s, shade: nextOf(SHADE_VARIANTS, s.shade) });
+    else if (what === 'head') this.applyDisplaySettings({ ...s, head: nextOf(HEAD_VARIANTS, s.head) });
+    else {
+      // Extras: the default pair → none → each of the pair alone → all
+      const options: DisplaySettings['fx'][] = [['tracer', 'boost'], [], ['tracer'], ['boost'], [...FX]];
+      const current = options.findIndex(o => o.join() === s.fx.join());
+      this.applyDisplaySettings({ ...s, fx: options[(current + 1) % options.length]! });
+    }
+  }
+
+  // Switch trail shade / head halo / extras; the display bitmap is kept and re-derived
+  applyDisplaySettings(settings: DisplaySettings, announce = true): void {
+    this.settings = settings;
+    const style = styleFor(settings, this.env);
+    this.style = style;
+    this.halo = haloFor(resolveDisplay(settings, this.env).head);
+    this.overlayCss.clear();
+    this.scale = style.scale;
+    if (this.canvas.width !== CANVAS_WIDTH * this.scale) {
+      this.canvas.width = CANVAS_WIDTH * this.scale;    // Resets the context state
+      this.canvas.height = CANVAS_HEIGHT * this.scale;
+      this.tintCanvas.width = PLAY_WIDTH * this.scale;
+      this.tintCanvas.height = PLAY_HEIGHT * this.scale;
+    }
+    this.ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+    this.ctx.imageSmoothingEnabled = false;
+    this.display.setStyle(style);
+    this.updatePixelation();
+    this.renderCount = 0;
+    this.updateChips();
+    this.onInvalidate?.();
+    if (announce) {
+      this.settingsNotice = { text: this.describeDisplay(), frames: 90 };
+      try { localStorage.setItem(DISPLAY_STORAGE_KEY, formatDisplaySettings(settings)); } catch { /* private mode */ }
+    }
+  }
+
+  // "trail auto→bold  head auto→soft  fx tracer,boost"
+  private describeDisplay(): string {
+    const s = this.settings;
+    const r = resolveDisplay(s, this.env);
+    const shown = (asked: string, got: string): string => (asked === got ? asked : `${asked}→${got}`);
+    return `trail ${shown(s.shade, r.shade)}  head ${shown(s.head, r.head)}  fx ${s.fx.join(',') || 'none'}`;
+  }
+
+  // The screen changed (rotation, window resize, another level): `auto` may now stand for
+  // something else, and a 2× picture may need smoothing or not
+  private followScreen(): void {
+    const env = this.measureEnv(this.env.lightBackground);
+    const before = resolveDisplay(this.settings, this.env);
+    const after = resolveDisplay(this.settings, env);
+    this.env = env;
+    if (before.shade !== after.shade || before.head !== after.head) this.applyDisplaySettings(this.settings, false);
+    else this.updatePixelation();
+  }
+
+  // `?displaydebug=1`: three tappable chips in the corner, outside the arena on a phone
+  private createChips(): void {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;right:6px;top:50%;transform:translateY(-50%);z-index:1000;'
+      + 'display:flex;flex-direction:column;gap:6px;align-items:flex-end;touch-action:manipulation;';
+    for (const what of ['shade', 'head', 'fx'] as const) {
+      const chip = document.createElement('button');
+      chip.dataset.display = what;
+      chip.style.cssText = 'font:11px monospace;padding:6px 8px;min-width:76px;color:#0ff;background:rgba(0,16,32,0.85);'
+        + 'border:1px solid #0ff;border-radius:10px;text-align:left;white-space:pre;';
+      const cycle = (e: Event): void => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.cycleDisplay(what);
+      };
+      chip.addEventListener('click', cycle);
+      // Keep the touch away from the game's own controls underneath
+      for (const type of ['touchstart', 'touchend', 'pointerdown'] as const) {
+        chip.addEventListener(type, e => e.stopPropagation());
+      }
+      box.appendChild(chip);
+    }
+    document.body.appendChild(box);
+    this.chips = box;
+    this.updateChips();
+  }
+
+  private updateChips(): void {
+    if (!this.chips) return;
+    const s = this.settings;
+    const r = resolveDisplay(s, this.env);
+    const text: Record<string, string> = {
+      shade: `trail\n${s.shade === r.shade ? s.shade : `${s.shade}→${r.shade}`}`,
+      head: `head\n${s.head === r.head ? s.head : `${s.head}→${r.head}`}`,
+      fx: `fx\n${s.fx.join('\n') || 'none'}`,
+    };
+    for (const chip of Array.from(this.chips.children) as HTMLElement[]) {
+      chip.textContent = text[chip.dataset.display ?? ''] ?? '';
+    }
+  }
+
+  // A 2× backing store shown on fewer device pixels than it has (a desktop window at
+  // DPR 1) must be smoothed: nearest-neighbour would drop sub-pixels at random. Shown
+  // 1:1 or enlarged it stays pixelated, like the 1× picture always is.
+  private updatePixelation(): void {
+    let pixelated = true;
+    if (this.scale > 1) {
+      const devicePerLogical = this.env.cssPerLogical * (window.devicePixelRatio || 1);
+      pixelated = devicePerLogical >= this.scale * 0.9;
+    }
+    const value = pixelated ? 'pixelated' : 'auto';
+    if (this.canvas.style.imageRendering !== value) this.canvas.style.imageRendering = value;
+  }
+
+  /**
+   * Comparison aid (tools/display-lab.mjs): a fixed 76×40 pattern at (ox, oy). Left: wavy
+   * trails in the six player colours (red and green one free pixel apart), a crossing and
+   * a hole erased through them, with heads. Right: pairs of straight trails with 1, 2 and
+   * 3 free pixels between them, a lone head and two tracers. Display only: the collision
+   * bitmap knows nothing about it.
+   */
+  private drawTestCard(ox: number, oy: number): void {
+    const colors = [FFA_COLORS[0], FFA_COLORS[1], FFA_COLORS[2], FFA_COLORS[3], TEAM_COLORS.purple, TEAM_COLORS.brown];
+    TEST_CARD_ROWS.forEach((row, i) => {
+      const points = [];
+      for (let x = 0; x < 40; x++) points.push({ x: ox + x, y: oy + row + Math.floor(x / 9) });
+      this.display.addTrail(points, colors[i]!);
+    });
+    const crossing = [];
+    for (let i = 0; i < 36; i++) crossing.push({ x: ox + 10 + Math.floor(i / 6), y: oy + 1 + i });
+    this.display.addTrail(crossing, colors[0]!);
+    this.display.clearRect(ox + 22, oy + 2, 6, 14);
+    for (const y of [4, 6, 13, 16, 24, 28]) {
+      const points = [];
+      for (let x = 48; x < 74; x++) points.push({ x: ox + x, y: oy + y });
+      this.display.addTrail(points, colors[1]!);
+    }
+    this.testCard = { x: ox, y: oy };
+    this.onInvalidate?.();
+  }
+
+  /** Time spent in render() over the last frames (ms). */
+  private renderPerf(): { frames: number; avg: number; p95: number; max: number } {
+    const n = Math.min(this.renderCount, this.renderTimes.length);
+    if (n === 0) return { frames: 0, avg: 0, p95: 0, max: 0 };
+    const sorted = Array.from(this.renderTimes.subarray(0, n)).sort((a, b) => a - b);
+    const round = (v: number): number => Math.round(v * 1000) / 1000;
+    return {
+      frames: this.renderCount,
+      avg: round(sorted.reduce((a, b) => a + b, 0) / n),
+      p95: round(sorted[Math.floor(n * 0.95)]!),
+      max: round(sorted[n - 1]!),
+    };
+  }
+
   // Main render function
   render(
     round: TronRoundState, match: TronMatchState, fps?: number, networkStats?: NetworkStats,
     overlayTrails?: { color: string; segments: TrailSegment[] }[]
   ): void {
-    // Clear the play area
-    this.ctx.fillStyle = '#000';
-    this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
+    const renderStart = performance.now();
+    if (this.renderCount % 30 === 0) this.followScreen();
 
-    // Draw level background
-    this.ctx.drawImage(this.levelCanvas, 0, 0);
+    // Background of the play area: black, or the level's display-only image
+    const background = this.backgroundLayer();
+    if (background) {
+      this.ctx.drawImage(background, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    } else {
+      this.ctx.fillStyle = '#000';
+      this.ctx.fillRect(0, 0, PLAY_WIDTH, CANVAS_HEIGHT);
+    }
 
-    // Draw trails. During color blindness every trail is tinted with one cycling colour
+    // Bring the derived layers up to date with the display bitmap
+    this.display.flush();
+
+    // Walls (and their shadow)
+    this.ctx.drawImage(this.layers.levelCanvas, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+
+    // Draw trails (and their shade). During color blindness every trail is tinted with
+    // one cycling colour
+    let trails: HTMLCanvasElement = this.layers.trailCanvas;
     if (this.colorBlindnessFrames > 0) {
       const elapsed = this.COLOR_BLINDNESS_DURATION - this.colorBlindnessFrames;
       const colors = this.getColorBlindnessColors();
       const colorIndex = Math.floor(elapsed / 2) % colors.length;  // Change every 2 frames
       this.tintCtx.globalCompositeOperation = 'copy';
-      this.tintCtx.drawImage(this.trailCanvas, 0, 0);
+      this.tintCtx.drawImage(trails, 0, 0);
       this.tintCtx.globalCompositeOperation = 'source-in';
       this.tintCtx.fillStyle = colors[colorIndex]!;
-      this.tintCtx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-      this.ctx.drawImage(this.tintCanvas, 0, 0);
-    } else {
-      this.ctx.drawImage(this.trailCanvas, 0, 0);
+      this.tintCtx.fillRect(0, 0, this.tintCanvas.width, this.tintCanvas.height);
+      trails = this.tintCanvas;
+    }
+    this.ctx.drawImage(trails, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+
+    // Erased areas flash and fade
+    if (this.fades.length > 0) {
+      for (const fade of this.fades) {
+        this.ctx.fillStyle = `rgba(255, 255, 255, ${0.3 * fade.frames / FADE_FRAMES})`;
+        this.ctx.fillRect(fade.x, fade.y, fade.w, fade.h);
+        fade.frames--;
+      }
+      this.fades = this.fades.filter(f => f.frames > 0);
     }
 
     // Provisional trails (guest prediction): not part of the trail canvas
     if (overlayTrails) {
+      // Same shade as confirmed trail (approximately: it is not clipped by what is around)
+      const style = this.style;
       for (const { color, segments } of overlayTrails) {
-        this.ctx.fillStyle = color;
+        let css = this.overlayCss.get(color);
+        if (!css) {
+          const core = trailColor(style, packCss(color));
+          css = { core: cssOf(core), bands: style.bands.map(band => cssOf(bandColor(band, core))) };
+          this.overlayCss.set(color, css);
+        }
+        let reach = fringeWidth(style) / style.scale;
+        for (let b = style.bands.length - 1; b >= 0; b--) {
+          this.ctx.fillStyle = css.bands[b]!;
+          for (const seg of segments) this.ctx.fillRect(seg.x - reach, seg.y - reach, 1 + 2 * reach, 1 + 2 * reach);
+          reach -= style.bands[b]!.width / style.scale;
+        }
+        this.ctx.fillStyle = css.core;
         for (const seg of segments) this.ctx.fillRect(seg.x, seg.y, 1, 1);
       }
     }
@@ -232,10 +476,17 @@ export class TronRenderer {
       if (playerState.alive) {
         this.drawPlayerHead(
           Math.floor(playerState.x / 1000),
-          Math.floor(playerState.y / 1000),
-          playerState.color
+          Math.floor(playerState.y / 1000)
         );
       }
+    }
+
+    if (this.testCard) {
+      const { x, y } = this.testCard;
+      for (const row of TEST_CARD_ROWS) this.drawPlayerHead(x + 40, y + row + 4);
+      this.drawPlayerHead(x + 54, y + 35);
+      this.drawTracer(x + 64, y + 33, 0);
+      this.drawTracer(x + 70, y + 37, 135);
     }
 
     // The dentist's hand goes over everything
@@ -281,6 +532,21 @@ export class TronRenderer {
       this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
       this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
+
+    // The display setting just selected (keys 1/2/3)
+    if (this.settingsNotice) {
+      this.ctx.font = '12px monospace';
+      this.ctx.textAlign = 'right';
+      this.ctx.textBaseline = 'top';
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      this.ctx.fillRect(PLAY_WIDTH - 360, 0, 360, 18);
+      this.ctx.fillStyle = '#0ff';
+      this.ctx.fillText(this.settingsNotice.text, PLAY_WIDTH - 4, 4);
+      if (--this.settingsNotice.frames <= 0) this.settingsNotice = null;
+    }
+
+    if (this.perfSync) this.ctx.getImageData(0, 0, 1, 1);
+    this.renderTimes[this.renderCount++ % this.renderTimes.length] = performance.now() - renderStart;
 
     // Draw debug overlay (FPS + network stats)
     if (fps !== undefined) {
@@ -339,91 +605,57 @@ export class TronRenderer {
     this.ctx.fillText(text, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
   }
 
-  // Add trail segments to the off-screen canvas
+  // Add trail segments to the display bitmap
   addTrailSegments(slotIndex: SlotIndex, segments: TrailSegment[]): void {
     const player = this.players.find(p => p.slotIndex === slotIndex);
     if (!player) return;
-
-    this.trailCtx.fillStyle = player.color;
-    for (const seg of segments) {
-      this.trailCtx.fillRect(seg.x, seg.y, 1, 1);
-    }
+    this.display.addTrail(segments, player.color);
   }
 
-  // Add border segments to the level canvas (for lock borders effect)
-  // Border pixels become part of the level background, not trails
+  // Add border segments (lock borders effect): they become part of the level, not trails
   addBorderSegments(color: string, segments: TrailSegment[]): void {
-    this.levelCtx.fillStyle = color;
-    for (const seg of segments) {
-      this.levelCtx.fillRect(seg.x, seg.y, 1, 1);
-    }
+    this.display.addLevel(segments, color);
   }
 
   // Clear all trails and restore level (for new round)
   clearTrails(): void {
-    this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     this.ridiculousDeathSlots.clear();
     this.deathCauses.clear();
     this.colorBlindnessFrames = 0;
     this.whiteFlashFrames = 0;
-    // Restore level canvas (removes lock borders modifications)
-    this.drawLevelImage();
+    this.fades = [];
+    // Also removes lock borders and level damage
+    this.restoreLevel();
   }
 
-  // Restore level to original state (for eraser)
-  // Clears trails and redraws original level image
+  // Restore level to original state (for eraser): no trails, undamaged level
   restoreLevel(): void {
-    // Clear trails
-    this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-
-    // Restore level canvas from stored image
-    this.drawLevelImage();
+    this.levelHidden = false;
+    this.display.restoreLevel();
   }
 
   // Clear a rectangle (top-left x,y; wraps around edges) from trails and level
   clearRect(x: number, y: number, w: number, h: number): void {
-    const x0 = ((x % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH;
-    const y0 = ((y % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT;
-    // Split into up to 4 rectangles when crossing the edges
-    const xs: [number, number][] = x0 + w > PLAY_WIDTH ? [[x0, PLAY_WIDTH - x0], [0, x0 + w - PLAY_WIDTH]] : [[x0, w]];
-    const ys: [number, number][] = y0 + h > PLAY_HEIGHT ? [[y0, PLAY_HEIGHT - y0], [0, y0 + h - PLAY_HEIGHT]] : [[y0, h]];
-    for (const [rx, rw] of xs) {
-      for (const [ry, rh] of ys) {
-        this.trailCtx.clearRect(rx, ry, rw, rh);
-        this.levelCtx.clearRect(rx, ry, rw, rh);
-      }
+    this.display.clearRect(x, y, w, h);
+    if (this.settings.fx.includes('fade') && this.fades.length < 400) {
+      this.fades.push({ x, y, w, h, frames: FADE_FRAMES });
     }
   }
 
   // Clear the pixels along lines (tracer paths; they wrap around edges), given as a flat
-  // [x0, y0, x1, y1, ...]. All the pixels go into one path that is erased with a single
-  // fill per canvas: a burst of tracers used to cost two canvas calls per pixel.
+  // [x0, y0, x1, y1, ...]
   clearLines(lines: readonly number[]): void {
-    if (lines.length < 4) return;
-    const path = new Path2D();
-    const addPixel = (x: number, y: number): void => { path.rect(x, y, 1, 1); };
     for (let i = 0; i + 3 < lines.length; i += 4) {
-      forEachLinePixel(lines[i]!, lines[i + 1]!, lines[i + 2]!, lines[i + 3]!, addPixel);
-    }
-    for (const ctx of [this.trailCtx, this.levelCtx]) {
-      // Whole pixels, so this erases exactly what clearRect would
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.fillStyle = '#000';
-      ctx.fill(path);
-      ctx.globalCompositeOperation = 'source-over';
+      this.display.clearLine(lines[i]!, lines[i + 1]!, lines[i + 2]!, lines[i + 3]!);
     }
   }
 
   // Paint a whole arena (joining a game in progress). The level image stays hidden
   // until the next round / eraser: the snapshot already contains what is left of it.
   paintArena(arena: PixelGrid): void {
-    this.trailCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    this.levelCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     this.levelHidden = true;
-    arena.forEachRun((x, y, length, color) => {
-      this.trailCtx.fillStyle = color;
-      this.trailCtx.fillRect(x, y, length, 1);
-    });
+    const trailColors = new Set(this.players.map(p => p.color.toLowerCase()));
+    this.display.paintSnapshot(arena, color => trailColors.has(color.toLowerCase()));
   }
 
   // Remember why a player died, to show it on the round summary
@@ -464,8 +696,17 @@ export class TronRenderer {
       img.onerror = () => reject(new Error(`Failed to load level image: ${level.imagePath}`));
     });
 
-    // Store the image for restoration (new round, eraser)
-    this.currentLevelImage = img;
+    // Display-only background: never read for collisions
+    if (this.env.lightBackground !== !!level.lightBackground) {
+      this.env = this.measureEnv(!!level.lightBackground);
+      this.applyDisplaySettings(this.settings, false);
+    }
+    this.backgroundImage = null;
+    if (level.backgroundPath) {
+      const background = new Image();
+      background.src = level.backgroundPath;
+      this.backgroundImage = background;
+    }
 
     this.doors = level.doors ?? [];
     if (this.doors.length > 0 && !this.doorImage) {
@@ -473,8 +714,6 @@ export class TronRenderer {
       doorImage.src = `${import.meta.env.BASE_URL}assets/levels/doors.png`;
       this.doorImage = doorImage;
     }
-
-    if (!this.levelHidden) this.drawLevelImage();
 
     // The obstacles are the pixels of the file, decoded here. Reading them back from a
     // canvas is not exact everywhere: Safari adds noise to canvas read-backs, which put
@@ -491,9 +730,14 @@ export class TronRenderer {
     }
     if (!obstacles || this.checkCanvasReadback) {
       const fromCanvas = this.obstaclesFromCanvas(img);
-      if (!obstacles) return fromCanvas;
-      this.canvasReadbackDifference = obstacles.differenceFrom(fromCanvas);
+      if (obstacles) this.canvasReadbackDifference = obstacles.differenceFrom(fromCanvas);
+      else obstacles = fromCanvas;
     }
+    // The same grid is the collision bitmap of the level and the source of its display
+    // cells (never a canvas read-back when the file can be decoded)
+    this.display.setLevel(obstacles);
+    // Not while a snapshot stands in for the level (it holds what is left of it)
+    if (!this.levelHidden) this.display.restoreLevel(true);
     return obstacles;
   }
 
@@ -504,9 +748,31 @@ export class TronRenderer {
 
   // Fallback (no DecompressionStream, unusual PNG): the image as a canvas reports it
   private obstaclesFromCanvas(img: HTMLImageElement): PixelGrid {
-    this.tintCtx.globalCompositeOperation = 'copy';
-    this.tintCtx.drawImage(img, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    return PixelGrid.fromRgba(this.tintCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT).data);
+    const scratch = document.createElement('canvas');
+    scratch.width = PLAY_WIDTH;
+    scratch.height = PLAY_HEIGHT;
+    const scratchCtx = scratch.getContext('2d', { willReadFrequently: true })!;
+    scratchCtx.drawImage(img, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    return PixelGrid.fromRgba(scratchCtx.getImageData(0, 0, PLAY_WIDTH, PLAY_HEIGHT).data);
+  }
+
+  // The level's background image at the scale of the backing store (opaque), so that
+  // drawing it every frame is a plain copy; null when the level has none (black)
+  private backgroundLayer(): HTMLCanvasElement | null {
+    const image = this.backgroundImage;
+    if (!image || !image.complete || image.naturalWidth === 0) return null;
+    const key = `${image.src}@${this.scale}`;
+    if (this.backgroundKey !== key || !this.backgroundCanvas) {
+      const canvas = this.backgroundCanvas ?? document.createElement('canvas');
+      canvas.width = PLAY_WIDTH * this.scale;
+      canvas.height = PLAY_HEIGHT * this.scale;
+      const ctx = canvas.getContext('2d', { alpha: false })!;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      this.backgroundCanvas = canvas;
+      this.backgroundKey = key;
+    }
+    return this.backgroundCanvas;
   }
 
   // The dentist's hand hides what is under it, unless a player is there
@@ -536,7 +802,7 @@ export class TronRenderer {
     ctx.rect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
     ctx.clip();
     for (const door of this.doors) {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
       ctx.translate(door.x, door.y);
       if (door.vertical) ctx.transform(0, 1, 1, 0, 0, 0); // Swap axes: the sprite is symmetric
       ctx.drawImage(
@@ -545,14 +811,6 @@ export class TronRenderer {
       );
     }
     ctx.restore();
-  }
-
-  private drawLevelImage(): void {
-    this.levelHidden = false;
-    this.levelCtx.clearRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    if (this.currentLevelImage) {
-      this.levelCtx.drawImage(this.currentLevelImage, 0, 0, PLAY_WIDTH, PLAY_HEIGHT);
-    }
   }
 
   // Draw a teleport portal (both endpoints with wrap-around)
@@ -607,9 +865,7 @@ export class TronRenderer {
     const y = Math.floor(proj.y / 1000);
 
     if (proj.type === 'tracer') {
-      // Tracer: single white pixel
-      this.ctx.fillStyle = '#fff';
-      this.ctx.fillRect(x, y, 1, 1);
+      this.drawTracer(x, y, proj.direction);
     } else if (proj.type === 'bomb') {
       // Bomb: use directional sprites (bomb_0, bomb_30, bomb_60, bomb_90)
       if (!this.spriteAtlas?.isLoaded()) return;
@@ -632,6 +888,26 @@ export class TronRenderer {
         rotation,
       });
     }
+  }
+
+  // Tracer: a single white pixel; with the `tracer` extra, a short fading streak behind it
+  // (unlike a head, which has a halo all around)
+  private drawTracer(x: number, y: number, direction: number): void {
+    const ctx = this.ctx;
+    const light = this.env.lightBackground;
+    if (this.settings.fx.includes('tracer')) {
+      const rad = (direction * Math.PI) / 180;
+      const dx = Math.cos(rad);
+      const dy = Math.sin(rad);
+      const alphas = light ? [0.8, 0.5, 0.25] : [0.6, 0.35, 0.15];
+      for (let i = 0; i < alphas.length; i++) {
+        ctx.fillStyle = light ? `rgba(0, 0, 0, ${alphas[i]})` : `rgba(255, 255, 255, ${alphas[i]})`;
+        ctx.fillRect(Math.round(x - dx * (i + 1)), Math.round(y - dy * (i + 1)), 1, 1);
+      }
+    }
+    // On a light level white would not show
+    ctx.fillStyle = light ? '#000' : '#fff';
+    ctx.fillRect(x, y, 1, 1);
   }
 
   // Draw an explosion animation
@@ -670,19 +946,27 @@ export class TronRenderer {
     );
   }
 
-  private drawPlayerHead(x: number, y: number, color: string): void {
-    // Draw a white head with colored glow
-    const offset = Math.floor(PLAYER_HEAD_SIZE / 2);
-
-    // Glow effect in player color
-    this.ctx.shadowColor = color;
-    this.ctx.shadowBlur = 10;
-
-    // White head pixel
-    this.ctx.fillStyle = '#fff';
-    this.ctx.fillRect(x - offset, y - offset, PLAYER_HEAD_SIZE, PLAYER_HEAD_SIZE);
-
-    this.ctx.shadowBlur = 0;
+  // A head is a solid white pixel — the logical pixel the player is on — with a white,
+  // transparent halo around it: rings of squares (corners cut from the second on), each
+  // adding its opacity. Not an obstacle. On a light level the halo is dark instead, so
+  // that the white pixel shows on it.
+  private drawPlayerHead(x: number, y: number): void {
+    const ctx = this.ctx;
+    const light = this.env.lightBackground;
+    const halo = this.halo;
+    for (let ring = halo.length; ring >= 1; ring--) {
+      const alpha = Math.min(0.9, halo[ring - 1]! * (light ? 1.5 : 1));
+      ctx.fillStyle = light ? `rgba(0, 0, 0, ${alpha})` : `rgba(255, 255, 255, ${alpha})`;
+      if (ring === 1) {
+        ctx.fillRect(x - 1, y - 1, 3, 3);
+      } else {
+        ctx.fillRect(x - ring, y - ring + 1, 2 * ring + 1, 2 * ring - 1);
+        ctx.fillRect(x - ring + 1, y - ring, 2 * ring - 1, 1);
+        ctx.fillRect(x - ring + 1, y + ring, 2 * ring - 1, 1);
+      }
+    }
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(x, y, PLAYER_HEAD_SIZE, PLAYER_HEAD_SIZE);
   }
 
   // The status panel changes about once a second (the timers), so it is kept on its own
@@ -1004,6 +1288,8 @@ export class TronRenderer {
   // Clean up
   destroy(): void {
     window.removeEventListener('resize', this.resizeHandler);
+    document.removeEventListener('keydown', this.displayKeyHandler);
+    this.chips?.remove();
     this.canvas.remove();
   }
 }
