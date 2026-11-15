@@ -42,6 +42,10 @@ export interface BotProfile {
   usesTurbo: boolean;
   knowsMatchups: boolean;   // Seeks, avoids and holds fire according to weapons and satellites
   reverseReactionTicks: number; // Ticks needed to adapt to Control Reversal
+  /** Keep this many pixels between the path and anything solid (design/bots-human.md); default 0. */
+  sideMargin?: number;
+  /** Extra room (px) given to enemy heads, whose position is not known exactly; default 0. */
+  headMargin?: number;
 }
 
 export const BOT_PROFILES: Record<BotDifficulty, BotProfile> = {
@@ -84,6 +88,10 @@ const PROBE_STEP = 50;               // Where along a path progress towards the 
 const OPENNESS_RAYS = [-70, -35, 0, 35, 70];
 const OPENNESS_RANGE = 40;
 const BAD_ITEMS = new Set(['reverse', 'automatic_slow']);
+const MARGIN_FROM = 3;               // `sideMargin` is minded between these steps of a path:
+const MARGIN_STEPS = 40;             // what is nearer cannot be helped, what is further will be re-planned
+const MARGIN_PENALTY = 6;            // Cost of each step that passes too close...
+const MARGIN_SHARE = 12;             // ...for up to 1/12 of the lookahead: a tight path still beats a much shorter one
 
 interface Hazard {
   x: number;
@@ -426,11 +434,14 @@ export class BotController {
     // Our own colour in the grid, while it is passable (crossing)
     const ownColor = crossingSteps > 0 ? pixels.paletteIndexOf(ctx.me.color) : -1;
     const clearanceSteps = this.profile.clearanceSteps;
+    const sideMargin = this.profile.sideMargin ?? 0;
+    const maxTight = Math.round(this.profile.lookahead / MARGIN_SHARE);
     let { x, y, dir } = start;
     let portalCooldown = start.portalCooldown;
     let px = Math.floor(x);
     let py = Math.floor(y);
     let narrow = 0;
+    let tight = 0;
     let probeX = x;
     let probeY = y;
     let badItem = false;
@@ -491,6 +502,17 @@ export class BotController {
           // Diagonal step: the two pixels we squeeze between also count
           if (dx !== 0 && dy !== 0 && Math.abs(dx) === 1 && Math.abs(dy) === 1 &&
               (blocked(px + dx, py) || blocked(px, py + dy))) break;
+
+          // Imprecise hands: a path that brushes past something is a bad path
+          if (sideMargin > 0 && tight < maxTight && step > MARGIN_FROM && step <= MARGIN_STEPS) {
+            const ox = -sin * sideMargin;
+            const oy = cos * sideMargin;
+            if (blocked(wrapX(Math.floor(x + ox)), wrapY(Math.floor(y + oy))) ||
+                blocked(wrapX(Math.floor(x - ox)), wrapY(Math.floor(y - oy)))) {
+              narrow += MARGIN_PENALTY;
+              tight++;
+            }
+          }
 
           // Room to turn around, sampled every few steps. Where neither side has
           // room for a U-turn we are in a corridor: fine to pass through, deadly if
@@ -672,7 +694,7 @@ export class BotController {
     for (const p of game.players) {
       if (!p.alive || p.slotIndex === this.slot) continue;
       const rad = p.direction * DEG;
-      hazards.push({ x: p.x / 1000, y: p.y / 1000, vx: Math.cos(rad), vy: Math.sin(rad), radius: 4, maxStep: 45 });
+      hazards.push({ x: p.x / 1000, y: p.y / 1000, vx: Math.cos(rad), vy: Math.sin(rad), radius: 4 + (this.profile.headMargin ?? 0), maxStep: 45 });
     }
     // Satellites attack anyone inside their owner's area of action (design/bodyguards.md):
     // the whole area is deadly, and it travels with the owner

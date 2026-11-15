@@ -125,6 +125,29 @@ Design: `design/local-and-ai.md`
       November 2026 optimisations (`design/research/performance.md`); check low-end phones
       hosting, see "Performance" below
 
+### Human-like bots (research branch `research/bots-human`)
+
+Design and measurements: `design/bots-human.md`
+
+- [x] `HumanBot` = perception → planner (`BotController`, unchanged logic) → motor.
+      Strength 0 is the old bot input for input; `?human=<n>` in the URL dials it
+- [x] Perception: enemies seen `trackDelay` late and extrapolated, limited attention,
+      surprise delay for new items / shots / enemy weapons, aim error, tunnel vision
+- [x] Motor: key lag, minimum press, panic over-steer, trigger hesitation and tap rate
+- [x] Control Reversal: wrong-way presses, catching them, over-correction, gradual
+      adaptation, after-effect; disorientation after Swap / portals
+- [x] Planner margins for imprecise players (`sideMargin`, `headMargin`)
+- [x] `npm run sim:human` (before/after tables), `npm run bots:trace` (pictures)
+- [ ] Tight places: `normal` threads gaps half as often as before, `hard` does not, and
+      both spend more time squeezed than the old bots; look at replays before tuning more
+- [ ] `easy` is weaker than before (78 % against 69 % dead within 20 s when left alone);
+      decide after playing against it whether to lower the strength for easy
+- [ ] Late perception of trail pixels (bots still see every new trail pixel at once)
+- [ ] Colour blindness after a Swap does not confuse bots
+- [ ] Bots that know they see late could also *lead* their shots; today the aim error
+      only ever hurts
+- [ ] Setting in the local setup screen for the strength (now only `?human=`)
+
 ## Iteration 4 — Netcode: make it controllable  ✅
 
 Design: `design/networking.md` (Input Handling, Prediction and Reconciliation)

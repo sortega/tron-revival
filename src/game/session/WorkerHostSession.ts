@@ -10,6 +10,7 @@ import type { GameConfig, TronGameStateData, TronInput } from '../../types/game'
 import type { PixelGrid } from '../PixelGrid';
 import { perfEnd, perfSample, perfStart } from '../perf';
 import type { PerfDump, PerfSummary } from '../perf';
+import { defaultHumanisation } from '../ai/humanProfiles';
 import { HostSession } from './HostSession';
 import { ByteRate } from './GameSession';
 import type { GameSession, HostTransport, NetworkStats, ViewState } from './GameSession';
@@ -47,6 +48,7 @@ export class WorkerHostSession implements AuthoritativeSession {
       config,
       perf: new URLSearchParams(location.search).has('perf'),
       network: transport !== null,
+      botHumanisation: defaultHumanisation(),
     });
     if (transport) {
       transport.onInput = (slot, input) => this.post({ type: 'netInput', slot, input });

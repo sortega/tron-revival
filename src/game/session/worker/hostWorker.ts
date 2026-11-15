@@ -63,7 +63,11 @@ scope.onmessage = (event) => {
   switch (message.type) {
     case 'init':
       if (message.perf) perfEnable();
-      session = new HostSession(message.config, message.network ? { transport: relay } : {});
+      // The URL (`?human=`) is the page's: a worker cannot see it
+      session = new HostSession(message.config, {
+        botHumanisation: message.botHumanisation,
+        ...(message.network && { transport: relay }),
+      });
       session.onFrame = (frame) => { pending.push(frame); };
       lastTime = performance.now();
       // Timers are clamped to ~4 ms: wake up often and let the accumulator decide

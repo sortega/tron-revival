@@ -7,7 +7,7 @@ import type { PerfDump, PerfSummary } from '../../perf';
 
 export type ToWorker =
   /** `network`: this is the host of a network game; encoded states come back as `state`. */
-  | { type: 'init'; config: GameConfig; perf: boolean; network: boolean }
+  | { type: 'init'; config: GameConfig; perf: boolean; network: boolean; botHumanisation: number }
   /** Network host: an input received from a guest. */
   | { type: 'netInput'; slot: SlotIndex; input: TronInputMessage }
   /** Network host: a player joining mid-game needs the game so far. */
