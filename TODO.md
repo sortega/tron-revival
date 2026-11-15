@@ -105,6 +105,18 @@ Design: `design/display-layer.md`.
 - [ ] Remaining `npm audit` findings are dev-only: `free-tex-packer-core` (sprite build
       script) and `node-turn` (local TURN server of the e2e test)
 
+## Spectators
+
+Design: `design/spectators.md`. Merged from `research/spectators`; not yet tried on real
+devices.
+
+- [ ] **Try it with real phones**: joining by QR from somebody's screen, asking to play,
+      stepping down; what a spectator costs a phone that hosts (CPU, battery) was not
+      measured
+- [ ] Team mode with seat changes is unit-tested only
+- [ ] No chat during a game
+- [ ] Trystero's `scale` plug-in or `maxUsers` if rooms with many phones prove unstable
+
 ## Research branches not merged
 
 - [ ] `research/ideas` (worktree `.claude/worktrees/agent-a0532a52a989283a1`)

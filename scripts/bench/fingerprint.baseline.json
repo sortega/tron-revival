@@ -1,12 +1,12 @@
 {
-  "hard-normal-easy@bus": "state:459e5a1089fa19d6 frames:c003ef5341ed737f wire:65b3679157fee50b rounds:3",
-  "4hard@cycle": "state:29f9b1c243d9bb9f frames:0986ed3d7dd1e1cc wire:876778aa7844a0e1 rounds:5",
-  "normal-hard@portals": "state:a62adcf97dd69ec6 frames:5f8026d700756913 wire:a7ae6b2a2884e1e1 rounds:2",
-  "3normal+human@warzone": "state:482a518ebb46405f frames:f8ff1948112eaead wire:8d629e57c0bda867 rounds:2",
-  "hard-easy@dentistry": "state:733a7af03f0a511b frames:af3963a89e316909 wire:7990f553bb3f954d rounds:4",
-  "heavy-uzi-4p": "state:7f23b3a37ce2621a frames:a15eb196093d5b8b wire:1dbf45150d933370 rounds:1",
-  "heavy-rifle-shotgun-4p": "state:b487656049420b2f frames:40c6310835054f34 wire:9376b52d8b838485 rounds:2",
-  "heavy-hbombs-4p": "state:f42b7474341ff3c1 frames:61a14c7ff050781c wire:75e46df82870ff50 rounds:1",
-  "heavy-megabomb": "state:635f23a02d3f2a91 frames:7e7075f6dd68ad7c wire:431526e5582ae760 rounds:2",
-  "heavy-satellites-12": "state:eae6cd06c38a112d frames:18fffd7036c309d3 wire:d319c38152fad1b5 rounds:2"
+  "hard-normal-easy@bus": "state:459e5a1089fa19d6 frames:c003ef5341ed737f wire:20c0949044cecf1d rounds:3",
+  "4hard@cycle": "state:29f9b1c243d9bb9f frames:0986ed3d7dd1e1cc wire:0ab43e32e5047824 rounds:5",
+  "normal-hard@portals": "state:a62adcf97dd69ec6 frames:5f8026d700756913 wire:df2312355d68db32 rounds:2",
+  "3normal+human@warzone": "state:482a518ebb46405f frames:f8ff1948112eaead wire:9f9252af12ff15ee rounds:2",
+  "hard-easy@dentistry": "state:733a7af03f0a511b frames:af3963a89e316909 wire:29379701786b7154 rounds:4",
+  "heavy-uzi-4p": "state:7f23b3a37ce2621a frames:a15eb196093d5b8b wire:d11f96f2a3948d69 rounds:1",
+  "heavy-rifle-shotgun-4p": "state:b487656049420b2f frames:40c6310835054f34 wire:3e5b38f9379bd383 rounds:2",
+  "heavy-hbombs-4p": "state:f42b7474341ff3c1 frames:61a14c7ff050781c wire:6d64ffc532b0d42b rounds:1",
+  "heavy-megabomb": "state:635f23a02d3f2a91 frames:7e7075f6dd68ad7c wire:86e6be301045d2e3 rounds:2",
+  "heavy-satellites-12": "state:eae6cd06c38a112d frames:18fffd7036c309d3 wire:ab7b5a6bee002829 rounds:2"
 }

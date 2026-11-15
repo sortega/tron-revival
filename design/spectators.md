@@ -201,6 +201,20 @@ The reduced stream is serialised once more per 3 ticks on top of the players' st
 somebody watches. Not measured: CPU and battery on a real phone that hosts, and the cost of
 the extra idle connections on the other phones.
 
+**With the simulation in a Web Worker** (the default for a host, design/local-and-ai.md)
+the page only relays: the worker produces both streams and posts them to the page, which
+hands them to the room. Three things cross the other way or need care:
+
+- the worker cannot ask the room whether anybody watches, so the page tells it whenever
+  that changes — and always before asking it for a snapshot, so that the reduced stream
+  carries every tick after the snapshot of a newcomer;
+- the next round's players are posted to the worker (`nextPlayers`), and when a round
+  starts with them the worker posts `roster` **after** the frames of the round before and
+  **before** the first state of the new one, which is the order the page needs to change
+  who gets which stream and who steers;
+- the page forgets which inputs it already sent, since it only posts changes and the
+  seats have new occupants.
+
 Alternatives: full-rate stream for spectators (simplest; ~3× the bytes and encodes shared
 with players); relaying through a guest (complex, guests are phones too); Trystero's
 `scale` plug-in (`maxDirectPeers`, partial mesh) to cut the idle connections — worth a look
@@ -257,5 +271,6 @@ the host never sends it the stream); a lower cap.
   bytes out with 0 and 3 spectators. `E2E_CAP=1` adds seven more browsers to check that the
   7th spectator is refused. `E2E_SHOTS=dir` saves the screenshots.
 - Not covered by e2e: team mode (rules are unit-tested), and anything across real
-  networks or on real phones.
+  networks or on real phones. The e2e runs with the host's simulation in the worker; the
+  in-thread path (`?worker=0`) is covered by the unit tests only.
 - Screenshots in `design/research/spectators/`.
