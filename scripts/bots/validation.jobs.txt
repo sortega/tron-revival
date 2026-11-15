@@ -1,0 +1,114 @@
+# Validation of the territory bots (design/bots-territory.md, "Results").
+#   node scripts/bots/batch.mjs scripts/bots/validation.jobs.txt --quiet
+# `old-*` is the same profile without the territory map.
+
+# 1. New against old, head to head, hard
+--drivers=hard,old-hard --levels=blank --seed=1 --rounds=80
+--drivers=hard,old-hard --levels=blank --seed=2 --rounds=80
+--drivers=hard,old-hard --levels=pop-culture --seed=1 --rounds=80
+--drivers=hard,old-hard --levels=pop-culture --seed=2 --rounds=80
+--drivers=hard,old-hard --levels=selva --seed=1 --rounds=80
+--drivers=hard,old-hard --levels=selva --seed=2 --rounds=80
+--drivers=hard,old-hard --levels=bricks --seed=1 --rounds=80
+--drivers=hard,old-hard --levels=bricks --seed=2 --rounds=80
+--drivers=hard,old-hard --levels=bus --seed=1 --rounds=80
+--drivers=hard,old-hard --levels=bus --seed=2 --rounds=80
+--drivers=hard,old-hard --levels=dentistry --seed=1 --rounds=80
+--drivers=hard,old-hard --levels=dentistry --seed=2 --rounds=80
+--drivers=hard,old-hard --levels=warzone --seed=1 --rounds=80
+--drivers=hard,old-hard --levels=warzone --seed=2 --rounds=80
+--drivers=hard,old-hard --levels=portals --seed=1 --rounds=80
+--drivers=hard,old-hard --levels=portals --seed=2 --rounds=80
+
+# 2. New against old, head to head, normal
+--drivers=normal,old-normal --levels=blank --seed=1 --rounds=80
+--drivers=normal,old-normal --levels=blank --seed=2 --rounds=80
+--drivers=normal,old-normal --levels=pop-culture --seed=1 --rounds=80
+--drivers=normal,old-normal --levels=pop-culture --seed=2 --rounds=80
+--drivers=normal,old-normal --levels=selva --seed=1 --rounds=80
+--drivers=normal,old-normal --levels=selva --seed=2 --rounds=80
+--drivers=normal,old-normal --levels=bricks --seed=1 --rounds=80
+--drivers=normal,old-normal --levels=bricks --seed=2 --rounds=80
+--drivers=normal,old-normal --levels=bus --seed=1 --rounds=80
+--drivers=normal,old-normal --levels=bus --seed=2 --rounds=80
+--drivers=normal,old-normal --levels=dentistry --seed=1 --rounds=80
+--drivers=normal,old-normal --levels=dentistry --seed=2 --rounds=80
+--drivers=normal,old-normal --levels=warzone --seed=1 --rounds=80
+--drivers=normal,old-normal --levels=warzone --seed=2 --rounds=80
+--drivers=normal,old-normal --levels=portals --seed=1 --rounds=80
+--drivers=normal,old-normal --levels=portals --seed=2 --rounds=80
+
+# 3. Ordering of the difficulties, after and before
+--drivers=normal,easy --levels=blank --seed=1 --rounds=80
+--drivers=normal,easy --levels=bricks --seed=1 --rounds=80
+--drivers=normal,easy --levels=bus --seed=1 --rounds=80
+--drivers=hard,normal --levels=blank --seed=1 --rounds=80
+--drivers=hard,normal --levels=bricks --seed=1 --rounds=80
+--drivers=hard,normal --levels=bus --seed=1 --rounds=80
+--drivers=hard,easy --levels=blank --seed=1 --rounds=80
+--drivers=hard,easy --levels=bricks --seed=1 --rounds=80
+--drivers=hard,easy --levels=bus --seed=1 --rounds=80
+--drivers=old-normal,easy --levels=blank --seed=1 --rounds=80
+--drivers=old-normal,easy --levels=bricks --seed=1 --rounds=80
+--drivers=old-normal,easy --levels=bus --seed=1 --rounds=80
+--drivers=old-hard,old-normal --levels=blank --seed=1 --rounds=80
+--drivers=old-hard,old-normal --levels=bricks --seed=1 --rounds=80
+--drivers=old-hard,old-normal --levels=bus --seed=1 --rounds=80
+--drivers=old-hard,easy --levels=blank --seed=1 --rounds=80
+--drivers=old-hard,easy --levels=bricks --seed=1 --rounds=80
+--drivers=old-hard,easy --levels=bus --seed=1 --rounds=80
+
+# 4. Normal against a player that drives straight
+--drivers=normal,straight --levels=blank --seed=1 --rounds=20 --max=60
+--drivers=normal,straight --levels=pop-culture --seed=1 --rounds=20 --max=60
+--drivers=normal,straight --levels=selva --seed=1 --rounds=20 --max=60
+--drivers=normal,straight --levels=bricks --seed=1 --rounds=20 --max=60
+--drivers=normal,straight --levels=bus --seed=1 --rounds=20 --max=60
+--drivers=normal,straight --levels=dentistry --seed=1 --rounds=20 --max=60
+--drivers=normal,straight --levels=warzone --seed=1 --rounds=20 --max=60
+--drivers=normal,straight --levels=portals --seed=1 --rounds=20 --max=60
+--drivers=old-normal,straight --levels=blank --seed=1 --rounds=20 --max=60
+--drivers=old-normal,straight --levels=pop-culture --seed=1 --rounds=20 --max=60
+--drivers=old-normal,straight --levels=selva --seed=1 --rounds=20 --max=60
+--drivers=old-normal,straight --levels=bricks --seed=1 --rounds=20 --max=60
+--drivers=old-normal,straight --levels=bus --seed=1 --rounds=20 --max=60
+--drivers=old-normal,straight --levels=dentistry --seed=1 --rounds=20 --max=60
+--drivers=old-normal,straight --levels=warzone --seed=1 --rounds=20 --max=60
+--drivers=old-normal,straight --levels=portals --seed=1 --rounds=20 --max=60
+
+# 5. Four players, free for all: two new and two old; then the usual mix, after and before
+--drivers=hard,old-hard,hard,old-hard --levels=blank --seed=1 --rounds=80
+--drivers=hard,old-hard,hard,old-hard --levels=bricks --seed=1 --rounds=80
+--drivers=hard,old-hard,hard,old-hard --levels=selva --seed=1 --rounds=80
+--drivers=hard,old-hard,hard,old-hard --levels=portals --seed=1 --rounds=80
+--drivers=normal,old-normal,normal,old-normal --levels=blank --seed=1 --rounds=80
+--drivers=normal,old-normal,normal,old-normal --levels=bricks --seed=1 --rounds=80
+--drivers=normal,old-normal,normal,old-normal --levels=selva --seed=1 --rounds=80
+--drivers=normal,old-normal,normal,old-normal --levels=portals --seed=1 --rounds=80
+--drivers=easy,normal,hard,hard --levels=blank --seed=1 --rounds=80
+--drivers=easy,normal,hard,hard --levels=bricks --seed=1 --rounds=80
+--drivers=easy,old-normal,old-hard,old-hard --levels=blank --seed=1 --rounds=80
+--drivers=easy,old-normal,old-hard,old-hard --levels=bricks --seed=1 --rounds=80
+
+# 6. Teams: slots 0 and 2 against 1 and 3
+--drivers=hard,old-hard,hard,old-hard --mode=team --levels=blank --seed=1 --rounds=80
+--drivers=hard,old-hard,hard,old-hard --mode=team --levels=bricks --seed=1 --rounds=80
+--drivers=hard,old-hard,hard,old-hard --mode=team --levels=selva --seed=1 --rounds=80
+--drivers=normal,old-normal,normal,old-normal --mode=team --levels=blank --seed=1 --rounds=80
+--drivers=normal,old-normal,normal,old-normal --mode=team --levels=bricks --seed=1 --rounds=80
+--drivers=normal,old-normal,normal,old-normal --mode=team --levels=selva --seed=1 --rounds=80
+
+# 7. Left alone (no hunting, no shooting): how long until the first of two dies
+--drivers=calm-hard,calm-hard --levels=blank --seed=1 --rounds=40 --max=240
+--drivers=calm-hard,calm-hard --levels=bricks --seed=1 --rounds=40 --max=240
+--drivers=old-calm-hard,old-calm-hard --levels=blank --seed=1 --rounds=40 --max=240
+--drivers=old-calm-hard,old-calm-hard --levels=bricks --seed=1 --rounds=40 --max=240
+--drivers=calm-normal,calm-normal --levels=blank --seed=1 --rounds=40 --max=240
+--drivers=calm-normal,calm-normal --levels=bricks --seed=1 --rounds=40 --max=240
+--drivers=old-calm-normal,old-calm-normal --levels=blank --seed=1 --rounds=40 --max=240
+--drivers=old-calm-normal,old-calm-normal --levels=bricks --seed=1 --rounds=40 --max=240
+
+# 8. Pure space filling: each player closed in its half, no items
+--drivers=hard,old-hard --levels=split --bare --max=600 --seed=1 --rounds=40
+--drivers=hard,hard --levels=split --bare --max=600 --seed=1 --rounds=40
+--drivers=old-hard,old-hard --levels=split --bare --max=600 --seed=1 --rounds=40

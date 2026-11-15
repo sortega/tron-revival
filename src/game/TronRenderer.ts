@@ -156,6 +156,11 @@ export class TronRenderer {
     }
   }
 
+  /** The main canvas, for debug overlays drawn after `render` (origin = the arena's). */
+  get context(): CanvasRenderingContext2D {
+    return this.ctx;
+  }
+
   // Main render function
   render(
     round: TronRoundState, match: TronMatchState, fps?: number, networkStats?: NetworkStats,

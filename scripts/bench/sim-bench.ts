@@ -19,6 +19,7 @@ import { HostSession } from '../../src/game/session/HostSession';
 import { GuestSession } from '../../src/game/session/GuestSession';
 import type { GuestTransport, HostTransport } from '../../src/game/session/GameSession';
 import { perfDump, perfEnable } from '../../src/game/perf';
+import { BOT_PROFILES } from '../../src/game/ai/BotController';
 import { createRng } from '../../src/game/rng';
 import type { Rng } from '../../src/game/rng';
 import { TICK_MS } from '../../src/game/constants';
@@ -186,6 +187,9 @@ interface Result {
   gc: { count: number; totalMs: number; maxMs: number };
   allocKbPerTick: number;
   wireBytesPerTick: number;
+  /** Bot decisions that mattered (bot alive, round being played), and their mean cost in ms. */
+  botTicks: number;
+  botMs: number;
 }
 
 function buildSession(s: Scenario, seed: number): {
@@ -231,6 +235,7 @@ async function run(s: Scenario, ticks: number, warmup: number, seed = 12345): Pr
 
   const allocatedBytes = (): number => (v8.getHeapStatistics() as unknown as { total_allocated_bytes: number }).total_allocated_bytes;
   let allocatedAtStart = 0;
+  let botTicks = 0;
   for (let tick = -warmup; tick < ticks; tick++) {
     if (tick === 0) {
       perfEnable();
@@ -244,6 +249,9 @@ async function run(s: Scenario, ticks: number, warmup: number, seed = 12345): Pr
     }
     humans.forEach((h, i) => { if (h) inputs.set(i as SlotIndex, h(tick + warmup)); });
     if (s.script && game.phase === 'playing') s.script(game, tick + warmup, inputs);
+    if (tick >= 0 && game.phase === 'playing') {
+      s.players.forEach((kind, i) => { if (kind !== 'human' && game.players[i]!.alive) botTicks++; });
+    }
     session.step(inputs);
     guest?.getViewState();
   }
@@ -267,6 +275,8 @@ async function run(s: Scenario, ticks: number, warmup: number, seed = 12345): Pr
     scenario: s.name, ticks, phases, total: stats(totals), gc,
     allocKbPerTick: allocated / ticks / 1024,
     wireBytesPerTick: wire.bytes / ticks,
+    botTicks,
+    botMs: botTicks > 0 ? (dump.samples['bots'] ?? []).reduce((a, b) => a + b, 0) / botTicks : 0,
   };
 }
 
@@ -331,6 +341,12 @@ async function main(): Promise<void> {
     return [k!, v ?? '1'] as const;
   }));
 
+  // `--no-territory`: the bots as they were before they read the territory map
+  // (design/bots-territory.md). The fingerprint must then match the one from before.
+  if (args.has('no-territory')) {
+    for (const profile of Object.values(BOT_PROFILES)) profile.territory = null;
+  }
+
   if (args.has('fingerprint')) {
     const prints = fingerprint();
     for (const [name, value] of Object.entries(prints)) console.log(`${name.padEnd(28)} ${value}`);
@@ -353,6 +369,7 @@ async function main(): Promise<void> {
       console.log(`${(phase === 'TOTAL' ? r.scenario : '').padEnd(26)} ${phase.padEnd(10)} ${fmt(st.mean)} ${fmt(st.p50)} ${fmt(st.p95)} ${fmt(st.p99)} ${fmt(st.max)}`);
     }
     console.log(`${''.padEnd(26)} gc: ${r.gc.count} pauses, ${r.gc.totalMs.toFixed(1)} ms total, max ${r.gc.maxMs.toFixed(2)} ms; ~${r.allocKbPerTick.toFixed(1)} KB allocated/tick` +
+      (r.botTicks > 0 ? `; ${(r.botMs * 1000).toFixed(0)} µs per live bot per tick (${r.botTicks} bot-ticks)` : '') +
       (r.wireBytesPerTick > 0 ? `; wire ${r.wireBytesPerTick.toFixed(0)} B/tick (${(r.wireBytesPerTick * 70 / 1024).toFixed(1)} KB/s)` : ''));
   }
   if (args.has('json')) {

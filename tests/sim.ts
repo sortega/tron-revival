@@ -4,12 +4,14 @@
 import { BotController, BOT_PROFILES } from '../src/game/ai/BotController';
 import { HumanBot } from '../src/game/ai/HumanBot';
 import { PLAY_HEIGHT, PLAY_WIDTH } from '../src/game/constants';
+import type { BotProfile } from '../src/game/ai/BotController';
 import { createRng } from '../src/game/rng';
 import type { Rng } from '../src/game/rng';
 import { TronGameState } from '../src/game/TronGameState';
 import { TICK_RATE } from '../src/game/constants';
 import type { GameMode, SlotIndex } from '../src/types/lobby';
 import type { BotDifficulty, TronInput } from '../src/types/game';
+import type { PixelGrid } from '../src/game/PixelGrid';
 import { loadLevelGrid, makePlayers } from './helpers';
 
 // Driver specs are a difficulty with optional prefixes, e.g. `calm-normal`, `raw-hard`,
@@ -19,7 +21,11 @@ import { loadLevelGrid, makePlayers } from './helpers';
 // `naive-`: does not know the weapon match-ups.
 // `raw-`: the planner alone, without the humanisation layer (design/bots-human.md).
 // `h<strength>-`: humanisation strength (default 1).
-export type DriverSpec = BotDifficulty | `${string}-${BotDifficulty}` | 'straight' | 'random';
+// `old-`: as the bots were before they read the territory map (design/bots-territory.md).
+// `var-<name>`: the experimental profile `PROFILE_VARIANTS[name]`, planner alone.
+export type DriverSpec = BotDifficulty | `${string}-${BotDifficulty}` | `var-${string}` | 'straight' | 'random';
+
+export const PROFILE_VARIANTS: Record<string, BotProfile> = {};
 
 export interface Driver {
   decide(game: TronGameState): TronInput;
@@ -39,6 +45,11 @@ export function makeDriver(spec: DriverSpec, slot: SlotIndex, rng: Rng): Driver 
       },
     };
   }
+  if (spec.startsWith('var-')) {
+    const variant = PROFILE_VARIANTS[spec.slice(4)];
+    if (!variant) throw new Error(`Unknown profile variant ${spec}`);
+    return new BotController(slot, variant, rng);
+  }
   const parts = spec.split('-');
   const difficulty = parts.pop() as BotDifficulty;
   let profile = BOT_PROFILES[difficulty];
@@ -48,6 +59,7 @@ export function makeDriver(spec: DriverSpec, slot: SlotIndex, rng: Rng): Driver 
   for (const part of parts) {
     if (part === 'raw') raw = true;
     else if (part === 'calm') profile = { ...profile, hunts: false, weapons: 'panic' };
+    else if (part === 'old') profile = { ...profile, territory: null };
     else if (part === 'naive') profile = { ...profile, knowsMatchups: false };
     else if (/^h[\d.]+$/.test(part)) strength = Number(part.slice(1));
     else throw new Error(`Unknown driver ${spec}`);
@@ -76,6 +88,16 @@ export interface MatchOptions {
   makeDriver?: (spec: DriverSpec, slot: SlotIndex, rng: Rng) => Driver;
   /** Filled in with details of how the drivers played, when given. */
   stats?: MatchStats;
+  /** Obstacles to play on instead of the level's own. */
+  grid?: PixelGrid;
+  /** No items and no portals: nothing but driving. */
+  bare?: boolean;
+  /** Called once per round, during the countdown (e.g. to move the players). */
+  setup?: (game: TronGameState, round: number) => void;
+  /** Called once with the drivers, in seat order (to switch on a bot's trace, say). */
+  inspect?: (drivers: unknown[]) => void;
+  /** Called after every tick of the playing phase (statistics, snapshots). */
+  observe?: (game: TronGameState, round: number, tick: number) => void;
 }
 
 /** How each driver played, accumulated over a match (indexes follow `drivers`). */
@@ -172,8 +194,9 @@ function observe(stats: MatchStats, game: TronGameState, i: number, input: TronI
 export function runMatch(opts: MatchOptions): RoundResult[] {
   const rng = createRng(opts.seed);
   const game = new TronGameState(makePlayers(opts.drivers.length, opts.mode), opts.mode ?? 'ffa', opts.level, rng);
-  game.setLevelObstacles(loadLevelGrid(opts.level));
+  game.setLevelObstacles(opts.grid ?? loadLevelGrid(opts.level));
   const drivers = opts.drivers.map((spec, i) => (opts.makeDriver ?? makeDriver)(spec, i as SlotIndex, createRng(opts.seed * 1000 + i)));
+  opts.inspect?.(drivers);
   const maxTicks = (opts.maxRoundSeconds ?? 240) * TICK_RATE;
   const inputs = new Map<SlotIndex, TronInput>();
   const results: RoundResult[] = [];
@@ -189,8 +212,17 @@ export function runMatch(opts: MatchOptions): RoundResult[] {
     let ticks = 0;
     let finished = false;
     let guard = 0;
+    let setUp = false;
 
     while (game.currentRound === startRound) {
+      if (!setUp && game.phase === 'countdown') {
+        setUp = true;
+        opts.setup?.(game, round);
+      }
+      if (opts.bare) {
+        game.items.length = 0;
+        game.portals.length = 0;
+      }
       const wasPlaying = game.phase === 'playing';
       if (wasPlaying && !finished) opts.during?.(game, ticks);
       if (stats) {
@@ -209,6 +241,7 @@ export function runMatch(opts: MatchOptions): RoundResult[] {
         drivers.forEach((d, i) => inputs.set(i as SlotIndex, d.decide(game)));
       }
       game.tick(inputs);
+      if (wasPlaying && !finished) opts.observe?.(game, round, ticks + 1);
       const frame = game.serialize();
       for (const d of frame.deaths ?? []) {
         const fx = game.players[d.slotIndex]!.activeEffects.map(e => e.sprite).join('+');

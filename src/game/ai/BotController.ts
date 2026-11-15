@@ -18,6 +18,8 @@ import type { GunDefinition } from '../guns';
 import { LEVELS } from '../../types/game';
 import { firesTracers, lineOfFire, stance, worthFiringAt } from './matchups';
 import type { Fighter, Stance } from './matchups';
+import { TerritorySense } from './territorySense';
+import type { TerritoryUse } from './territorySense';
 
 const TURN_DEG = 4;                  // Degrees per step at full lock (matches TronPlayer)
 const DEG = Math.PI / 180;
@@ -46,20 +48,24 @@ export interface BotProfile {
   sideMargin?: number;
   /** Extra room (px) given to enemy heads, whose position is not known exactly; default 0. */
   headMargin?: number;
+  territory: TerritoryUse | null; // How it reads the territory map (design/bots-territory.md)
 }
 
 export const BOT_PROFILES: Record<BotDifficulty, BotProfile> = {
   easy: {
     lookahead: 60, replanTicks: 6, clearanceSteps: 0, areaAware: false, escapes: false, mistakeChance: 0.04, itemInterest: 0.4,
     weapons: 'panic', avoidsHazards: false, hunts: false, usesTurbo: false, knowsMatchups: false, reverseReactionTicks: 25,
+    territory: null,
   },
   normal: {
     lookahead: 130, replanTicks: 3, clearanceSteps: 60, areaAware: true, escapes: true, mistakeChance: 0.003, itemInterest: 1,
     weapons: 'full', avoidsHazards: true, hunts: false, usesTurbo: false, knowsMatchups: true, reverseReactionTicks: 6,
+    territory: { roomCap: 400, foeWeight: 1, fills: false, riskWeight: 0, racesForItems: true, intercepts: false, expands: false },
   },
   hard: {
     lookahead: 180, replanTicks: 2, clearanceSteps: 110, areaAware: true, escapes: true, mistakeChance: 0, itemInterest: 1,
     weapons: 'full', avoidsHazards: true, hunts: true, usesTurbo: true, knowsMatchups: true, reverseReactionTicks: 0,
+    territory: { roomCap: 1400, foeWeight: 1, fills: true, riskWeight: 0, racesForItems: true, intercepts: true, expands: false },
   },
 };
 
@@ -198,6 +204,9 @@ export class BotController {
   private lastWeapon: string | null = null;
   private goalItemId: number | null = null;
   private enemies: EnemyView[] = [];  // Refreshed every decision
+  private readonly scores: number[] = [];  // Of the candidates of the current plan
+  /** How this bot reads the territory map; null if its profile does not. */
+  readonly sense: TerritorySense | null;
 
   // Scratch buffers for flood fills
   private floodGen = 0;
@@ -208,7 +217,7 @@ export class BotController {
   trace: string[] | null = null;
 
   /** What the last plan was heading for, for tests and tuning. */
-  goalKind: 'item' | 'seek' | 'flee' | null = null;
+  goalKind: 'item' | 'seek' | 'flee' | 'expand' | null = null;
 
   /** Details of the last plan, for tests and tuning. */
   debug = { score: 0, dist: 0, steer: 0, turnSteps: 0, straightFree: 0 };
@@ -217,6 +226,7 @@ export class BotController {
     this.slot = slot;
     this.profile = typeof difficulty === 'string' ? BOT_PROFILES[difficulty] : difficulty;
     this.rng = rng;
+    this.sense = this.profile.territory ? new TerritorySense(this.profile.territory) : null;
   }
 
   decide(game: TronGameState): TronInput {
@@ -231,6 +241,8 @@ export class BotController {
       return { steer: 0, action: !ready && this.tick % 20 === 0 };
     }
     if (game.phase !== 'playing' || !me.alive) {
+      // (the countdown is the time to build the territory map: nothing else is going on)
+      if (game.phase === 'countdown') this.sense?.begin(game, this.slot, me.activeEffects);
       this.resetRound();
       return { steer: 0, action: false };
     }
@@ -238,6 +250,7 @@ export class BotController {
     const x = me.x / 1000;
     const y = me.y / 1000;
     this.enemies = this.lookAround(game, me, x, y);
+    this.sense?.begin(game, this.slot, me.activeEffects);
     const ctx = this.makeContext(game, me);
     const start: PathState = { x, y, dir: me.direction, step: 0, portalCooldown: 0, cells: null, cellCount: 0 };
 
@@ -346,6 +359,7 @@ export class BotController {
     let best = -Infinity;
     let bestSteer = 0;
     let straightFree = 0;
+    this.scores.length = 0;
 
     for (const cand of CANDIDATES) {
       checkpoints.length = 0;
@@ -385,8 +399,15 @@ export class BotController {
       }
       // How much room is left once this path has been driven (its own trail included)?
       if (profile.areaAware && ctx.ignoreSteps === 0) {
-        const area = this.freeAreaAfter(ctx.pixels, end);
-        score -= (1 - area / AREA_CAP) * profile.lookahead;
+        if (this.sense) {
+          // ...counting who gets to it first (design/bots-territory.md)
+          const worth = this.sense.judge(ctx.pixels, end.cells, end.endX, end.endY, end.endDir, end.dist);
+          score += worth.bonus - (1 - worth.room) * profile.lookahead;
+          this.trace?.push(`${cand.steer}/${cand.turnSteps}: room=${worth.room.toFixed(2)} bonus=${worth.bonus.toFixed(0)}`);
+        } else {
+          const area = this.freeAreaAfter(ctx.pixels, end);
+          score -= (1 - area / AREA_CAP) * profile.lookahead;
+        }
       }
       if (r.badItem) score -= 40;
       // Goals only matter on paths that are safe well beyond the goal itself
@@ -406,6 +427,13 @@ export class BotController {
         bestSteer = cand.steer;
         this.debug = { score, dist, steer: cand.steer, turnSteps: cand.turnSteps, straightFree: 0 };
       }
+      this.scores.push(score);
+    }
+    // The best path's room may have to be counted further (design/bots-territory.md)
+    if (this.sense) {
+      const pick = CANDIDATES[this.sense.review(this.scores, profile.lookahead)]!;
+      bestSteer = pick.steer;
+      this.trace?.push(`pick ${pick.steer}/${pick.turnSteps} scores ${this.scores.map(s => s.toFixed(0)).join(' ')}`);
     }
 
     if (profile.mistakeChance > 0 && this.rng() < profile.mistakeChance) {
@@ -729,6 +757,7 @@ export class BotController {
         if (!item.mystery && BAD_ITEMS.has(item.sprite)) continue;
         // Keep the weapon we have unless it is nearly spent
         if (!item.mystery && item.category === 'weapon' && me.equippedWeapon && this.weaponHeldTicks < 600) continue;
+        if (this.sense && !this.sense.itemWorth(item.x, item.y)) continue;
         const d = wrappedDist(x, y, item.x, item.y);
         if (d < bestDist) {
           bestDist = d;
@@ -761,17 +790,32 @@ export class BotController {
 
     // Go after one we have the upper hand over; hunters also go after the rest
     const prey = this.enemies.find(e => e.stance === 'seek' || (this.profile.hunts && e.stance === 'neutral'));
-    if (prey) {
+    if (prey && !this.sense?.filling) {
       this.goalKind = 'seek';
       // With a gun: face the enemy. Without: aim ahead of them to cut them off.
       const lead = me.equippedWeapon ? 0 : 45;
       const rad = prey.player.direction * DEG;
+      if (lead > 0 && this.sense?.use.intercepts) {
+        // ...where we get ahead of them, if anywhere
+        const cut = this.sense.intercept(prey.player.slotIndex, x + prey.dx, y + prey.dy, prey.player.direction);
+        if (cut) return cut;
+        this.goalKind = null;
+        return this.expansion(x, y);
+      }
       return {
         x: x + prey.dx + Math.cos(rad) * lead,
         y: y + prey.dy + Math.sin(rad) * lead,
       };
     }
-    return null;
+    return this.expansion(x, y);
+  }
+
+  // Nothing to fetch, nobody to chase or run from: take territory (design/bots-territory.md)
+  private expansion(x: number, y: number): { x: number; y: number } | null {
+    const border = this.sense?.use.expands && !this.sense.filling ? this.sense.frontier() : null;
+    if (!border) return null;
+    this.goalKind = 'expand';
+    return { x: x + wrapDelta(border.x - x, PLAY_WIDTH), y: y + wrapDelta(border.y - y, PLAY_HEIGHT) };
   }
 
   // Is an enemy bullet, or an H-bomb still far enough to set off safely, coming at us

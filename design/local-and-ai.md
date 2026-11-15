@@ -5,7 +5,8 @@ game screen run without a network, and computer-controlled players.
 
 Related: [architecture.md](./architecture.md), [networking.md](./networking.md),
 [old-tron-design.md](./old-tron-design.md), [bots-human.md](./bots-human.md) (reaction
-time, motor imprecision and aim error of bots).
+time, motor imprecision and aim error of bots), [bots-territory.md](./bots-territory.md)
+(what the bots know about the arena as a whole: territory, room, crash risk).
 
 ## Goals
 
@@ -197,6 +198,10 @@ score = free distance along the path                 (survival)
       + small bonus for keeping the current steering (stability, less jitter)
 ```
 
+`normal` and `hard` bots work out the room at the end of a path, its crash risk and what to
+do once cut off from their enemies from a shared **territory map**:
+[bots-territory.md](./bots-territory.md).
+
 The bot applies the first steering value of the best candidate. A `safetyMargin` (also
 check pixels 1–2 px to each side of the path) keeps bots from threading 1-pixel gaps.
 (In the code this is the corridor and wall-hugging penalty governed by `clearanceSteps`.
@@ -211,7 +216,9 @@ When the best path is comfortably long, the bot picks a target and adds the goal
 
 - Nearest useful item (wrap-aware distance). Bots avoid *Control Reversal* and automatic
   *Slow*, and treat mystery items as mildly attractive.
-- Otherwise, on `hard`, a point ahead of the nearest enemy (cut them off).
+- Otherwise, on `hard`, a point ahead of the nearest enemy (cut them off): the nearest point
+  on its course that the bot reaches first, if there is one
+  ([bots-territory.md](./bots-territory.md), "Goals").
 
 ### Weapons
 
@@ -286,6 +293,7 @@ it never learns about the reversal and the bot's hands have to relearn the contr
 | Avoids enemy heads / bodyguards | no | yes | yes |
 | Hunts enemies | no | when it has the advantage | yes, except when at a disadvantage |
 | Knows the weapon and satellite match-ups | no | yes | yes |
+| Reads the territory map ([bots-territory.md](./bots-territory.md)) | no | room, item races | + fills its region, risk, cut-offs |
 
 ### Bots in network games
 

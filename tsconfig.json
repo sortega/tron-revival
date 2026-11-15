@@ -20,6 +20,6 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src", "tests", "scripts/bench"],
+  "include": ["src", "tests", "scripts/bench", "scripts/bots"],
   "exclude": ["scripts/bench/wasm/kernel.as.ts"]
 }

@@ -180,7 +180,12 @@ describe('bots and match-ups: seeking and avoiding', () => {
   });
 
   it('hard bots hunt, except when at a disadvantage', () => {
-    expect(goalOf(faceOff(), 'hard')).toBe('seek');
+    // (unarmed, only an enemy it can get ahead of - here one crossing in front - and not
+    // one driving away from it: design/bots-territory.md)
+    const crossing = faceOff();
+    place(crossing, 1, 330, 150, 90);
+    expect(goalOf(crossing, 'hard')).toBe('seek');
+    expect(goalOf(faceOff(), 'hard')).toBeNull();
 
     const outgunned = faceOff();
     outgunned.players[1]!.equipWeapon('rifle', 200);

@@ -621,7 +621,9 @@ describe('human bots: disorientation', () => {
         step(g, { steer: 0 }, {});   // (keep it from actually moving: we only watch the keys)
         place(g, 0, 400, 140, 270);
         const input = bot.decide(g);
-        if (input.steer !== key) break;
+        if (!bot.motor!.frozen) break;
+        // A key that was down stays down for a startled moment, then the hands let go
+        expect([key, 0], d).toContain(input.steer);
         frozenFor++;
       }
       expect(frozenFor, d).toBeGreaterThanOrEqual(profile.disorient[0]);

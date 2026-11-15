@@ -23,7 +23,11 @@
     "bench:fingerprint": "node scripts/bench/run-node.mjs scripts/bench/sim-bench.ts --fingerprint",
     "bench:browser": "node scripts/bench/browser-bench.mjs",
     "bench:render": "node scripts/bench/render-bench.mjs",
-    "bench:wasm": "node scripts/bench/wasm/run.mjs"
+    "bench:wasm": "node scripts/bench/wasm/run.mjs",
+    "bots:strength": "node scripts/bench/run-node.mjs scripts/bots/strength.ts",
+    "bots:snapshots": "node scripts/bench/run-node.mjs scripts/bots/snapshots.ts",
+    "bots:cost": "node scripts/bench/run-node.mjs scripts/bots/cost.ts",
+    "bots:territory-trace": "node scripts/bench/run-node.mjs scripts/bots/trace.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

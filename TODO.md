@@ -119,8 +119,19 @@ Design: `design/local-and-ai.md`
 - [x] **Automated gameplay validation**: `tests/sim.ts` headless match runner; `tests/bots.test.ts`
       regression thresholds; `npm run sim` prints a per-level tuning table
 - [ ] Bots: dodge projectiles and bomb blast areas
-- [ ] Bots: most remaining deaths are "own trail" in self-made pockets; a Voronoi-style
+- [~] Bots: most remaining deaths are "own trail" in self-made pockets; a Voronoi-style
       territory estimate would help more than longer lookahead
+      → **research branch `research/bots-territory`** (design: `design/bots-territory.md`):
+      shared territory map (who reaches what first, clearance, regions, risk), room judged
+      without counting what lies behind walls or beside the own path, endgame filling,
+      item races, cut-off goals; `?botdebug=1` overlay, `npm run bots:strength`,
+      `npm run bots:snapshots`. Not merged; results and recommendation in the design doc
+  - [ ] Endgame: a real space-filling planner (finish a side chamber before sealing it;
+        handle wedges between non-parallel passes) instead of the wall-hugging bonus
+  - [ ] Mid-game: tell which side of a cut is bigger beyond 400 cells without paying for
+        large flood fills on every candidate
+  - [ ] Risk map: enemy lines of fire and satellites per cell (for goal choice); today they
+        are only in the rollouts
 - [ ] Bots cost ~0.04 ms (normal) / ~0.07 ms (hard) per tick each on a fast core after the
       November 2026 optimisations (`design/research/performance.md`); check low-end phones
       hosting, see "Performance" below

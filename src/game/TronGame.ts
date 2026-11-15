@@ -17,6 +17,8 @@ import { HOST_SILENCE_MS } from './session/GameSession';
 import { escapeHtml } from '../util/html';
 import { perfCounter, perfDump, perfEnable, perfEnd, perfSince, perfStart } from './perf';
 import type { PerfSummary } from './perf';
+import { TerritoryOverlay } from './ai/TerritoryOverlay';
+import type { TronGameState } from './TronGameState';
 
 export class TronGame implements Screen {
   private container: HTMLElement;
@@ -42,6 +44,9 @@ export class TronGame implements Screen {
 
   // Double-tap detection for mobile FPS toggle
   private lastTapTime: number = 0;
+
+  // `?botdebug=...`: the bots' territory map over the arena
+  private botDebug: TerritoryOverlay | null = TerritoryOverlay.fromUrl(location.search);
 
   // Track loaded level to detect changes
   private loadedLevelIndex: number = -1;
@@ -699,6 +704,9 @@ export class TronGame implements Screen {
       this.showFps ? stats : undefined, view.overlayTrails
     );
     perfEnd('render', t0);
+    // `?botdebug=1`: what the bots know of the arena (design/bots-territory.md)
+    const game = (this.session as { game?: TronGameState }).game;
+    if (this.botDebug && game && view.round.phase === 'playing') this.botDebug.draw(this.renderer.context, game);
     const silentMs = stats?.silentMs ?? 0;
     if (silentMs > HOST_SILENCE_MS) {
       this.renderer.renderNotice('Connection to the host lost', `waiting… ${Math.floor(silentMs / 1000)}s`);
@@ -845,6 +853,8 @@ export class TronGame implements Screen {
 
     this.renderer?.destroy();
     this.renderer = null;
+    this.botDebug?.destroy();
+    this.botDebug = null;
 
     this.session.onFrame = null;
     this.session.onSnapshot = null;
