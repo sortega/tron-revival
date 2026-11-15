@@ -54,6 +54,16 @@ export class LaggedTransport implements HostTransport, GuestTransport {
     this.outgoing.push(() => { if (!this.closed) this.inner.broadcastState(data); });
   }
 
+  // Note: who receives which stream is decided when the delayed message really goes
+  // out, so with a lagged *host* a client changing role at a round start can miss ticks
+  sendSpectatorState(data: Uint8Array): void {
+    this.outgoing.push(() => { if (!this.closed) this.inner.sendSpectatorState?.(data); });
+  }
+
+  hasSpectators(): boolean {
+    return this.inner.hasSpectators?.() ?? true;
+  }
+
   sendInput(input: TronInputMessage): void {
     this.outgoing.push(() => { if (!this.closed) this.inner.sendInput(input); });
   }

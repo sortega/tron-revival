@@ -9,6 +9,7 @@ High-level architecture of the web revival of Teratron. Detailed designs:
 - [projectiles.md](./projectiles.md) — what bullets, tracers and bombs hit, and how
 - [bodyguards.md](./bodyguards.md) — satellites: what they block, attack and how they wear out
 - [teams.md](./teams.md) — team mode: scoring and how it is shown
+- [spectators.md](./spectators.md) — watching a game, the join code on the game screen, joining from the next round
 - [touch-controls.md](./touch-controls.md) — steering on phones
 - [display-layer.md](./display-layer.md) — the display bitmap, kept apart from the collision
   bitmap: trail shade, head markers, levels with a background
@@ -73,7 +74,8 @@ Rules of the layering:
   the Eraser item; weapons damage the live grid, and the renderer shows the damage.
 - Movement rules shared between host and guest prediction live in `movement.ts`.
 - Round flow: `countdown` → `playing` → `waiting_ready` (everyone presses action to toggle
-  "ready"; the next round starts when all are). Action presses are ignored for the first
+  "ready"; the next round starts when all are). In network games the players can change at
+  that point ([spectators.md](./spectators.md)). Action presses are ignored for the first
   `READY_LOCK_TICKS` (70 ticks = 1 s) of `waiting_ready`, so a shot fired as the round
   ends is not taken as "ready". A button held through the lock must be released and
   pressed again.
@@ -151,7 +153,8 @@ See [networking.md](./networking.md).
 | Rules | Scripted situations, seeded fuzz on real levels, determinism | `tests/rules.test.ts` |
 | Bots | Seeded bot-vs-bot matches with quality thresholds | `tests/bots.test.ts`, `npm run sim` |
 | Netcode | Host+guest over a simulated link (latency, jitter, drift) | `tests/netcode.test.ts` |
-| Lobby | Seat reconciliation, authority, game config | `tests/room.test.ts` |
+| Lobby | Seat reconciliation, authority, game config, queue and next-round seating | `tests/room.test.ts` |
+| Spectators | Reduced stream, seats changing hands at a round start | `tests/spectators.test.ts`, `tests/e2e/spectators.e2e.mjs` |
 | End to end | Two headless Chromes through real signaling (and TURN) | `npm run test:e2e` |
 
 ## Deployment

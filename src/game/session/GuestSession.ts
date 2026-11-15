@@ -3,8 +3,8 @@
 // See design/networking.md.
 
 import type { SlotIndex } from '../../types/lobby';
-import type { TrailSegment, TronGameStateData, TronInput, TronPlayerState } from '../../types/game';
-import { decodeSnapshot, deserializeState } from '../../network/serialization';
+import type { GamePlayer, RosterEntry, TrailSegment, TronGameStateData, TronInput, TronPlayerState } from '../../types/game';
+import { decodeSnapshot, deserializeState, eventsOf, rosterIdentities } from '../../network/serialization';
 import { PixelGrid } from '../PixelGrid';
 import type { SmoothLinesData } from '../display/SmoothLines';
 import type { PlayerIdentity } from '../../network/serialization';
@@ -30,7 +30,15 @@ export interface GuestSessionOptions {
    * called (or `skipSnapshot`, if none could be obtained).
    */
   awaitSnapshot?: boolean;
+  /**
+   * This user's id. When given, the session takes its slot from the roster in the
+   * game stream (owner === selfId), so it follows seat changes at round starts.
+   */
+  selfId?: string;
 }
+
+/** A watcher never extrapolates further than this between two messages. */
+const MAX_SPECTATOR_LEAD = 4;
 
 interface PendingInput extends TronInput {
   seq: number;
@@ -41,11 +49,18 @@ export class GuestSession implements GameSession {
   onEnded: ((reason: string) => void) | null = null;
   private lastStateAt: number | null = null;  // When the last state from the host arrived
   onSnapshot: ((arena: PixelGrid, smoothLines?: SmoothLinesData) => void) | null = null;
+  onRoster: ((players: GamePlayer[]) => void) | null = null;
   readonly runsInBackground = false;
 
   private readonly transport: GuestTransport;
-  private readonly mySlot: SlotIndex | null;
-  private readonly players: readonly PlayerIdentity[];
+  private mySlot: SlotIndex | null;
+  private players: readonly PlayerIdentity[];
+  private readonly selfId: string | null;
+  private rosterKey: string;
+  // Watching: ticks stepped since the last state, and ticks between the last two states
+  private ticksSinceState = 0;
+  private streamInterval = 1;
+  private lastTick = -1;
   private readonly now: () => number;
   private readonly predict: boolean;
   private readonly extrapolate: boolean;
@@ -73,6 +88,8 @@ export class GuestSession implements GameSession {
     this.now = options.now ?? (() => performance.now());
     this.predict = options.predict ?? true;
     this.extrapolate = options.extrapolate ?? true;
+    this.selfId = options.selfId ?? null;
+    this.rosterKey = this.keyOf(players);
     if (options.awaitSnapshot) this.held = [];
 
     transport.onState = (data) => this.handleState(data);
@@ -80,7 +97,17 @@ export class GuestSession implements GameSession {
   }
 
   step(localInputs: ReadonlyMap<SlotIndex, TronInput>): void {
-    if (this.mySlot === null || this.held) return; // Spectating, or not in sync yet
+    if (this.held) return; // Not in sync yet
+    if (this.mySlot === null) {
+      // Watching: nothing to send; the view runs ahead of the last message
+      // (the first tick after a message shows that message as it is)
+      const lead = Math.min(this.ticksSinceState + 1, this.streamInterval - 1, MAX_SPECTATOR_LEAD);
+      if (lead !== this.ticksSinceState) {
+        this.ticksSinceState = lead;
+        if (lead > 0) this.view = null;
+      }
+      return;
+    }
     const input = localInputs.get(this.mySlot) ?? { steer: 0, action: false };
     const seq = ++this.seq;
     this.transport.sendInput({ steer: input.steer, action: input.action, seq, t: this.now() });
@@ -116,6 +143,36 @@ export class GuestSession implements GameSession {
     for (const frame of held) this.handleState(frame);
   }
 
+  /** The slot this user plays in the round in progress, or null when watching. */
+  getMySlot(): SlotIndex | null {
+    return this.mySlot;
+  }
+
+  private keyOf(players: readonly PlayerIdentity[]): string {
+    return JSON.stringify([this.mySlot, players.map(p => [p.slotIndex, p.nickname, p.color])]);
+  }
+
+  // The stream says who plays: follow it (design/spectators.md)
+  private applyRoster(roster: readonly RosterEntry[]): void {
+    const identities = rosterIdentities(roster);
+    this.players = identities;
+    if (this.selfId !== null) {
+      const mine = identities.find(p => p.owner === this.selfId)?.slotIndex ?? null;
+      if (mine !== this.mySlot) {
+        this.mySlot = mine;
+        this.pending = [];
+        this.lagSamples = [];
+      }
+    }
+    const key = this.keyOf(identities);
+    if (key === this.rosterKey) return;
+    this.rosterKey = key;
+    this.onRoster?.(identities.map((p): GamePlayer => ({
+      slotIndex: p.slotIndex, nickname: p.nickname, color: p.color, owner: p.owner,
+      control: p.slotIndex === this.mySlot ? { type: 'local', scheme: 'solo' } : { type: 'remote' },
+    })));
+  }
+
   private handleState(data: Uint8Array): void {
     if (this.held) {
       // Keep only a bounded backlog while waiting
@@ -125,7 +182,22 @@ export class GuestSession implements GameSession {
     let t0 = perfStart();
     const state = deserializeState(data, this.players, this.latest);
     perfEnd('decode', t0);
-    if (state.tick !== undefined && state.tick <= this.minTick) return; // Already in the snapshot
+    // Already in the snapshot, or already seen
+    if (state.tick !== undefined && (state.tick <= this.minTick || state.tick <= this.lastTick)) return;
+    if (state.roster) this.applyRoster(state.roster);
+    if (state.tick !== undefined) {
+      if (this.lastTick >= 0) this.streamInterval = Math.max(1, state.tick - this.lastTick);
+      this.lastTick = state.tick;
+    }
+    this.ticksSinceState = -1;
+    // Reduced stream: first the events of the ticks this message skipped, in order
+    if (state.earlier) {
+      for (const events of state.earlier) {
+        if (events.tick !== undefined && events.tick <= this.minTick) continue;
+        this.onFrame?.({ ...state, ...eventsOf(events), earlier: undefined, roster: undefined });
+      }
+      state.earlier = undefined;
+    }
     const now = this.now();
     this.lastStateAt = now;
     this.bytesIn.add(data.length, now);
@@ -179,12 +251,14 @@ export class GuestSession implements GameSession {
   // has not processed yet, and the other players extrapolated by the same amount
   private buildView(state: TronGameStateData): ViewState {
     const { round, match } = state;
-    if (round.phase !== 'playing' || this.pending.length === 0 || (!this.predict && !this.extrapolate)) {
+    // Others are shown as far ahead as our own inputs in flight; a watcher, as far as
+    // time has passed since the last (reduced-rate) message
+    const lead = this.mySlot === null ? Math.max(0, this.ticksSinceState) : Math.min(this.pending.length, MAX_EXTRAPOLATION_TICKS);
+    if (round.phase !== 'playing' || lead === 0 || (!this.predict && !this.extrapolate)) {
       return { round, match };
     }
 
     const overlayTrails: { color: string; segments: TrailSegment[] }[] = [];
-    const lead = Math.min(this.pending.length, MAX_EXTRAPOLATION_TICKS);
 
     const players = round.players.map(player => {
       if (!player.alive) return player;

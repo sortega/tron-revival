@@ -6,17 +6,19 @@ import { normalizeLevelMode } from '../game/levelMode';
 import { joinRoom, createUserIdentity, exportUserIdentity, importUserIdentity } from 'trystero';
 import type { MessageAction, RequestAction, Room, RoomError, SharedState, UserIdentity, UserState } from 'trystero';
 import type { ChatMessage, GameMode, LevelMode, LobbyState, SlotIndex } from '../types/lobby';
-import type { BotDifficulty, GameConfig, TronInputMessage } from '../types/game';
+import type { BotDifficulty, GameConfig, GamePlayer, TronInputMessage } from '../types/game';
 import type { GuestTransport, HostTransport } from '../game/session/GameSession';
 import { loadIceSetup } from './ice';
 export { generateRoomCode, normalizeRoomCode } from './roomCode';
 import {
-  botName, buildGameConfig, canStart, createSharedRoom, isRoomWriteAllowed, reconcile, sanitizeName, slotOfUser, toLobbyState,
+  MAX_WATCHERS, SLOT_INDEXES, audienceOf, botName, buildGameConfig, canStart, createSharedRoom, isRoomWriteAllowed,
+  planNextRound, reconcile, sanitizeName, slotOfUser, toLobbyState,
 } from './roomLogic';
-import type { Profile, SharedRoom } from './roomLogic';
+import type { Audience, Profile, SharedRoom, SlotEntry } from './roomLogic';
+export type { Audience } from './roomLogic';
 
 // Includes a protocol version: incompatible builds never meet in a room
-const APP_ID = 'teratron/v2';
+const APP_ID = 'teratron/v3';
 
 const IDENTITY_KEY = 'teratron-identity';
 const ROOM_KEY = 'teratron-room';
@@ -28,13 +30,15 @@ const MAX_CHAT_MESSAGES = 100;
 const MAX_CHAT_LENGTH = 300;
 const MAX_BUFFERED_STATES = 300;
 const STALE_STATE_WINDOW_MS = 1500;
+const REFUSED_AFTER_MS = 10_000;         // Neither seated nor admitted for this long: the room is full
 
 /** Room this tab was in before a reload, if any. */
-export function rememberedRoom(): { code: string; host: boolean } | null {
+export function rememberedRoom(): { code: string; host: boolean; joinNext: boolean } | null {
   try {
     const raw = sessionStorage.getItem(ROOM_KEY);
-    const parsed = raw ? JSON.parse(raw) as { code?: unknown; host?: unknown } : null;
-    return parsed && typeof parsed.code === 'string' ? { code: parsed.code, host: parsed.host === true } : null;
+    const parsed = raw ? JSON.parse(raw) as { code?: unknown; host?: unknown; joinNext?: unknown } : null;
+    return parsed && typeof parsed.code === 'string'
+      ? { code: parsed.code, host: parsed.host === true, joinNext: parsed.joinNext === true } : null;
   } catch {
     return null;
   }
@@ -116,6 +120,17 @@ export class RoomConnection {
   private status: RoomStatus = 'connecting';
   private selfId: string | null = null;
   private current: SharedRoom | null = null;   // Last room state seen
+  // Host: the last room state written. Writes are asynchronous, so `current` can be
+  // one step behind; everything the host decides is based on this one
+  private written: SharedRoom | null = null;
+  // Host, during a game: who plays the round in progress (userId -> slot), users who
+  // said goodbye, and where to push the plan for the next round
+  private activeRoster: Map<string, SlotIndex> | null = null;
+  private departed = new Set<string>();
+  private nextPlayersListener: ((players: GamePlayer[]) => void) | null = null;
+  private playerTargets: string[] = [];
+  private watcherTargets: string[] = [];
+  private refusedTimer: ReturnType<typeof setTimeout> | null = null;
   private myProfile: Profile;
   private chat: ChatMessage[] = [];
   private chatSeq = 0;
@@ -135,6 +150,9 @@ export class RoomConnection {
     this.code = code;
     this.options = options;
     this.myProfile = { name: sanitizeName(options.nickname), want: -1 };
+    // A request to play from the next round survives a reload
+    const remembered = rememberedRoom();
+    if (remembered?.code === code && remembered.joinNext) this.myProfile.joinNext = true;
   }
 
   setCallbacks(callbacks: RoomCallbacks): void {
@@ -169,6 +187,23 @@ export class RoomConnection {
 
   getMySlotIndex(): SlotIndex | null {
     return this.current && this.selfId ? slotOfUser(this.current, this.selfId) : null;
+  }
+
+  // The room as the host last wrote it (host), or as last received (guests)
+  private view(): SharedRoom | null {
+    return this.written && this.isHost() ? this.written : this.current;
+  }
+
+  /** Who is around the game in progress: spectators, who joins or leaves next round. */
+  getAudience(): Audience {
+    const room = this.view();
+    if (!room) return { spectators: 0, joining: [], leaving: [], waiting: [], me: 'watching', queuePosition: 0 };
+    return audienceOf(room, this.presentProfiles(), this.selfId, this.departed);
+  }
+
+  /** Link that brings a browser into this room. */
+  getLink(): string {
+    return `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(this.code)}`;
   }
 
   getLobbyState(): LobbyState | null {
@@ -217,12 +252,19 @@ export class RoomConnection {
       this.byeAction = room.makeAction<string>('bye');
       // The host says goodbye when it closes the room, so guests need not wait
       this.byeAction.onMessage((_reason, { userId }) => {
-        if (userId === this.current?.hostId && userId !== this.selfId) this.close('The host closed the room.');
+        if (userId === this.current?.hostId && userId !== this.selfId) {
+          this.close('The host closed the room.');
+        } else if (this.isHost() && userId !== this.selfId) {
+          // A guest left for good: its seat need not be kept for a return
+          this.departed.add(userId);
+          this.handlePresenceChange();
+        }
       });
 
       this.shared.onChange(value => this.handleRoomChange(value));
       this.profiles.onChange(() => this.handlePresenceChange());
       room.onUserJoin(({ userId }) => {
+        this.departed.delete(userId);
         if (userId === this.current?.hostId) this.setHostPresent(true);
         this.handlePresenceChange();
       });
@@ -238,11 +280,17 @@ export class RoomConnection {
       });
       this.inputAction.onMessage((input, { userId }) => {
         if (!this.isHost() || !this.current || typeof input !== 'object' || input === null) return;
-        const slot = slotOfUser(this.current, userId);
-        if (slot !== null) this.transport?.onInput?.(slot, input);
+        // Only from whoever owns a slot in the round being played
+        const slot = this.activeRoster?.get(userId);
+        if (slot !== undefined) this.transport?.onInput?.(slot, input);
       });
       this.chatAction.onMessage((text, { userId }) => this.addChat(userId, text));
-      this.syncAction.onRequest(() => (this.isHost() && this.snapshotProvider ? this.snapshotProvider() : new Uint8Array(0)));
+      this.syncAction.onRequest(() => {
+        if (!this.isHost() || !this.snapshotProvider) return new Uint8Array(0);
+        // Whoever asks is here: make sure the stream reaches them from this tick on
+        this.refreshTargets();
+        return this.snapshotProvider();
+      });
 
       const self = await room.getSelf();
       if (this.closed) return;
@@ -280,7 +328,13 @@ export class RoomConnection {
 
   private becomeHost(): void {
     if (!this.shared || !this.selfId) return;
-    void this.shared.set(createSharedRoom(this.selfId));
+    this.write(createSharedRoom(this.selfId));
+  }
+
+  // Host: publish a new room state
+  private write(room: SharedRoom): void {
+    this.written = room;
+    void this.shared?.set(room);
   }
 
   /** Leave the room for good. */
@@ -301,8 +355,11 @@ export class RoomConnection {
     const room = this.room;
     this.room = null;
     if (room) {
-      // Let the goodbye go out before tearing the connections down
-      const goodbye = this.isHost() ? this.byeAction?.send('closed').catch(() => {}) : undefined;
+      // Let the goodbye go out before tearing the connections down: the host closes
+      // the room for everybody, a guest tells the host not to keep its seat
+      const hostId = this.current?.hostId;
+      const goodbye = this.isHost() ? this.byeAction?.send('closed').catch(() => {})
+        : hostId ? this.byeAction?.send('left', { target: hostId }).catch(() => {}) : undefined;
       void Promise.race([goodbye, new Promise(resolve => setTimeout(resolve, 300))])
         .then(() => room.leave())
         .catch(() => {});
@@ -320,8 +377,10 @@ export class RoomConnection {
   private clearTimers(): void {
     if (this.hostGoneTimer) clearTimeout(this.hostGoneTimer);
     if (this.joinTimer) clearTimeout(this.joinTimer);
+    if (this.refusedTimer) clearTimeout(this.refusedTimer);
     this.hostGoneTimer = null;
     this.joinTimer = null;
+    this.refusedTimer = null;
   }
 
   private setStatus(status: RoomStatus): void {
@@ -360,11 +419,7 @@ export class RoomConnection {
     if (!previous) {
       if (this.joinTimer) clearTimeout(this.joinTimer);
       this.joinTimer = null;
-      try {
-        sessionStorage.setItem(ROOM_KEY, JSON.stringify({ code: this.code, host: this.isHost() }));
-      } catch {
-        // ignore
-      }
+      this.remember();
       this.setStatus('ready');
       if (!this.isHost()) {
         this.setHostPresent(this.room !== null && value.hostId in this.room.getUsers());
@@ -377,7 +432,13 @@ export class RoomConnection {
       return;
     }
 
+    if (previous?.phase !== value.phase && value.phase === 'lobby') {
+      this.activeRoster = null;
+      this.nextPlayersListener = null;
+      this.departed.clear();
+    }
     this.reconcileSeats();
+    this.checkAdmission();
     this.emitLobby();
 
     if (previous?.phase !== value.phase) {
@@ -395,14 +456,107 @@ export class RoomConnection {
   private handlePresenceChange(): void {
     if (this.closed) return;
     this.reconcileSeats();
+    this.checkAdmission();
     this.emitLobby();
   }
 
-  // Host: turn profiles into seats
+  private remember(): void {
+    try {
+      sessionStorage.setItem(ROOM_KEY, JSON.stringify({
+        code: this.code, host: this.isHost(), joinNext: this.myProfile.joinNext === true,
+      }));
+    } catch {
+      // ignore
+    }
+  }
+
+  // Host: turn profiles into seats (lobby), queue and watchers; during a game, plan
+  // the next round and say who gets which stream
   private reconcileSeats(): void {
-    if (!this.isHost() || !this.current || !this.shared) return;
-    const next = reconcile(this.current, this.presentProfiles());
-    if (next !== this.current) void this.shared.set(next);
+    const room = this.view();
+    if (!this.isHost() || !room || !this.shared) return;
+    const next = reconcile(room, this.presentProfiles());
+    if (next !== room) this.write(next);
+    this.pushPlan();
+    this.refreshTargets();
+  }
+
+  // Host, during a game: tell the session who plays from the next round on
+  private pushPlan(): void {
+    const room = this.view();
+    if (!this.nextPlayersListener || !room || room.phase !== 'game' || !this.selfId) return;
+    const slots = planNextRound(room, this.presentProfiles(), this.departed);
+    this.nextPlayersListener(buildGameConfig({ ...room, slots }, this.selfId).players);
+  }
+
+  // Host: who gets the full-rate stream (players of this round) and who the reduced one
+  private refreshTargets(): void {
+    const room = this.view();
+    if (!this.isHost() || !room || !this.room || !this.activeRoster) {
+      this.playerTargets = [];
+      this.watcherTargets = [];
+      return;
+    }
+    const profiles = this.presentProfiles();
+    const admitted = new Set([...(room.watchers ?? []), ...room.slots.map(s => s?.userId)]);
+    const players: string[] = [];
+    const watchers: string[] = [];
+    for (const userId of Object.keys(this.room.getUsers())) {
+      if (userId === this.selfId) continue;
+      if (this.activeRoster.has(userId)) players.push(userId);
+      // Not (yet) known by profile: let them watch; known and over the limit: no
+      else if (!profiles[userId] || admitted.has(userId)) watchers.push(userId);
+    }
+    this.playerTargets = players;
+    this.watcherTargets = watchers;
+  }
+
+  /**
+   * Host: a round has started with these players (also called for the first round).
+   * The room's seats follow the simulation.
+   */
+  setActiveRoster(players: readonly GamePlayer[]): void {
+    if (!this.isHost()) return;
+    const first = this.activeRoster === null;
+    this.activeRoster = new Map(players.filter(p => p.owner && p.owner !== 'ai').map(p => [p.owner!, p.slotIndex]));
+    if (!first) {
+      const slots = SLOT_INDEXES.map((i): SlotEntry | null => {
+        const player = players.find(p => p.slotIndex === i);
+        if (!player) return null;
+        return player.control.type === 'ai'
+          ? { ai: player.control.difficulty, name: player.nickname }
+          : { userId: player.owner, name: player.nickname };
+      });
+      // Whoever gave up a seat stays in the room as a watcher, whatever the limit
+      const unseated = (room: SharedRoom): string[] => room.slots
+        .map(s => s?.userId).filter((id): id is string => !!id && !slots.some(n => n?.userId === id));
+      this.updateRoom(room => ({ ...room, slots, watchers: [...(room.watchers ?? []), ...unseated(room)] }));
+      for (const userId of [...this.departed]) if (!this.activeRoster.has(userId)) this.departed.delete(userId);
+    }
+    this.refreshTargets();
+    this.emitLobby();
+  }
+
+  /** Host: where to send the players of the next round whenever the plan changes. */
+  setNextPlayersListener(listener: ((players: GamePlayer[]) => void) | null): void {
+    this.nextPlayersListener = listener;
+    this.pushPlan();
+  }
+
+  // Guests: a room that neither seats nor admits us is full
+  private checkAdmission(): void {
+    const room = this.current;
+    const refused = !!room && !!this.selfId && !this.isHost() && this.hostPresent &&
+      slotOfUser(room, this.selfId) === null && !(room.watchers ?? []).includes(this.selfId);
+    if (!refused) {
+      if (this.refusedTimer) clearTimeout(this.refusedTimer);
+      this.refusedTimer = null;
+    } else if (!this.refusedTimer) {
+      this.refusedTimer = setTimeout(() => {
+        this.refusedTimer = null;
+        this.close(`The room is full: all seats are taken and it already has ${MAX_WATCHERS} spectators.`);
+      }, REFUSED_AFTER_MS);
+    }
   }
 
   private emitLobby(): void {
@@ -423,8 +577,9 @@ export class RoomConnection {
 
   // Host: apply a change to the room state
   private updateRoom(change: (room: SharedRoom) => SharedRoom): void {
-    if (!this.isHost() || !this.current || !this.shared) return;
-    void this.shared.set(reconcile(change(this.current), this.presentProfiles()));
+    const room = this.view();
+    if (!this.isHost() || !room || !this.shared) return;
+    this.write(reconcile(change(room), this.presentProfiles()));
   }
 
   // === Lobby actions (everyone) ===
@@ -432,6 +587,7 @@ export class RoomConnection {
   private publishProfile(change: Partial<Profile>): void {
     this.myProfile = { ...this.myProfile, ...change };
     void this.profiles?.set(this.myProfile);
+    this.remember();
     // The host acts on its own profile straight away
     this.handlePresenceChange();
   }
@@ -441,7 +597,27 @@ export class RoomConnection {
   }
 
   leaveSlot(): void {
-    this.publishProfile({ want: null });
+    this.publishProfile({ want: null, joinNext: false });
+  }
+
+  /** Spectator of a running game: ask for a seat from the next round. */
+  askToPlay(): void {
+    this.publishProfile({ want: -1, joinNext: true });
+  }
+
+  /** Take back `askToPlay`. */
+  cancelAsk(): void {
+    this.publishProfile({ joinNext: false });
+  }
+
+  /** Player of a running game: watch from the next round on. */
+  stepDown(): void {
+    this.publishProfile({ want: null, joinNext: false });
+  }
+
+  /** Take back `stepDown` before the round is over. */
+  stayIn(): void {
+    this.publishProfile({ want: -1 });
   }
 
   setNickname(nickname: string): void {
@@ -513,7 +689,8 @@ export class RoomConnection {
   }
 
   startGame(): void {
-    if (!this.current || !canStart(this.current)) return;
+    const room = this.view();
+    if (!room || !canStart(room)) return;
     this.updateRoom(room => ({ ...room, phase: 'game', gameId: room.gameId + 1 }));
   }
 
@@ -531,8 +708,12 @@ export class RoomConnection {
       onState: null,
       onHostDisconnected: null,
       broadcastState: (data) => {
-        void this.stateAction?.send(data).catch(() => {});
+        if (this.playerTargets.length > 0) void this.stateAction?.send(data, { target: this.playerTargets }).catch(() => {});
       },
+      sendSpectatorState: (data) => {
+        if (this.watcherTargets.length > 0) void this.stateAction?.send(data, { target: this.watcherTargets }).catch(() => {});
+      },
+      hasSpectators: () => this.watcherTargets.length > 0,
       sendInput: (input) => {
         const hostId = this.current?.hostId;
         if (hostId) void this.inputAction?.send(input, { target: hostId }).catch(() => {});

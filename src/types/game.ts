@@ -16,6 +16,29 @@ export interface GamePlayer {
   nickname: string;
   color: string;
   control: PlayerControl;
+  /**
+   * Who plays this slot (network games: a userId, or 'ai'). When the occupant of a slot
+   * changes between rounds, the slot's score starts again (design/spectators.md).
+   */
+  owner?: string;
+}
+
+/** A player as announced in the game stream: slot, nickname, colour, owner ('ai' = bot). */
+export type RosterEntry = [slot: number, nickname: string, color: string, owner: string];
+
+/** The one-shot events of a frame: must be applied exactly once, in tick order. */
+export interface FrameEvents {
+  tick?: number;
+  newTrailSegments: { slotIndex: SlotIndex; segments: TrailSegment[] }[];
+  borderSegments?: { color: string; segments: TrailSegment[] }[];
+  soundEvents: SoundEvent[];
+  eraserUsed?: boolean;
+  ridiculousDeathSlots?: SlotIndex[];
+  clearedAreas?: ClearedRect[];
+  clearedLines?: number[];
+  roundStarted?: boolean;
+  deaths?: DeathEvent[];
+  roster?: RosterEntry[];
 }
 
 export interface GameConfig {
@@ -183,6 +206,10 @@ export interface TronGameStateData {
   tick?: number;
   // Last input sequence number consumed for each remote slot
   acks?: Partial<Record<SlotIndex, number>>;
+  // Who plays, when it changed (and periodically): design/spectators.md
+  roster?: RosterEntry[];
+  // Reduced-rate stream: events of the ticks skipped since the previous message, oldest first
+  earlier?: FrameEvents[];
 }
 
 // Input includes action key for ready signal

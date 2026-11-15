@@ -3,7 +3,8 @@
 Multiplayer for Teratron Web: peer-to-peer over WebRTC with one player's browser acting as
 the authoritative host. No game server; static hosting only.
 
-Related: [architecture.md](./architecture.md), [local-and-ai.md](./local-and-ai.md).
+Related: [architecture.md](./architecture.md), [local-and-ai.md](./local-and-ai.md),
+[spectators.md](./spectators.md) (users without a seat, mid-game seating, the reduced stream).
 
 ## Contents
 
@@ -100,8 +101,9 @@ which also block most online games.
   link for phones.
 - The room code stays in the URL while the player is in the room, so **a reload rejoins the
   same room** with the same identity. It is removed when the player leaves deliberately.
-- `appId` includes a protocol version (`teratron/v2`) so incompatible builds never meet.
-- Rooms are open to anyone with the code. Extra players are spectators.
+- `appId` includes a protocol version (`teratron/v3`) so incompatible builds never meet.
+- Rooms are open to anyone with the code. Extra players are spectators
+  ([spectators.md](./spectators.md)).
 
 ## Lobby
 
@@ -124,6 +126,8 @@ interface SharedRoom {
   slots: (SlotEntry | null)[];          // 4 entries
   phase: 'lobby' | 'game';
   gameId: number;                       // incremented on every game start
+  queue: string[];                      // spectators.md: waiting for a seat in the running game
+  watchers: string[];                   // spectators.md: admitted users without a seat
 }
 interface SlotEntry { userId?: string; ai?: BotDifficulty; name: string; }
 ```
@@ -135,6 +139,7 @@ interface SlotEntry { userId?: string; ai?: BotDifficulty; name: string; }
   messages and no join handshake: a newcomer receives `room` and all profiles automatically.
 - Seats belong to a `userId`. While a game is running a seat is kept even if its owner
   disconnects, so they can come back; in the lobby, seats of absent users are freed.
+  During a game seats change only when a round starts ([spectators.md](./spectators.md)).
 - Chat is an ephemeral broadcast action (not stored; late joiners don't see history).
 - Bots: the host fills a slot with `{ ai: difficulty, name }`.
 
@@ -152,11 +157,13 @@ Three actions on the same room:
 | Action | Direction | Payload |
 |--------|-----------|---------|
 | `i` | guest → host (targeted) | `TronInputMessage` |
-| `s` | host → everyone | compact binary game state, one per tick |
+| `s` | host → players of the round | compact binary game state, one per tick |
+| `s` | host → everybody else in the room | the same, one message per 3 ticks carrying the events of the ticks in between ([spectators.md](./spectators.md)) |
 | `sync` (request) | guest → host | reply: full snapshot, for joining a game in progress |
 
-Inputs are mapped to slots by the sender's verified `userId`; state is accepted only from
-`hostId`.
+Inputs are mapped to slots by the sender's verified `userId` — it must own a slot in the
+round being played (the roster, which can differ from `slots` only for an instant at a
+round start); state is accepted only from `hostId`.
 
 ## Netcode: Prediction and Reconciliation
 
@@ -289,7 +296,7 @@ tested with two tabs on one machine. The debug overlay (`F`) shows lag and predi
 |-------|-----------|
 | Guest reloads in the lobby | Rejoins with the same `userId`; keeps its seat |
 | Guest reloads / reconnects during a game | Seat was kept. The client sees `phase: 'game'`, requests a **snapshot** from the host and resumes. Meanwhile its player keeps going straight (last input held) |
-| Someone new joins during a game | Becomes a spectator with a snapshot; can take a seat when the room is back in the lobby |
+| Someone new joins during a game | Becomes a spectator with a snapshot; can ask to play from the next round ([spectators.md](./spectators.md)) or take a seat when the room is back in the lobby |
 | Host reloads in the lobby | Comes back as host (`hostId` matches); guests see "host reconnecting…" meanwhile |
 | Host reloads during a game | The simulation is lost: the host returns and puts the room back in the lobby (scores reset). *Host migration is a possible later improvement* |
 | Host gone | Guests wait 25 s for it to return, then leave to the menu with a message |

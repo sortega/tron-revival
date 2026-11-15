@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildGameConfig, canStart, createSharedRoom, isRoomWriteAllowed, reconcile, sanitizeName, slotOfUser, toLobbyState,
+  MAX_WATCHERS, audienceOf, buildGameConfig, canStart, createSharedRoom, isRoomWriteAllowed, planNextRound, reconcile,
+  sanitizeName, slotOfUser, toLobbyState,
 } from '../src/network/roomLogic';
 import type { Profile, SharedRoom } from '../src/network/roomLogic';
 
@@ -120,5 +121,135 @@ describe('game configuration', () => {
     expect(view.slots[0]!.isHost).toBe(true);
     expect(view.slots[1]!.ai).toBe('normal');
     expect(view.spectators).toEqual([{ peerId: 'zoe', nickname: 'Zoe' }]);
+  });
+});
+
+describe('spectators', () => {
+  const ids = (slots: SharedRoom['slots']) => slots.map(s => s?.userId ?? (s?.ai ? `bot:${s.ai}` : null));
+  const inGame = (entries: Record<string, Partial<Profile> | null>, mode: SharedRoom['gameMode'] = 'ffa'): SharedRoom =>
+    ({ ...reconcile({ ...createSharedRoom('host'), gameMode: mode }, profiles(entries)), phase: 'game' });
+
+  it('admits watchers in order of arrival, up to the limit', () => {
+    let room = inGame({ host: {}, ann: {} });
+    const present: Record<string, Partial<Profile> | null> = { host: {}, ann: {} };
+    for (let i = 1; i <= MAX_WATCHERS + 2; i++) {
+      present[`w${i}`] = {};
+      room = reconcile(room, profiles(present));
+    }
+    expect(room.watchers).toEqual(Array.from({ length: MAX_WATCHERS }, (_, i) => `w${i + 1}`));
+    expect(ids(room.slots)).toEqual(['host', 'ann', null, null]);   // Nobody is seated during a game
+    // One leaves: the next one in gets the place
+    delete present.w2;
+    room = reconcile(room, profiles(present));
+    expect(room.watchers).toHaveLength(MAX_WATCHERS);
+    expect(room.watchers).toContain(`w${MAX_WATCHERS + 1}`);
+    expect(room.watchers).not.toContain('w2');
+    // A watcher who reloads (absent, then back) is not guaranteed the place, but those inside stay
+    expect(reconcile(room, profiles(present))).toBe(room);
+  });
+
+  it('never refuses the host or somebody who had a seat', () => {
+    const present: Record<string, Partial<Profile> | null> = { host: {}, ann: {}, bob: {}, cat: {} };
+    for (let i = 1; i <= MAX_WATCHERS; i++) present[`w${i}`] = {};
+    let room = reconcile(createSharedRoom('host'), profiles(present));
+    expect(room.watchers).toHaveLength(MAX_WATCHERS);
+    // Host and Ann leave their seats in the lobby
+    present.host = { want: null };
+    present.ann = { want: null };
+    room = reconcile(room, profiles(present));
+    expect(room.watchers).toContain('host');
+    expect(room.watchers).toContain('ann');
+  });
+
+  it('queues those who ask to play, in the order they asked', () => {
+    let room = inGame({ host: {}, ann: {}, bob: {}, cat: {} });
+    room = reconcile(room, profiles({ host: {}, ann: {}, bob: {}, cat: {}, zoe: { joinNext: true }, yan: {} }));
+    room = reconcile(room, profiles({ host: {}, ann: {}, bob: {}, cat: {}, zoe: { joinNext: true }, yan: { joinNext: true } }));
+    expect(room.queue).toEqual(['zoe', 'yan']);
+    // Zoe changes her mind
+    room = reconcile(room, profiles({ host: {}, ann: {}, bob: {}, cat: {}, zoe: {}, yan: { joinNext: true } }));
+    expect(room.queue).toEqual(['yan']);
+    expect(toLobbyState('x', room, profiles({ host: {}, yan: {}, zoe: {} })).spectators)
+      .toEqual([{ peerId: 'yan', nickname: 'yan', queued: true }, { peerId: 'zoe', nickname: 'zoe' }]);
+  });
+
+  describe('next round', () => {
+    it('changes nothing when nobody asked for anything', () => {
+      const room = inGame({ host: {}, ann: {} });
+      expect(planNextRound(room, profiles({ host: {}, ann: {}, zoe: {} }))).toBe(room.slots);
+    });
+
+    it('gives a queued spectator a free seat before a bot\'s', () => {
+      let room = inGame({ host: {}, ann: {} });
+      room.slots[2] = { ai: 'hard', name: 'Blue Bot' };
+      const present = profiles({ host: {}, ann: {}, zoe: { joinNext: true, name: 'Zoe' }, yan: { joinNext: true } });
+      room = reconcile(room, present);
+      expect(ids(planNextRound(room, present))).toEqual(['host', 'ann', 'yan', 'zoe']);
+      expect(planNextRound(room, present)[3]).toEqual({ userId: 'zoe', name: 'Zoe' });
+    });
+
+    it('replaces bots with humans, never humans, and keeps the rest waiting', () => {
+      let room = inGame({ host: {}, ann: {}, bob: {} });
+      room.slots[3] = { ai: 'easy', name: 'Yellow Bot' };
+      const present = profiles({ host: {}, ann: {}, bob: {}, zoe: { joinNext: true }, yan: { joinNext: true } });
+      room = reconcile(room, present);
+      expect(ids(planNextRound(room, present))).toEqual(['host', 'ann', 'bob', 'zoe']);
+      const audience = audienceOf(room, present, 'yan');
+      expect(audience).toMatchObject({ spectators: 2, joining: ['zoe'], waiting: ['yan'], me: 'waiting', queuePosition: 1 });
+      expect(audienceOf(room, present, 'zoe').me).toBe('joining');
+      expect(audienceOf(room, present, 'ann').me).toBe('playing');
+    });
+
+    it('frees the seat of a player who steps down, for the first in the queue', () => {
+      let room = inGame({ host: {}, ann: {}, bob: {}, cat: {} });
+      const present = profiles({ host: {}, ann: { want: null }, bob: {}, cat: {}, zoe: { joinNext: true } });
+      room = reconcile(room, present);
+      expect(ids(room.slots)).toEqual(['host', 'ann', 'bob', 'cat']);   // Ann plays this round out
+      expect(ids(planNextRound(room, present))).toEqual(['host', 'zoe', 'bob', 'cat']);
+      expect(audienceOf(room, present, 'ann')).toMatchObject({ me: 'leaving', leaving: ['ann'], joining: ['zoe'] });
+    });
+
+    it('keeps the seat of a player who vanished, unless they said goodbye', () => {
+      const room = inGame({ host: {}, ann: {}, bob: {} });
+      const present = profiles({ host: {}, bob: {} });
+      expect(planNextRound(room, present)).toBe(room.slots);
+      expect(ids(planNextRound(room, present, new Set(['ann'])))).toEqual(['host', null, 'bob', null]);
+    });
+
+    it('fills in with bots when the game would fall below its minimum', () => {
+      const ffa = inGame({ host: {}, ann: {} });
+      expect(ids(planNextRound(ffa, profiles({ host: {}, ann: { want: null } })))).toEqual(['host', 'bot:normal', null, null]);
+      const team = inGame({ host: {}, ann: {}, bob: {}, cat: {} }, 'team');
+      const next = planNextRound(team, profiles({ host: {}, ann: {}, bob: { want: null }, cat: {} }));
+      expect(ids(next)).toEqual(['host', 'ann', 'bot:normal', 'cat']);
+      expect(next[2]!.name).toBe('Purple Bot');
+      // With somebody waiting, the newcomer takes that team seat instead
+      const present = profiles({ host: {}, ann: {}, bob: { want: null }, cat: {}, zoe: { joinNext: true } });
+      expect(ids(planNextRound(reconcile(team, present), present))).toEqual(['host', 'ann', 'zoe', 'cat']);
+    });
+
+    it('picks up new nicknames', () => {
+      const room = inGame({ host: {}, ann: {} });
+      expect(planNextRound(room, profiles({ host: {}, ann: { name: 'Annie' } }))[1]!.name).toBe('Annie');
+    });
+  });
+
+  it('back in the lobby, those who were waiting are seated first', () => {
+    let room = inGame({ host: {}, ann: {}, bob: {}, cat: {} });
+    const present = { yan: {}, host: {}, ann: {}, bob: {}, zoe: { joinNext: true } };
+    room = reconcile(room, profiles(present));
+    // Cat left during the game; the room returns to the lobby
+    room = reconcile({ ...room, phase: 'lobby' }, profiles(present));
+    expect(ids(room.slots)).toEqual(['host', 'ann', 'bob', 'zoe']);
+    expect(room.queue).toEqual([]);
+    expect(room.watchers).toEqual(['yan']);
+  });
+
+  it('marks who owns each slot in the game configuration', () => {
+    const room: SharedRoom = {
+      ...createSharedRoom('host'),
+      slots: [{ userId: 'host', name: 'H' }, { ai: 'normal', name: 'Green Bot' }, null, null],
+    };
+    expect(buildGameConfig(room, 'host').players.map(p => p.owner)).toEqual(['host', 'ai']);
   });
 });

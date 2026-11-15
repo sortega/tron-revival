@@ -1,11 +1,11 @@
 // Network lobby screen: seats, settings, chat, and the hand-over to the game.
 // The room logic lives in RoomConnection; see design/networking.md.
 
-import qrcode from 'qrcode-generator';
-import type { Screen, ScreenManager, LobbyOptions } from './ScreenManager';
+import type { Screen, ScreenManager, LobbyOptions, GameRoomInfo } from './ScreenManager';
 import { RoomConnection, generateRoomCode } from '../network/RoomConnection';
 import type { PeerDiagnostics, RoomStatus } from '../network/RoomConnection';
 import { DEBUG_LAG, LaggedTransport } from '../network/LaggedTransport';
+import { MAX_WATCHERS } from '../network/roomLogic';
 import type { LobbyState, SlotIndex, GameMode } from '../types/lobby';
 import { getSlotColor, canStartGame, getFilledSlotCount } from '../types/lobby';
 import type { BotDifficulty } from '../types/game';
@@ -14,6 +14,7 @@ import type { GameSession } from '../game/session/GameSession';
 import { createHostSession } from '../game/session/WorkerHostSession';
 import { GuestSession } from '../game/session/GuestSession';
 import { escapeHtml } from '../util/html';
+import { qrSvg } from '../util/qr';
 import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
 
 const NICKNAME_KEY = 'teratron-nickname';
@@ -195,7 +196,7 @@ export class NetworkLobby implements Screen {
     const isHost = this.room.isHost();
     const editable = isHost && state !== null;
     const roomId = this.room.code;
-    const link = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(roomId)}`;
+    const link = this.room.getLink();
     const gameMode = state?.gameMode ?? 'ffa';
     const levelMode = state?.levelMode ?? 'cycle';
     const canStart = state !== null && canStartGame(state);
@@ -252,7 +253,7 @@ export class NetworkLobby implements Screen {
           <button id="copyCodeBtn" style="flex: 1; ${BTN} background: #002; color: #08f; border: 1px solid #08f;">📋 CODE</button>
           <button id="copyLinkBtn" style="flex: 1; ${BTN} background: #002; color: #08f; border: 1px solid #08f;">🔗 LINK</button>
         </div>
-        <div class="lobby-qr" title="Scan to join" style="background: #fff; padding: 6px; margin: 0.5rem auto 0; width: 150px; border-radius: 4px;">${this.qrSvg(link)}</div>
+        <div class="lobby-qr" title="Scan to join" style="background: #fff; padding: 6px; margin: 0.5rem auto 0; width: 150px; border-radius: 4px;">${qrSvg(link)}</div>
         <div style="color: #666; font-size: 0.7rem; text-align: center; margin-top: 0.25rem;">Scan to join from a phone</div>
       </div>
 
@@ -289,17 +290,6 @@ export class NetworkLobby implements Screen {
     this.myNickname = nickname;
     localStorage.setItem(NICKNAME_KEY, nickname);
     this.room.setNickname(nickname);
-  }
-
-  private qrSvg(text: string): string {
-    try {
-      const qr = qrcode(0, 'M');
-      qr.addData(text);
-      qr.make();
-      return qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
-    } catch {
-      return '';
-    }
   }
 
   private setupCopyButton(id: string, text: string, label: string): void {
@@ -350,7 +340,7 @@ export class NetworkLobby implements Screen {
     const spectatorsHtml = state.spectators.map(peer => `
       <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; margin-bottom: 0.5rem;
         background: #0a0a0a; border: 1px solid #333; border-radius: 4px;">
-        <div style="flex: 1; color: #888;">${escapeHtml(peer.nickname)}${peer.peerId === selfId ? ' (You)' : ''}${peer.peerId === state.hostPeerId ? ' 🛠️' : ''}</div>
+        <div style="flex: 1; color: #888;">👁 ${escapeHtml(peer.nickname)}${peer.peerId === selfId ? ' (You)' : ''}${peer.peerId === state.hostPeerId ? ' 🛠️' : ''}${peer.queued ? ' <span title="Asked to play" style="color: #0c8;">· wants to play</span>' : ''}</div>
         ${this.linkBadge(peer.peerId)}
       </div>
     `).join('');
@@ -359,7 +349,7 @@ export class NetworkLobby implements Screen {
       <h3 style="color: #0ff; margin-bottom: 1rem;">Players</h3>
       ${slotsHtml}
       ${state.spectators.length > 0 ? `
-        <h3 style="color: #666; margin-top: 1.5rem; margin-bottom: 1rem;">Spectators</h3>
+        <h3 id="spectatorsHeading" style="color: #666; margin-top: 1.5rem; margin-bottom: 1rem;">Spectators (${state.spectators.length}/${MAX_WATCHERS})</h3>
         ${spectatorsHtml}
       ` : ''}
     `;
@@ -520,22 +510,43 @@ export class NetworkLobby implements Screen {
 
     let session: GameSession;
     if (room.isHost()) {
-      const host = createHostSession(config, transport);
+      // Seats change hands at round starts (design/spectators.md): the room plans the
+      // next round, the session applies it and the room follows
+      const host = createHostSession(config, transport, { onRosterApplied: (players) => room.setActiveRoster([...players]) });
+      room.setActiveRoster(config.players);
+      room.setNextPlayersListener((players) => host.setNextPlayers(players));
       room.setSnapshotProvider(() => host.makeSnapshot());
       session = host;
     } else {
-      const guest = new GuestSession(transport, room.getMySlotIndex(), config.players, { awaitSnapshot: resume });
+      const guest = new GuestSession(transport, room.getMySlotIndex(), config.players, {
+        awaitSnapshot: resume, selfId: room.getSelfId() ?? undefined,
+      });
       if (resume) {
         void room.requestSnapshot().then(data => (data ? guest.loadSnapshot(data) : guest.skipSnapshot()));
       }
       session = guest;
     }
 
+    // What the game screen shows about the room: how to join, who watches, and the
+    // buttons to ask for a seat or give it up
+    const roomInfo: GameRoomInfo = {
+      code: room.code,
+      link: room.getLink(),
+      audience: () => room.getAudience(),
+      onChange: null,
+      askToPlay: () => room.askToPlay(),
+      cancelAsk: () => room.cancelAsk(),
+      stepDown: () => room.stepDown(),
+      stayIn: () => room.stayIn(),
+    };
+
     // From here on the room reports to the game, not to this (discarded) screen
     room.setCallbacks({
+      onLobbyUpdate: () => roomInfo.onChange?.(),
       onPhase: (phase) => {
         if (phase === 'lobby') {
           room.setSnapshotProvider(null);
+          room.setNextPlayersListener(null);
           screenManager.showNetworkLobby({ room });
         }
       },
@@ -548,6 +559,7 @@ export class NetworkLobby implements Screen {
     screenManager.showGame(config, session, {
       onBackToLobby: room.isHost() ? () => room.setPhase('lobby') : undefined,
       onLeave: () => room.leave(),
+      room: roomInfo,
     });
   }
 

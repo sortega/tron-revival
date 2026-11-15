@@ -3,7 +3,7 @@
 
 import { encode, decode } from '@msgpack/msgpack';
 import type {
-  ActiveEffect, EquippedWeapon, GameItem, Projectile, ProjectileType, TrailSegment,
+  ActiveEffect, EquippedWeapon, FrameEvents, GameItem, GamePlayer, Projectile, ProjectileType, RosterEntry, TrailSegment,
   TronGameStateData, TronMatchState, TronPlayerState, TronRoundState,
 } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
@@ -36,11 +36,116 @@ interface PackedRound extends Omit<TronRoundState, 'players' | 'projectiles' | '
   portals?: TronRoundState['portals'];
 }
 
-interface PackedGameState extends Omit<TronGameStateData, 'newTrailSegments' | 'round' | 'borderSegments' | 'match'> {
+interface PackedEvents extends Omit<FrameEvents, 'newTrailSegments' | 'borderSegments'> {
+  newTrailSegments: PackedTrail[];
+  borderSegments?: { color: string; segments: number[] }[];
+}
+
+interface PackedGameState extends Omit<TronGameStateData, 'newTrailSegments' | 'round' | 'borderSegments' | 'match' | 'earlier'> {
   match?: TronMatchState;
   round: PackedRound;
   newTrailSegments: PackedTrail[];
   borderSegments?: { color: string; segments: number[] }[];
+  earlier?: PackedEarlier[];
+}
+
+// Events of a skipped tick, as compact as they get: most ticks only have trail pixels.
+// trails: [slot, pixelCount, x, y, x, y, ..., slot, pixelCount, ...]
+type PackedEarlier = [tick: number, trails: number[], rest?: Partial<PackedEvents>];
+
+function packEarlier(events: FrameEvents): PackedEarlier {
+  const trails: number[] = [];
+  for (const { slotIndex, segments } of events.newTrailSegments) {
+    trails.push(slotIndex, segments.length);
+    for (const seg of segments) trails.push(seg.x, seg.y);
+  }
+  const rest: Partial<PackedEvents> = {};
+  let hasRest = false;
+  const keep = <K extends keyof PackedEvents>(key: K, value: PackedEvents[K] | undefined, present: boolean): void => {
+    if (!present) return;
+    rest[key] = value;
+    hasRest = true;
+  };
+  keep('borderSegments', events.borderSegments?.map(b => ({ color: b.color, segments: packTrails(b.segments) })), !!events.borderSegments?.length);
+  keep('soundEvents', events.soundEvents, events.soundEvents.length > 0);
+  keep('eraserUsed', true, !!events.eraserUsed);
+  keep('ridiculousDeathSlots', events.ridiculousDeathSlots, !!events.ridiculousDeathSlots?.length);
+  keep('clearedAreas', events.clearedAreas, !!events.clearedAreas?.length);
+  keep('clearedLines', events.clearedLines, !!events.clearedLines?.length);
+  keep('roundStarted', true, !!events.roundStarted);
+  keep('deaths', events.deaths, !!events.deaths?.length);
+  return hasRest ? [events.tick ?? -1, trails, rest] : [events.tick ?? -1, trails];
+}
+
+function unpackEarlier(packed: PackedEarlier): FrameEvents | null {
+  if (!Array.isArray(packed) || typeof packed[0] !== 'number' || !Array.isArray(packed[1])) return null;
+  const [tick, trails, rest] = packed;
+  const newTrailSegments: PackedTrail[] = [];
+  for (let i = 0; i + 1 < trails.length;) {
+    const count = Math.max(0, trails[i + 1]!);
+    newTrailSegments.push({ slotIndex: trails[i]!, segments: trails.slice(i + 2, i + 2 + count * 2) });
+    i += 2 + count * 2;
+  }
+  return { ...unpackEvents({ soundEvents: [], ...rest, newTrailSegments }), tick };
+}
+
+/** The roster as it travels in the game stream (design/spectators.md). */
+export function toRoster(players: readonly GamePlayer[]): RosterEntry[] {
+  return players.map(p => [p.slotIndex, p.nickname, p.color, p.owner ?? '']);
+}
+
+/** Tolerant of malformed entries: anything unusable is dropped. */
+export function rosterIdentities(roster: readonly RosterEntry[]): (PlayerIdentity & { owner: string })[] {
+  const result: (PlayerIdentity & { owner: string })[] = [];
+  for (const entry of roster) {
+    if (!Array.isArray(entry)) continue;
+    const [slot, nickname, color, owner] = entry;
+    if (typeof slot !== 'number' || slot < 0 || slot > 3 || !Number.isInteger(slot)) continue;
+    result.push({
+      slotIndex: slot as SlotIndex,
+      nickname: typeof nickname === 'string' ? nickname : '',
+      color: typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) ? color : '#ffffff',
+      owner: typeof owner === 'string' ? owner : '',
+    });
+  }
+  return result;
+}
+
+/** The one-shot events of a frame, without its state. */
+export function eventsOf(frame: FrameEvents): FrameEvents {
+  return {
+    tick: frame.tick,
+    newTrailSegments: frame.newTrailSegments,
+    borderSegments: frame.borderSegments,
+    soundEvents: frame.soundEvents,
+    eraserUsed: frame.eraserUsed,
+    ridiculousDeathSlots: frame.ridiculousDeathSlots,
+    clearedAreas: frame.clearedAreas,
+    clearedLines: frame.clearedLines,
+    roundStarted: frame.roundStarted,
+    deaths: frame.deaths,
+    roster: frame.roster,
+  };
+}
+
+function packEvents<T extends FrameEvents>(events: T): Omit<T, 'newTrailSegments' | 'borderSegments'> & Pick<PackedEvents, 'newTrailSegments' | 'borderSegments'> {
+  return {
+    ...events,
+    newTrailSegments: events.newTrailSegments.map(t => ({ slotIndex: t.slotIndex, segments: packTrails(t.segments) })),
+    borderSegments: events.borderSegments?.map(b => ({ color: b.color, segments: packTrails(b.segments) })),
+  };
+}
+
+function unpackEvents(packed: PackedEvents): FrameEvents {
+  return {
+    ...packed,
+    newTrailSegments: (packed.newTrailSegments ?? []).map(t => ({
+      slotIndex: t.slotIndex as SlotIndex,
+      segments: unpackTrails(t.segments),
+    })),
+    borderSegments: packed.borderSegments?.map(b => ({ color: b.color, segments: unpackTrails(b.segments) })),
+    soundEvents: packed.soundEvents ?? [],
+  };
 }
 
 const EMPTY_MATCH: TronMatchState = {
@@ -153,7 +258,8 @@ export type WireState = Omit<TronGameStateData, 'match' | 'round'> & {
 /** Serialize game state to a compact MessagePack binary. */
 export function serializeState(state: WireState): Uint8Array {
   const packed = {
-    ...state,
+    ...packEvents(state),
+    earlier: state.earlier?.map(packEarlier),
     round: {
       ...state.round,
       players: state.round.players.map(packPlayer),
@@ -161,11 +267,6 @@ export function serializeState(state: WireState): Uint8Array {
       // Inactive items are of no interest to guests
       items: state.round.items?.filter(i => i.active).map(packItem),
     },
-    newTrailSegments: state.newTrailSegments.map(t => ({
-      slotIndex: t.slotIndex,
-      segments: packTrails(t.segments),
-    })),
-    borderSegments: state.borderSegments?.map(b => ({ color: b.color, segments: packTrails(b.segments) })),
   };
   return encode(packed, { ignoreUndefined: true });
 }
@@ -179,8 +280,15 @@ export function deserializeState(
   data: Uint8Array, players: readonly PlayerIdentity[] = [], previous: TronGameStateData | null = null
 ): TronGameStateData {
   const packed = decode(data) as PackedGameState;
+  // A frame that announces a roster is read with it
+  if (Array.isArray(packed.roster)) players = rosterIdentities(packed.roster);
+  const events = unpackEvents(packed);
   return {
     ...packed,
+    newTrailSegments: events.newTrailSegments,
+    borderSegments: events.borderSegments,
+    earlier: Array.isArray(packed.earlier)
+      ? packed.earlier.map(unpackEarlier).filter((e): e is FrameEvents => e !== null) : undefined,
     round: {
       ...packed.round,
       players: packed.round.players.map((p): TronPlayerState => {
@@ -202,10 +310,5 @@ export function deserializeState(
       portals: packed.round.portals ?? previous?.round.portals ?? [],
     },
     match: packed.match ?? previous?.match ?? EMPTY_MATCH,
-    newTrailSegments: packed.newTrailSegments.map(t => ({
-      slotIndex: t.slotIndex as SlotIndex,
-      segments: unpackTrails(t.segments),
-    })),
-    borderSegments: packed.borderSegments?.map(b => ({ color: b.color, segments: unpackTrails(b.segments) })),
   };
 }

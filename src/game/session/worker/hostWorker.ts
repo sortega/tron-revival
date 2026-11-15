@@ -27,8 +27,15 @@ const relay: HostTransport = {
   onInput: null,
   close: () => {},
 };
+let spectators = false;
 const inputs = new Map<SlotIndex, TronInput>();
 let pending: TronGameStateData[] = [];
+
+function postFrames(): void {
+  if (pending.length === 0) return;
+  scope.postMessage({ type: 'frames', frames: pending, sentAt: performance.timeOrigin + performance.now() });
+  pending = [];
+}
 let lastTime = 0;
 let accumulator = 0;
 let paused = false;
@@ -52,10 +59,7 @@ function advance(): void {
     perfCount('droppedTicks', Math.floor(accumulator / TICK_MS));
     accumulator = 0;
   }
-  if (pending.length > 0) {
-    scope.postMessage({ type: 'frames', frames: pending, sentAt: performance.timeOrigin + performance.now() });
-    pending = [];
-  }
+  postFrames();
 }
 
 scope.onmessage = (event) => {
@@ -64,9 +68,19 @@ scope.onmessage = (event) => {
     case 'init':
       if (message.perf) perfEnable();
       // The URL (`?human=`) is the page's: a worker cannot see it
+      spectators = message.spectators;
+      if (message.spectatorStream) {
+        relay.sendSpectatorState = (data) => scope.postMessage({ type: 'spectatorState', data });
+        relay.hasSpectators = () => spectators;
+      }
       session = new HostSession(message.config, {
         botHumanisation: message.botHumanisation,
         ...(message.network && { transport: relay }),
+        // The frames of the round before go first: the page changes roles on this message
+        onRosterApplied: (players) => {
+          postFrames();
+          scope.postMessage({ type: 'roster', players: [...players] });
+        },
       });
       session.onFrame = (frame) => { pending.push(frame); };
       lastTime = performance.now();
@@ -75,6 +89,12 @@ scope.onmessage = (event) => {
       break;
     case 'inputs':
       for (const [slot, input] of message.inputs) inputs.set(slot, input);
+      break;
+    case 'spectators':
+      spectators = message.present;
+      break;
+    case 'nextPlayers':
+      session?.setNextPlayers(message.players);
       break;
     case 'netInput':
       relay.onInput?.(message.slot, message.input);

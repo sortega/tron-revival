@@ -66,6 +66,7 @@ export interface ChatMessage {
 export interface Spectator {
   peerId: string;
   nickname: string;
+  queued?: boolean;   // Asked to play from the next round
 }
 
 export interface LobbyState {

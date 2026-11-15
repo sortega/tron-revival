@@ -3,6 +3,7 @@
 import type { GameConfig } from '../types/game';
 import type { GameSession } from '../game/session/GameSession';
 import type { RoomConnection } from '../network/RoomConnection';
+import type { Audience } from '../network/roomLogic';
 import { normalizeRoomCode } from '../network/roomCode';
 
 export interface Screen {
@@ -15,8 +16,27 @@ export type LobbyOptions =
   | { mode: 'guest'; roomId: string }
   | { room: RoomConnection };   // Return to the lobby of a room we are already in
 
+/** What a game screen knows about the network room it is played in (design/spectators.md). */
+export interface GameRoomInfo {
+  code: string;
+  /** URL that brings a browser into the room. */
+  link: string;
+  /** Spectators, who joins or leaves at the next round, and this user's own situation. */
+  audience(): Audience;
+  /** Set by the game screen: called when the audience may have changed. */
+  onChange: (() => void) | null;
+  /** Spectator: ask for a seat from the next round / take it back. */
+  askToPlay(): void;
+  cancelAsk(): void;
+  /** Player: watch from the next round on / take it back. */
+  stepDown(): void;
+  stayIn(): void;
+}
+
 /** Hooks a game screen gets from whoever started the game. */
 export interface GameScreenOptions {
+  /** Network games: the room, for the join code and the spectator controls. */
+  room?: GameRoomInfo;
   /** Host of a network game: send everybody back to the lobby. */
   onBackToLobby?: () => void;
   /** Called when the player leaves the game for the main menu. */

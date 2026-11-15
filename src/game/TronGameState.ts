@@ -250,6 +250,10 @@ export class TronGameState {
 
   // Player configs for restarting rounds
   private playerConfigs: GamePlayer[];
+  // Roster of the next round, when it differs (see setNextPlayers)
+  private nextPlayers: GamePlayer[] | null = null;
+  /** Incremented every time a round starts with a different roster. */
+  rosterVersion = 0;
 
   constructor(playerConfigs: GamePlayer[], gameMode: GameMode, levelMode: LevelMode, rng: Rng = Math.random) {
     this.rng = rng;
@@ -333,8 +337,53 @@ export class TronGameState {
     this.pixels.copyFrom(obstacles);
   }
 
+  /**
+   * Who plays from the next round on (design/spectators.md). Applied when that round
+   * starts; null cancels a pending change. Slots whose `owner` differs start afresh.
+   */
+  setNextPlayers(players: GamePlayer[] | null): void {
+    this.nextPlayers = players;
+  }
+
+  /** The players of the round being played. */
+  getPlayerConfigs(): readonly GamePlayer[] {
+    return this.playerConfigs;
+  }
+
+  private applyNextPlayers(): void {
+    const next = this.nextPlayers;
+    if (!next) return;
+    this.nextPlayers = null;
+
+    const oldConfigs = new Map(this.playerConfigs.map(c => [c.slotIndex, c]));
+    const oldPlayers = new Map(this.players.map(p => [p.slotIndex, p]));
+    this.players = next.map(config => {
+      const previous = oldConfigs.get(config.slotIndex);
+      const sameOccupant = previous !== undefined && previous.owner === config.owner;
+      if (!sameOccupant) {
+        // A newcomer starts from zero; in team mode the seat's wins belong to the team
+        const inherited = this.gameMode === 'team' && previous ? this.scores.get(config.slotIndex) ?? 0 : 0;
+        this.scores.set(config.slotIndex, inherited);
+        this.ridiculousDeaths.set(config.slotIndex, 0);
+      }
+      const player = oldPlayers.get(config.slotIndex) ?? new TronPlayer(config.slotIndex, 0, 0, 0, config.color, config.nickname);
+      player.color = config.color;
+      player.nickname = config.nickname;
+      return player;
+    });
+    for (const slot of oldConfigs.keys()) {
+      if (!next.some(c => c.slotIndex === slot)) {
+        this.scores.delete(slot);
+        this.ridiculousDeaths.delete(slot);
+      }
+    }
+    this.playerConfigs = next;
+    this.rosterVersion++;
+  }
+
   // Initialize/reset for a new round
   initRound(): void {
+    this.applyNextPlayers();
     this.phase = 'countdown';
     this.countdown = COUNTDOWN_SECONDS;
     this.roundWinner = null;
@@ -1685,8 +1734,12 @@ export class TronGameState {
       this.prevActionState.set(slotIndex, isPressed);
     }
 
-    // Check if all players are ready
-    if (this.playersReady.size >= this.players.length) {
+    // The next round starts when everyone who stays for it is ready. Players about to
+    // leave are not waited for; if nobody stays, the ready lock is the only pause.
+    const next = this.nextPlayers;
+    const staying = next === null ? this.playerConfigs : this.playerConfigs.filter(c =>
+      next.some(n => n.slotIndex === c.slotIndex && n.owner === c.owner));
+    if (staying.every(c => this.playersReady.has(c.slotIndex)) && (staying.length > 0 || !locked)) {
       this.currentRound++;
       // On to the next of the chosen levels (the same one if there is only one)
       this.currentLevelIndex = nextLevelIndex(this.levelMode, this.currentLevelIndex);

@@ -76,6 +76,8 @@ export class TronRenderer {
   private readonly sidebarCanvas: HTMLCanvasElement;
   private readonly sidebarCtx: CanvasRenderingContext2D;
   private sidebarKey = '';
+  // Network games: who is watching and who changes seats next round (round summary)
+  private audience: { spectators: number; joining: string[]; leaving: string[]; waiting: string[] } | null = null;
 
   // Resize handler (stored for cleanup)
   private readonly resizeHandler: () => void;
@@ -338,6 +340,16 @@ export class TronRenderer {
     ctx.fillStyle = '#ccc';
     ctx.font = '16px monospace';
     ctx.fillText(detail, PLAY_WIDTH / 2, midY + 18);
+  }
+
+  /** The players changed at a round start (design/spectators.md). */
+  setPlayers(players: GamePlayer[]): void {
+    this.players = players;
+  }
+
+  /** Who is watching, shown on the round summary; null in local games. */
+  setAudience(audience: { spectators: number; joining: string[]; leaving: string[]; waiting: string[] } | null): void {
+    this.audience = audience;
   }
 
   renderMessage(text: string): void {
@@ -1004,6 +1016,29 @@ export class TronRenderer {
     this.ctx.textAlign = 'center';
     const instructionY = startY + this.players.length * 35 + 40;
     this.ctx.fillText('Press ACTION when ready', PLAY_WIDTH / 2, instructionY);
+
+    // Spectators, and who changes seats when the next round starts (design/spectators.md)
+    const audience = this.audience;
+    if (audience) {
+      const list = (names: string[]): string => names.length > 2
+        ? `${names.slice(0, 2).join(', ')} +${names.length - 2}` : names.join(' and ');
+      const lines: { text: string; color: string }[] = [];
+      if (audience.spectators > 0) lines.push({ text: `👁 ${audience.spectators} watching`, color: '#8cf' });
+      if (audience.joining.length > 0) {
+        lines.push({ text: `${list(audience.joining)} ${audience.joining.length > 1 ? 'join' : 'joins'} next round`, color: '#0c8' });
+      }
+      if (audience.leaving.length > 0) {
+        lines.push({ text: `${list(audience.leaving)} ${audience.leaving.length > 1 ? 'leave' : 'leaves'} after this round`, color: '#c84' });
+      }
+      if (audience.waiting.length > 0) {
+        lines.push({ text: `${list(audience.waiting)} waiting for a seat`, color: '#888' });
+      }
+      this.ctx.font = '14px monospace';
+      lines.forEach((line, i) => {
+        this.ctx.fillStyle = line.color;
+        this.ctx.fillText(line.text, PLAY_WIDTH / 2, instructionY + 30 + i * 20, PLAY_WIDTH - 40);
+      });
+    }
   }
 
   // The headline between rounds of a team game: PURPLE 5 : 3 BROWN

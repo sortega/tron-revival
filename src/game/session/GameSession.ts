@@ -3,14 +3,15 @@
 // remote host (network guest). See design/local-and-ai.md.
 
 import type { SlotIndex } from '../../types/lobby';
-import type { TrailSegment, TronGameStateData, TronInput, TronInputMessage, TronMatchState, TronRoundState } from '../../types/game';
+import type { GamePlayer, TrailSegment, TronGameStateData, TronInput, TronInputMessage, TronMatchState, TronRoundState } from '../../types/game';
 import type { PixelGrid } from '../PixelGrid';
 import type { SmoothLinesData } from '../display/SmoothLines';
 
 export interface NetworkStats {
   lagMs: number;     // Estimated one-way latency to the host
   bytesIn: number;   // bytes/sec incoming
-  bytesOut: number;  // bytes/sec outgoing
+  bytesOut: number;  // bytes/sec outgoing (host: per player)
+  bytesOutSpectators?: number;  // Host: bytes/sec of the reduced stream, per spectator
   predictedTicks?: number;  // Guest: inputs sent but not yet acknowledged by the host
   silentMs?: number;        // Guest: time since the last state from the host
 }
@@ -35,6 +36,12 @@ export interface GameSession {
    * now (trails, level damage). Only guests ever call this.
    */
   onSnapshot: ((arena: PixelGrid, smoothLines?: SmoothLinesData) => void) | null;
+  /**
+   * The players changed at a round start (design/spectators.md), as seen from this
+   * machine: `control` says which of them, if any, are played here. Called before the
+   * first frame of that round.
+   */
+  onRoster: ((players: GamePlayer[]) => void) | null;
   /** What to draw right now; null until a guest has received its first state. */
   getViewState(): ViewState | null;
   /** Level obstacles for the level being played (ignored by guests). */
@@ -51,8 +58,12 @@ export interface GameSession {
 // === Transports: the network as seen by a session ===
 
 export interface HostTransport {
-  /** Send an encoded state to every guest. */
+  /** Send an encoded state to every guest who plays. */
   broadcastState(data: Uint8Array): void;
+  /** Send a reduced-rate state to the guests who only watch (design/spectators.md). */
+  sendSpectatorState?(data: Uint8Array): void;
+  /** False when nobody is watching, so the reduced stream need not be produced. */
+  hasSpectators?(): boolean;
   onInput: ((slot: SlotIndex, input: TronInputMessage) => void) | null;
   close(): void;
 }

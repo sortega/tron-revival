@@ -2,12 +2,12 @@
 // Used for local games (no transport) and by the host of a network game.
 
 import type { SlotIndex } from '../../types/lobby';
-import type { GameConfig, TronGameStateData, TronInput } from '../../types/game';
+import type { FrameEvents, GameConfig, GamePlayer, TronGameStateData, TronInput } from '../../types/game';
 import { TronGameState } from '../TronGameState';
 import type { PixelGrid } from '../PixelGrid';
 import type { SmoothLinesData } from '../display/SmoothLines';
 import type { Rng } from '../rng';
-import { encodeSnapshot, serializeState } from '../../network/serialization';
+import { encodeSnapshot, eventsOf, serializeState, toRoster } from '../../network/serialization';
 import type { WireState } from '../../network/serialization';
 import { PLAY_HEIGHT, PLAY_WIDTH, TICK_RATE } from '../constants';
 import { SmoothLineKeeper } from '../display/SmoothLines';
@@ -26,19 +26,42 @@ export interface HostSessionOptions {
   now?: () => number;
   /** Strength of the bots' human imperfections: 0 = none, 1 = as designed (design/bots-human.md). */
   botHumanisation?: number;
+  /**
+   * A round started with different players. Called before the first frame of that
+   * round is sent, so the transport can change who gets which stream.
+   */
+  onRosterApplied?: (players: readonly GamePlayer[]) => void;
 }
+
+/** Watchers get one message every this many ticks (design/spectators.md). */
+export const SPECTATOR_SEND_EVERY = 3;
+
+const sameRoster = (a: readonly GamePlayer[], b: readonly GamePlayer[]): boolean =>
+  JSON.stringify(a.map(p => [p.slotIndex, p.nickname, p.color, p.owner, p.control])) ===
+  JSON.stringify(b.map(p => [p.slotIndex, p.nickname, p.color, p.owner, p.control]));
 
 export class HostSession implements GameSession {
   readonly game: TronGameState;
   onFrame: ((frame: TronGameStateData) => void) | null = null;
   onEnded: ((reason: string) => void) | null = null;
   onSnapshot: ((arena: PixelGrid, smoothLines?: SmoothLinesData) => void) | null = null;
+  onRoster: ((players: GamePlayer[]) => void) | null = null;
+
+  private readonly options: HostSessionOptions;
+  private readonly rng: Rng;
+  private players: GamePlayer[];
+  private pendingPlayers: GamePlayer[] | null = null;
+  private rosterVersion = 0;
+  // Reduced stream: frames not yet sent to the watchers
+  private backlog: (TronGameStateData & { tick: number })[] = [];
+  private readonly spectatorBytesOut = new ByteRate();
+  private spectatorMessages = 0;
 
   private readonly transport: HostTransport | null;
   private readonly now: () => number;
   private readonly inputs = new Map<SlotIndex, TronInput>();
   private readonly localSlots = new Set<SlotIndex>();
-  private readonly bots: HumanBot[] = [];
+  private bots: HumanBot[] = [];
   private lastFrame: TronGameStateData;
   private readonly bytesOut = new ByteRate();
   private readonly pings = new Map<SlotIndex, { t: number; receivedAt: number }>();
@@ -51,24 +74,24 @@ export class HostSession implements GameSession {
   private tick = 0;
 
   constructor(config: GameConfig, options: HostSessionOptions = {}) {
+    this.options = options;
     this.transport = options.transport ?? null;
     this.now = options.now ?? (() => performance.now());
     this.game = new TronGameState(config.players, config.gameMode, config.levelMode, options.rng);
+    this.players = config.players;
 
-    const rng = options.rng ?? Math.random;
+    this.rng = options.rng ?? Math.random;
     for (const player of config.players) {
       if (player.control.type === 'local') {
         this.localSlots.add(player.slotIndex);
       } else if (player.control.type === 'ai') {
-        // Each bot gets its own random stream so bots don't perturb each other
-        const botRng = createRng(Math.floor(rng() * 0x100000000));
-        this.bots.push(createBot(player.slotIndex, player.control.difficulty, botRng, options.botHumanisation));
+        this.bots.push(this.createBot(player));
       }
     }
 
-    const colors = new Map(config.players.map(p => [p.slotIndex, packCss(p.color)]));
+    // (seats change hands at round starts, design/spectators.md: the colour is the seat's)
     this.smoothLines = this.transport
-      ? new SmoothLineKeeper(PLAY_WIDTH, PLAY_HEIGHT, slot => colors.get(slot))
+      ? new SmoothLineKeeper(PLAY_WIDTH, PLAY_HEIGHT, slot => this.colorOf(slot))
       : null;
 
     if (this.transport) {
@@ -97,6 +120,78 @@ export class HostSession implements GameSession {
   }
 
   private pendingInitialFrame: TronGameStateData | null;
+
+  private readonly colors = new Map<SlotIndex, number>();
+  private colorOf(slot: SlotIndex): number | undefined {
+    let color = this.colors.get(slot);
+    if (color === undefined) {
+      const player = this.players.find(p => p.slotIndex === slot);
+      if (!player) return undefined;
+      color = packCss(player.color);
+      this.colors.set(slot, color);
+    }
+    return color;
+  }
+
+  private createBot(player: GamePlayer): HumanBot {
+    // Each bot gets its own random stream so bots don't perturb each other
+    const botRng = createRng(Math.floor(this.rng() * 0x100000000));
+    const difficulty = player.control.type === 'ai' ? player.control.difficulty : 'normal';
+    return createBot(player.slotIndex, difficulty, botRng, this.options.botHumanisation);
+  }
+
+  /**
+   * Who plays from the next round on (design/spectators.md). Takes effect when that
+   * round starts; passing the current players cancels a pending change.
+   */
+  setNextPlayers(players: GamePlayer[]): void {
+    this.pendingPlayers = sameRoster(players, this.players) ? null : players;
+    this.game.setNextPlayers(this.pendingPlayers);
+  }
+
+  /** The players of the round being played. */
+  getPlayers(): readonly GamePlayer[] {
+    return this.players;
+  }
+
+  // The simulation has just started a round with `pendingPlayers`
+  private applyRoster(): void {
+    this.rosterVersion = this.game.rosterVersion;
+    const next = this.pendingPlayers;
+    this.pendingPlayers = null;
+    if (!next) return;
+
+    const previous = new Map(this.players.map(p => [p.slotIndex, p]));
+    const bots: HumanBot[] = [];
+    this.localSlots.clear();
+    for (const slot of [0, 1, 2, 3] as SlotIndex[]) {
+      const before = previous.get(slot);
+      const after = next.find(p => p.slotIndex === slot);
+      if (!after || before?.owner !== after.owner) {
+        // A new occupant must not inherit the input stream of the previous one
+        this.inputs.delete(slot);
+        this.queues.delete(slot);
+        this.pings.delete(slot);
+        delete this.acks[slot];
+      }
+      if (!after) continue;
+      if (after.control.type === 'local') {
+        this.localSlots.add(slot);
+      } else if (after.control.type === 'ai') {
+        const kept = before && JSON.stringify(before.control) === JSON.stringify(after.control)
+          ? this.bots.find(b => b.slot === slot) : undefined;
+        bots.push(kept ?? this.createBot(after));
+      }
+    }
+    this.bots = bots;
+    this.players = next;
+    this.colors.clear();
+
+    // Watchers get everything up to the previous tick before the audience changes
+    this.flushSpectators();
+    this.options.onRosterApplied?.(next);
+    this.onRoster?.(next);
+  }
 
   get runsInBackground(): boolean {
     return this.transport !== null;
@@ -135,6 +230,7 @@ export class HostSession implements GameSession {
     t0 = perfStart();
     this.game.tick(this.inputs);
     perfEnd('sim', t0);
+    if (this.game.rosterVersion !== this.rosterVersion) this.applyRoster();
     t0 = perfStart();
     const frame = this.game.serialize();
     perfEnd('serialize', t0);
@@ -165,11 +261,48 @@ export class HostSession implements GameSession {
       if (!this.changed('match', frame.match) && !refresh) delete wire.match;
       if (!this.changed('items', frame.round.items) && !refresh) delete round.items;
       if (!this.changed('portals', frame.round.portals) && !refresh) delete round.portals;
+      const roster = toRoster(this.players);
+      if (this.changed('roster', roster) || refresh) wire.roster = roster;
       const packed = serializeState(wire);
       this.bytesOut.add(packed.length, now);
       this.transport.broadcastState(packed);
+
+      // Reduced stream for those who only watch
+      if (this.transport.sendSpectatorState) {
+        if (this.transport.hasSpectators?.() ?? true) {
+          this.backlog.push({ ...frame, tick });
+          if (this.backlog.length >= SPECTATOR_SEND_EVERY) this.flushSpectators();
+        } else if (this.spectatorMessages > 0 || this.backlog.length > 0) {
+          // Nobody watching: whoever comes next starts from a snapshot and a full message
+          this.backlog = [];
+          this.spectatorMessages = 0;
+          for (const key of [...this.lastSent.keys()]) if (key.startsWith('w:')) this.lastSent.delete(key);
+        }
+      }
       perfEnd('net', t0);
     }
+  }
+
+  // Send the watchers the latest state plus the events of the ticks since the last message
+  private flushSpectators(): void {
+    const frames = this.backlog;
+    const last = frames[frames.length - 1];
+    if (!last || !this.transport?.sendSpectatorState) return;
+    this.backlog = [];
+
+    const refresh = this.spectatorMessages++ % Math.ceil(TICK_RATE / SPECTATOR_SEND_EVERY) === 0;
+    const earlier: FrameEvents[] = frames.slice(0, -1).map(eventsOf);
+    const wire: WireState = { ...last, ...(earlier.length > 0 && { earlier }) };
+    const round: WireState['round'] = { ...last.round };
+    wire.round = round;
+    if (!this.changed('w:match', last.match) && !refresh) delete wire.match;
+    if (!this.changed('w:items', last.round.items) && !refresh) delete round.items;
+    if (!this.changed('w:portals', last.round.portals) && !refresh) delete round.portals;
+    const roster = toRoster(this.players);
+    if (this.changed('w:roster', roster) || refresh) wire.roster = roster;
+    const packed = serializeState(wire);
+    this.spectatorBytesOut.add(packed.length, this.now());
+    this.transport.sendSpectatorState(packed);
   }
 
   /** Sequence number of the last input consumed for a remote slot. */
@@ -191,6 +324,7 @@ export class HostSession implements GameSession {
       colorBlindnessFrames: frame.colorBlindnessFrames,
       whiteFlashFrames: frame.whiteFlashFrames,
       acks: this.acks,
+      roster: toRoster(this.players),
     });
     return encodeSnapshot({
       tick: this.tick - 1, ...this.game.pixels.toRuns(), state,
@@ -218,7 +352,10 @@ export class HostSession implements GameSession {
 
   getNetworkStats(): NetworkStats | null {
     if (!this.transport) return null;
-    return { lagMs: 0, bytesIn: 0, bytesOut: this.bytesOut.perSecond(this.now()) };
+    return {
+      lagMs: 0, bytesIn: 0, bytesOut: this.bytesOut.perSecond(this.now()),
+      bytesOutSpectators: this.spectatorBytesOut.perSecond(this.now()),
+    };
   }
 
   destroy(): void {

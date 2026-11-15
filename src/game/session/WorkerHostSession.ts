@@ -6,7 +6,7 @@
 // cannot start. See design/local-and-ai.md and design/research/performance.md.
 
 import type { SlotIndex } from '../../types/lobby';
-import type { GameConfig, TronGameStateData, TronInput } from '../../types/game';
+import type { GameConfig, GamePlayer, TronGameStateData, TronInput } from '../../types/game';
 import type { PixelGrid } from '../PixelGrid';
 import type { SmoothLinesData } from '../display/SmoothLines';
 import { perfEnd, perfSample, perfStart } from '../perf';
@@ -20,12 +20,20 @@ import type { FromWorker, ToWorker } from './worker/protocol';
 /** A session that can describe the game in progress to a player joining late. */
 export interface AuthoritativeSession extends GameSession {
   makeSnapshot(): Uint8Array | Promise<Uint8Array>;
+  /** Who plays from the next round on (design/spectators.md). */
+  setNextPlayers(players: GamePlayer[]): void;
+}
+
+export interface AuthoritativeOptions {
+  /** A round started with different players; called before its first state is sent. */
+  onRosterApplied?: (players: readonly GamePlayer[]) => void;
 }
 
 export class WorkerHostSession implements AuthoritativeSession {
   onFrame: ((frame: TronGameStateData) => void) | null = null;
   onEnded: ((reason: string) => void) | null = null;
   onSnapshot: ((arena: PixelGrid, smoothLines?: SmoothLinesData) => void) | null = null;
+  onRoster: ((players: GamePlayer[]) => void) | null = null;
 
   private worker: Worker | null;
   /** Set if the worker could not start: the game then runs on this thread. */
@@ -35,21 +43,30 @@ export class WorkerHostSession implements AuthoritativeSession {
   private readonly sent = new Map<SlotIndex, TronInput>();
   private level: { levelIndex: number; obstacles: PixelGrid } | null = null;
   private readonly bytesOut = new ByteRate();
+  private readonly spectatorBytesOut = new ByteRate();
+  private spectators = false;   // What the worker was last told
   private snapshotId = 0;
   private readonly snapshotWaiters = new Map<number, (data: Uint8Array) => void>();
   private perfWaiters: ((dump: PerfDump) => void)[] = [];
   private summaryWaiters: ((result: { summary: PerfSummary; droppedTicks: number }) => void)[] = [];
 
-  constructor(private readonly config: GameConfig, private readonly transport: HostTransport | null = null) {
+  constructor(
+    private readonly config: GameConfig,
+    private readonly transport: HostTransport | null = null,
+    private readonly options: AuthoritativeOptions = {},
+  ) {
     this.worker = new Worker(new URL('./worker/hostWorker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (event: MessageEvent<FromWorker>) => this.handle(event.data);
     this.worker.onerror = (event) => this.fallBack(event.message);
+    this.spectators = transport?.hasSpectators?.() ?? true;
     this.post({
       type: 'init',
       config,
       perf: new URLSearchParams(location.search).has('perf'),
       network: transport !== null,
       botHumanisation: defaultHumanisation(),
+      spectatorStream: !!transport?.sendSpectatorState,
+      spectators: this.spectators,
     });
     if (transport) {
       transport.onInput = (slot, input) => this.post({ type: 'netInput', slot, input });
@@ -68,6 +85,19 @@ export class WorkerHostSession implements AuthoritativeSession {
     this.worker?.postMessage(message);
   }
 
+  // The worker cannot ask the room whether anybody watches: it is told when that changes
+  private syncSpectators(): void {
+    const present = this.transport?.hasSpectators?.() ?? true;
+    if (present === this.spectators) return;
+    this.spectators = present;
+    this.post({ type: 'spectators', present });
+  }
+
+  setNextPlayers(players: GamePlayer[]): void {
+    if (this.fallback) this.fallback.setNextPlayers(players);
+    else this.post({ type: 'nextPlayers', players });
+  }
+
   private handleVisibility = (): void => {
     this.post({ type: 'pause', paused: document.hidden });
   };
@@ -84,8 +114,11 @@ export class WorkerHostSession implements AuthoritativeSession {
       this.onEnded?.('The game stopped unexpectedly.');
       return;
     }
-    const fallback = new HostSession(this.config, this.transport ? { transport: this.transport } : {});
+    const fallback = new HostSession(this.config, {
+      ...this.options, ...(this.transport && { transport: this.transport }),
+    });
     fallback.onFrame = (frame) => this.onFrame?.(frame);
+    fallback.onRoster = (players) => this.onRoster?.(players);
     if (this.level) fallback.setLevelObstacles(this.level.levelIndex, this.level.obstacles);
     this.fallback = fallback;
     for (const resolve of this.snapshotWaiters.values()) resolve(fallback.makeSnapshot());
@@ -97,6 +130,16 @@ export class WorkerHostSession implements AuthoritativeSession {
       case 'state':
         this.bytesOut.add(message.data.length, performance.now());
         this.transport?.broadcastState(message.data);
+        return;
+      case 'spectatorState':
+        this.spectatorBytesOut.add(message.data.length, performance.now());
+        this.transport?.sendSpectatorState?.(message.data);
+        return;
+      case 'roster':
+        // Inputs are sent to the worker only when they change: the new occupants start afresh
+        this.sent.clear();
+        this.options.onRosterApplied?.(message.players);
+        this.onRoster?.(message.players);
         return;
       case 'snapshot':
         this.snapshotWaiters.get(message.id)?.(message.data);
@@ -128,6 +171,7 @@ export class WorkerHostSession implements AuthoritativeSession {
       this.fallback.step(localInputs);
       return;
     }
+    this.syncSpectators();
     // Only what changed crosses to the worker
     const changed: [SlotIndex, TronInput][] = [];
     for (const [slot, input] of localInputs) {
@@ -154,12 +198,18 @@ export class WorkerHostSession implements AuthoritativeSession {
   getNetworkStats(): NetworkStats | null {
     if (this.fallback) return this.fallback.getNetworkStats();
     if (!this.transport) return null;
-    return { lagMs: 0, bytesIn: 0, bytesOut: this.bytesOut.perSecond(performance.now()) };
+    return {
+      lagMs: 0, bytesIn: 0, bytesOut: this.bytesOut.perSecond(performance.now()),
+      bytesOutSpectators: this.spectatorBytesOut.perSecond(performance.now()),
+    };
   }
 
   /** The game in progress, for a player joining mid-game. */
   makeSnapshot(): Uint8Array | Promise<Uint8Array> {
     if (this.fallback) return this.fallback.makeSnapshot();
+    // (a newcomer who watches: the worker must know before it takes the snapshot, so that
+    // the reduced stream carries every tick after it)
+    this.syncSpectators();
     return new Promise(resolve => {
       const id = this.snapshotId++;
       this.snapshotWaiters.set(id, resolve);
@@ -203,16 +253,18 @@ export class WorkerHostSession implements AuthoritativeSession {
  * given: in a worker unless `?worker=0` or workers are unavailable. `?botdebug` also keeps
  * it on the page: its overlay reads the simulation (design/bots-territory.md).
  */
-export function createHostSession(config: GameConfig, transport: HostTransport | null = null): AuthoritativeSession {
+export function createHostSession(
+  config: GameConfig, transport: HostTransport | null = null, options: AuthoritativeOptions = {},
+): AuthoritativeSession {
   const params = new URLSearchParams(location.search);
   const debug = params.get('botdebug');
   const off = params.get('worker') === '0' || (debug !== null && debug !== '0');
   if (!off && typeof Worker !== 'undefined') {
     try {
-      return new WorkerHostSession(config, transport);
+      return new WorkerHostSession(config, transport, options);
     } catch (err) {
       console.warn('[worker] cannot start the simulation worker:', err);
     }
   }
-  return new HostSession(config, transport ? { transport } : {});
+  return new HostSession(config, { ...options, ...(transport && { transport }) });
 }

@@ -19,6 +19,7 @@ import { perfCounter, perfDump, perfEnable, perfEnd, perfSince, perfStart } from
 import type { PerfSummary } from './perf';
 import { TerritoryOverlay } from './ai/TerritoryOverlay';
 import type { TronGameState } from './TronGameState';
+import { qrSvg } from '../util/qr';
 
 export class TronGame implements Screen {
   private container: HTMLElement;
@@ -63,6 +64,27 @@ export class TronGame implements Screen {
 
   // Track previous round phase to detect transitions and stop sound loops
   private previousPhase: RoundPhase | null = null;
+
+  // Network games: last rendered state of the join badge / spectator bar (design/spectators.md)
+  private roomUiKey = '';
+  private showJoinQr: boolean = localStorage.getItem('showJoinQr') === 'true';
+  private readonly resizeRoomUi = (): void => this.updateRoomUi(true);
+  // One listener for the buttons of the join badge and the seat bar, which are
+  // re-rendered as the audience changes
+  private readonly handleRoomClick = (e: MouseEvent): void => {
+    const room = this.options.room;
+    const id = (e.target as HTMLElement | null)?.closest('[data-room-action]')?.getAttribute('data-room-action');
+    if (!room || !id) return;
+    if (id === 'ask') room.askToPlay();
+    else if (id === 'cancel') room.cancelAsk();
+    else if (id === 'watch') room.stepDown();
+    else if (id === 'stay') room.stayIn();
+    else if (id === 'qr') {
+      this.showJoinQr = !this.showJoinQr;
+      localStorage.setItem('showJoinQr', this.showJoinQr ? 'true' : 'false');
+    }
+    this.updateRoomUi(true);
+  };
 
   constructor(
     container: HTMLElement,
@@ -116,21 +138,21 @@ export class TronGame implements Screen {
       this.renderDesktopLayout();
     }
 
-    const bindings = this.localBindings();
-    this.input = new InputManager(bindings);
+    this.setupInput();
 
-    // Touch controls drive the first local human
-    if (isTouch && bindings[0]) {
-      const steerZone = document.getElementById('steerZone');
-      const actionButton = document.getElementById('actionButton');
-      if (steerZone && actionButton) {
-        const slot = bindings[0].slot;
-        this.touchSlot = slot;
-        this.input.initTouchControls(
-          slot, steerZone, actionButton, document.getElementById('touchModeBtn'),
-          () => this.steerableHeading(slot),
-        );
-      }
+    // Seats can change hands when a round starts (design/spectators.md)
+    this.session.onRoster = (players) => {
+      this.config = { ...this.config, players };
+      this.renderer?.setPlayers(players);
+      this.setupInput();
+      this.updateRoomUi(true);
+    };
+    const room = this.options.room;
+    if (room) {
+      room.onChange = () => this.updateRoomUi();
+      window.addEventListener('resize', this.resizeRoomUi);
+      this.container.addEventListener('click', this.handleRoomClick);
+      this.updateRoomUi(true);
     }
 
     this.session.onFrame = (frame) => this.applyFrameEvents(frame);
@@ -249,13 +271,15 @@ export class TronGame implements Screen {
     }
 
     // Debug / end-to-end test hook
+    const game = this;   // eslint-disable-line @typescript-eslint/no-this-alias
     (window as unknown as { __teratron?: unknown }).__teratron = {
-      config: this.config,
+      get config() { return game.config; },
       view: () => this.session.getViewState(),
       stats: () => this.session.getNetworkStats(),
       /** True if the simulation runs in a Web Worker */
       inWorker: () => (this.session as { inWorker?: boolean }).inWorker === true,
       ...(perf && { perf: perfDump, session: this.session }),
+      audience: () => this.options.room?.audience() ?? null,
     };
 
     this.ticker = new Ticker(
@@ -264,6 +288,135 @@ export class TronGame implements Screen {
       { runInBackground: this.session.runsInBackground }
     );
     this.ticker.start();
+  }
+
+  // (Re)bind keyboard and touch input to the players played on this machine, and
+  // show or hide the on-screen controls accordingly
+  private setupInput(): void {
+    this.input?.cleanup();
+    const bindings = this.localBindings();
+    this.input = new InputManager(bindings);
+
+    const steerZone = document.getElementById('steerZone');
+    const actionZone = document.getElementById('actionZone');
+    const modeButton = document.getElementById('touchModeBtn');
+    const playing = bindings.length > 0;
+    for (const el of [steerZone, actionZone, modeButton]) {
+      if (el) el.style.display = playing ? '' : 'none';
+    }
+    if (steerZone && !playing) steerZone.innerHTML = '';
+
+    // Touch controls drive the first local human
+    const actionButton = document.getElementById('actionButton');
+    this.touchSlot = null;
+    if (isTouchDevice() && bindings[0] && steerZone && actionButton) {
+      const slot = bindings[0].slot;
+      this.touchSlot = slot;
+      this.input.initTouchControls(slot, steerZone, actionButton, modeButton, () => this.steerableHeading(slot));
+    }
+
+    const hint = document.getElementById('controlsHint');
+    if (hint) hint.innerHTML = this.controlsHint();
+  }
+
+  // Network games: the join badge (room code, QR, spectator count) and what this user
+  // can do about their seat. Cheap to call: the DOM is touched only on changes.
+  private updateRoomUi(force = false): void {
+    const room = this.options.room;
+    if (!room) return;
+    const audience = room.audience();
+    this.renderer?.setAudience(audience);
+
+    const playing = this.localBindings().length > 0;
+    // The room can be one round ahead of the game: the game decides who plays now
+    const me = playing ? (audience.me === 'leaving' ? 'leaving' : 'playing')
+      : audience.me === 'waiting' ? 'waiting'
+        : audience.me === 'joining' || audience.me === 'playing' ? 'joining' : 'watching';
+    const key = JSON.stringify([audience.spectators, me, audience.queuePosition, this.showJoinQr, window.innerWidth, window.innerHeight]);
+    if (key === this.roomUiKey && !force) return;
+    this.roomUiKey = key;
+
+    const touch = isTouchDevice();
+    const button = (action: string, label: string, color: string): string => `<button data-room-action="${action}" style="
+      padding: ${touch ? '6px 8px' : '0.4rem 0.8rem'}; font-family: monospace; font-size: ${touch ? '0.7rem' : '0.9rem'};
+      cursor: pointer; background: rgba(0, 0, 0, 0.6); color: ${color}; border: 1px solid ${color}; border-radius: 4px;">${label}</button>`;
+
+    // --- What this user can do about their seat ---
+    let seat = '';
+    if (me === 'watching') {
+      seat = `<span id="spectatorLabel" style="color: #8cf;">👁 SPECTATING</span> ${button('ask', 'PLAY NEXT ROUND', '#0f0')}`;
+    } else if (me === 'joining') {
+      seat = `<span id="spectatorLabel" style="color: #0c8;">You play from the next round</span> ${button('cancel', 'CANCEL', '#fa0')}`;
+    } else if (me === 'waiting') {
+      const position = audience.queuePosition > 0 ? ` (#${audience.queuePosition} in the queue)` : '';
+      seat = `<span id="spectatorLabel" style="color: #888;">Waiting for a free seat${position}</span> ${button('cancel', 'CANCEL', '#fa0')}`;
+    } else if (me === 'leaving') {
+      seat = `<span id="spectatorLabel" style="color: #c84;">You watch from the next round</span> ${button('stay', 'UNDO', '#fa0')}`;
+    }
+    const seatBar = document.getElementById('seatBar');
+    if (seatBar) {
+      seatBar.innerHTML = seat;
+      seatBar.style.display = seat ? '' : 'none';
+    }
+    const watchBtn = document.getElementById('watchBtn');
+    if (watchBtn) watchBtn.style.display = me === 'playing' ? '' : 'none';
+
+    // --- How to join ---
+    const count = `<span id="watchCount" title="Spectators">👁 ${audience.spectators}</span>`;
+    const badge = document.getElementById('joinBadge');
+    const corner = document.getElementById('joinCorner');
+    if (!badge) return;
+    // Where to type the code: the address of the game without the room parameter
+    const site = room.link.replace(/^https?:\/\//, '').replace(/\?.*$/, '').replace(/\/$/, '');
+    if (!touch) {
+      // Desktop: text in the header; the QR in the page margin when there is one,
+      // otherwise in a pop-over opened from the badge
+      const canvas = this.container.querySelector('canvas');
+      const margin = canvas ? (window.innerWidth - canvas.getBoundingClientRect().width) / 2 : 0;
+      const inCorner = margin >= 130;
+      badge.innerHTML = `
+        <button data-room-action="qr" title="Show a QR code to join this room" style="
+          padding: 0.4rem 0.7rem; font-family: monospace; cursor: pointer; background: #010; color: #0f0;
+          border: 1px solid #063; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          <span style="color: #888;">JOIN</span> <span id="joinCode">${escapeHtml(room.code)}</span> · ${count}
+        </button>
+        ${this.showJoinQr && !inCorner ? `<div id="joinQrPop" style="position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+          z-index: 50; margin-top: 6px; background: #111; border: 1px solid #063; padding: 8px; border-radius: 4px; width: 176px;
+          font-family: monospace; font-size: 0.7rem; color: #888; word-break: break-all;">
+          <div style="background: #fff; padding: 6px; border-radius: 3px; margin-bottom: 4px;">${qrSvg(room.link)}</div>
+          <span id="joinSite">${escapeHtml(site)}</span></div>` : ''}`;
+      if (corner) {
+        corner.style.display = inCorner ? '' : 'none';
+        if (inCorner && !corner.innerHTML) {
+          corner.innerHTML = `<div style="background: #fff; padding: 6px; border-radius: 4px;">${qrSvg(room.link)}</div>
+            <div style="color: #0f0; margin-top: 4px;">${escapeHtml(room.code)}</div>
+            <div style="color: #666; font-size: 0.7rem;">scan, or join with this code at</div>
+            <div id="joinSite" style="color: #888; font-size: 0.7rem; word-break: break-all;">${escapeHtml(site)}</div>`;
+        }
+      }
+    } else {
+      // Phone: in the right-hand margin beside the 4:3 canvas, when there is one
+      const margin = Math.max(0, (window.innerWidth - (window.innerHeight * 4) / 3) / 2);
+      const qrSize = Math.min(96, Math.floor(margin - 14));
+      if (margin >= 70) {
+        badge.style.cssText = `position: absolute; right: 5px; top: 44px; width: ${Math.floor(margin - 10)}px; z-index: 5;
+          text-align: center; font-family: monospace; font-size: 0.65rem; color: #0f0; pointer-events: none;`;
+        badge.innerHTML = `
+          ${qrSize >= 56 ? `<div id="joinQr" style="background: #fff; padding: 4px; border-radius: 3px; width: ${qrSize}px; margin: 0 auto 4px; box-sizing: border-box;">${qrSvg(room.link)}</div>` : ''}
+          <div id="joinCode" style="word-break: break-word;">${escapeHtml(room.code)}</div>
+          <div style="color: #8cf; margin-top: 2px;">${count}</div>`;
+      } else {
+        // No margin (4:3 screens): one small line among the top buttons
+        badge.style.cssText = `position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 5;
+          font-family: monospace; font-size: 0.65rem; color: #0f0; background: rgba(0, 0, 0, 0.5); padding: 2px 6px;
+          border-radius: 3px; white-space: nowrap; pointer-events: none;`;
+        badge.innerHTML = `<span id="joinCode">${escapeHtml(room.code)}</span> · ${count}`;
+      }
+      if (seatBar) {
+        // Spectators have no controls: their bar takes the left margin (or the corner)
+        seatBar.style.width = margin >= 70 ? `${Math.floor(margin - 10)}px` : 'auto';
+      }
+    }
   }
 
   private renderDesktopLayout(): void {
@@ -285,7 +438,17 @@ export class TronGame implements Screen {
           margin-bottom: 1rem;
         ">
           <h2 style="color: #0ff; margin: 0; text-shadow: 0 0 10px #0ff;">TERATRON</h2>
+          ${this.options.room ? '<div id="joinBadge" style="position: relative; flex: 1; min-width: 0; margin: 0 1rem; text-align: center;"></div>' : ''}
           <div style="display: flex; gap: 0.5rem;">
+            ${this.options.room ? `<button id="watchBtn" data-room-action="watch" title="Stop playing and watch from the next round" style="
+              padding: 0.5rem 1rem;
+              font-family: monospace;
+              cursor: pointer;
+              background: #012;
+              color: #8cf;
+              border: 1px solid #8cf;
+              display: none;
+            ">👁 WATCH</button>` : ''}
             <button id="muteBtn" style="
               padding: 0.5rem 1rem;
               font-family: monospace;
@@ -318,13 +481,16 @@ export class TronGame implements Screen {
           justify-content: center;
         "></div>
 
-        <div style="
+        <div id="seatBar" style="display: none; margin-top: 0.75rem; font-family: monospace; text-align: center;"></div>
+        <div id="controlsHint" style="
           color: #888;
-          margin-top: 1rem;
+          margin-top: 0.75rem;
           text-align: center;
         ">
           ${this.controlsHint()}
         </div>
+        ${this.options.room ? `<div id="joinCorner" style="display: none; position: fixed; right: 12px; bottom: 12px; width: 118px;
+          font-family: monospace; font-size: 0.8rem; text-align: center; word-break: break-word;"></div>` : ''}
       </div>
     `;
 
@@ -630,6 +796,10 @@ export class TronGame implements Screen {
           ${this.options.onBackToLobby ? '<button id="lobbyBtn" class="back-button-mobile" style="left: 42px; color: #fc4; border-color: #fc4;" title="Back to lobby">⌂</button>' : ''}
           <button id="touchModeBtn" class="touch-mode-button" title="Steering mode"></button>
           <button id="muteBtn" class="top-button mute-button">${soundManager.isMuted() ? '🔇' : '🔊'}</button>
+          ${this.options.room ? `<button id="watchBtn" data-room-action="watch" class="top-button" style="right: 79px; display: none;" title="Watch from the next round">👁</button>
+          <div id="joinBadge"></div>
+          <div id="seatBar" style="display: none; position: absolute; left: 5px; top: 80px; z-index: 20; font-family: monospace;
+            font-size: 0.7rem; line-height: 1.6; background: rgba(0, 0, 0, 0.5); padding: 4px; border-radius: 4px; box-sizing: border-box;"></div>` : ''}
           <button id="fullscreenBtn" class="top-button fullscreen-button">⛶</button>
 
           <!-- iOS home screen popup -->
@@ -654,7 +824,7 @@ export class TronGame implements Screen {
           <div id="steerZone" class="steer-zone"></div>
 
           <!-- Right: Action button -->
-          <div class="control-zone control-zone-right">
+          <div id="actionZone" class="control-zone control-zone-right">
             <div id="actionButton" class="action-button">ACTION</div>
           </div>
         </div>
@@ -889,6 +1059,10 @@ export class TronGame implements Screen {
     this.botDebug?.destroy();
     this.botDebug = null;
 
+    window.removeEventListener('resize', this.resizeRoomUi);
+    this.container.removeEventListener('click', this.handleRoomClick);
+    if (this.options.room) this.options.room.onChange = null;
+    this.session.onRoster = null;
     this.session.onFrame = null;
     this.session.onSnapshot = null;
     this.session.onEnded = null;
