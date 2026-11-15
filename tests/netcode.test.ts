@@ -1,3 +1,5 @@
+import { SmoothLineKeeper } from '../src/game/display/SmoothLines';
+import { packCss } from '../src/game/display/shade';
 import { describe, expect, it } from 'vitest';
 import { HostSession } from '../src/game/session/HostSession';
 import { GuestSession } from '../src/game/session/GuestSession';
@@ -270,9 +272,12 @@ describe('joining a game in progress', () => {
     const late = new GuestSession(rig.net.addGuest(2 as SlotIndex, { delayMs: 70, jitterMs: 50 }), null, cfg.players, { now: rig.net.now, awaitSnapshot: true });
     let mirror: PixelGrid | null = null;
     let framesBeforeSnapshot = 0;
-    late.onSnapshot = (arena) => { mirror = arena; };
+    // The translucent part of the trails travels in the snapshot too (display-layer.md)
+    const smooth = new SmoothLineKeeper(750, 600, slot => packCss(FFA_COLORS[slot]));
+    late.onSnapshot = (arena, smoothLines) => { mirror = arena; smooth.lines.load(smoothLines); };
     late.onFrame = (f) => {
       if (!mirror) { framesBeforeSnapshot++; return; }
+      smooth.apply(f);
       for (const { slotIndex, segments } of f.newTrailSegments) for (const seg of segments) mirror.set(seg.x, seg.y, FFA_COLORS[slotIndex]);
       for (const { color, segments } of f.borderSegments ?? []) for (const seg of segments) mirror.set(seg.x, seg.y, color);
       const lines = f.clearedLines ?? [];
@@ -303,6 +308,15 @@ describe('joining a game in progress', () => {
     for (let y = 0; y < 600; y++) for (let x = 0; x < 750; x++) if (mirror!.get(x, y) !== hostGrid.get(x, y)) diff++;
     expect(diff).toBe(0);
     expect(hostGrid.count()).toBeGreaterThan(1000);
+    const hostSmooth = (rig.host as unknown as { smoothLines: SmoothLineKeeper }).smoothLines.lines;
+    let smoothDiff = 0, smoothCells = 0;
+    for (let i = 0; i < hostSmooth.alpha.length; i++) {
+      const a = hostSmooth.alpha[i]!;
+      if (a !== 0) smoothCells++;
+      if (a !== smooth.lines.alpha[i] || (a !== 0 && hostSmooth.color[i] !== smooth.lines.color[i])) smoothDiff++;
+    }
+    expect(smoothDiff).toBe(0);
+    expect(smoothCells).toBeGreaterThan(300);
   });
 
   it('survives a corrupt snapshot', () => {

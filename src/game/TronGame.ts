@@ -124,7 +124,7 @@ export class TronGame implements Screen {
     }
 
     this.session.onFrame = (frame) => this.applyFrameEvents(frame);
-    this.session.onSnapshot = (arena) => this.renderer?.paintArena(arena);
+    this.session.onSnapshot = (arena, smoothLines) => this.renderer?.paintArena(arena, smoothLines);
     this.session.onEnded = (reason) => {
       this.screenManager.showMainMenu(reason);
     };

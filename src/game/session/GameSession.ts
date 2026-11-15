@@ -5,6 +5,7 @@
 import type { SlotIndex } from '../../types/lobby';
 import type { TrailSegment, TronGameStateData, TronInput, TronInputMessage, TronMatchState, TronRoundState } from '../../types/game';
 import type { PixelGrid } from '../PixelGrid';
+import type { SmoothLinesData } from '../display/SmoothLines';
 
 export interface NetworkStats {
   lagMs: number;     // Estimated one-way latency to the host
@@ -33,7 +34,7 @@ export interface GameSession {
    * Called when joining a game in progress, before any frame: the arena as it is
    * now (trails, level damage). Only guests ever call this.
    */
-  onSnapshot: ((arena: PixelGrid) => void) | null;
+  onSnapshot: ((arena: PixelGrid, smoothLines?: SmoothLinesData) => void) | null;
   /** What to draw right now; null until a guest has received its first state. */
   getViewState(): ViewState | null;
   /** Level obstacles for the level being played (ignored by guests). */

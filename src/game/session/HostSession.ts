@@ -5,10 +5,13 @@ import type { SlotIndex } from '../../types/lobby';
 import type { GameConfig, TronGameStateData, TronInput } from '../../types/game';
 import { TronGameState } from '../TronGameState';
 import type { PixelGrid } from '../PixelGrid';
+import type { SmoothLinesData } from '../display/SmoothLines';
 import type { Rng } from '../rng';
 import { encodeSnapshot, serializeState } from '../../network/serialization';
 import type { WireState } from '../../network/serialization';
-import { TICK_RATE } from '../constants';
+import { PLAY_HEIGHT, PLAY_WIDTH, TICK_RATE } from '../constants';
+import { SmoothLineKeeper } from '../display/SmoothLines';
+import { packCss } from '../display/shade';
 import { createBot } from '../ai/HumanBot';
 import type { HumanBot } from '../ai/HumanBot';
 import { createRng } from '../rng';
@@ -29,7 +32,7 @@ export class HostSession implements GameSession {
   readonly game: TronGameState;
   onFrame: ((frame: TronGameStateData) => void) | null = null;
   onEnded: ((reason: string) => void) | null = null;
-  onSnapshot: ((arena: PixelGrid) => void) | null = null;
+  onSnapshot: ((arena: PixelGrid, smoothLines?: SmoothLinesData) => void) | null = null;
 
   private readonly transport: HostTransport | null;
   private readonly now: () => number;
@@ -43,6 +46,8 @@ export class HostSession implements GameSession {
   private readonly acks: Partial<Record<SlotIndex, number>> = {};
   private readonly lastSent = new Map<string, string>();
   private framesSent = 0;
+  // The translucent part of the trails, for the snapshot of those who join late
+  private readonly smoothLines: SmoothLineKeeper | null;
   private tick = 0;
 
   constructor(config: GameConfig, options: HostSessionOptions = {}) {
@@ -60,6 +65,11 @@ export class HostSession implements GameSession {
         this.bots.push(createBot(player.slotIndex, player.control.difficulty, botRng, options.botHumanisation));
       }
     }
+
+    const colors = new Map(config.players.map(p => [p.slotIndex, packCss(p.color)]));
+    this.smoothLines = this.transport
+      ? new SmoothLineKeeper(PLAY_WIDTH, PLAY_HEIGHT, slot => colors.get(slot))
+      : null;
 
     if (this.transport) {
       this.transport.onInput = (slot, input) => {
@@ -137,6 +147,7 @@ export class HostSession implements GameSession {
     let t0 = perfStart();
     this.onFrame?.(frame);
     perfEnd('events', t0);
+    this.smoothLines?.apply(frame);
     const tick = this.tick++;
 
     if (this.transport) {
@@ -181,7 +192,10 @@ export class HostSession implements GameSession {
       whiteFlashFrames: frame.whiteFlashFrames,
       acks: this.acks,
     });
-    return encodeSnapshot({ tick: this.tick - 1, ...this.game.pixels.toRuns(), state });
+    return encodeSnapshot({
+      tick: this.tick - 1, ...this.game.pixels.toRuns(), state,
+      smoothLines: this.smoothLines?.lines.encode(),
+    });
   }
 
   // True if `value` differs from what was last recorded under `key`

@@ -102,17 +102,43 @@ another trail), where, being transparent, it mixes with whatever background is b
 It is erased together with the hard pixels next to it (one pixel around anything erased),
 so nothing is left behind.
 
-How it is fed: once per simulated frame while playing, the renderer hands the display the
-stretch each living player moved since the frame before (`TronRenderer.addPaths` →
-`ArenaDisplay.addPath`), skipping jumps (arena edge, portal, swap). The line is sampled
-four times per pixel; at each sample the 1×1 square centred on the point is split among
-the up to four cells it overlaps, and a cell keeps the most it was ever covered
-(`DisplayCells.softAlpha` / `softColor`).
+**Gaps stay open.** A free pixel with something (trail or wall) on two opposite sides of
+it — left and right, above and below, or on two opposite corners — shows no smooth line,
+whatever is stored for it: a gap one can drive through must look open. The rule is applied
+when drawing, so the line comes back if one side is erased. The price: inside a corridor
+one pixel wide the trails look hard, as in the original.
 
-Limits: a trail that was there before this client joined (rejoin snapshot) has no smooth
-line, since only its pixels are known; a guest draws it from the host's states, so its own
-player's smooth line trails its predicted head by the network delay; the smooth line does
-not wrap around the arena edges.
+### Stored with the trails, as transparency
+
+The smooth lines are data, not a drawing: per cell an opacity (0–255) and a colour
+(`SmoothLines`, `src/game/display/SmoothLines.ts`; pure, no DOM). They are the translucent
+part of the stored trails, next to the opaque part that is the collision bitmap.
+
+- **Merging.** Along one trail (one colour) a cell keeps the most it was ever covered. The
+  line of another colour is added as one translucent layer over another
+  (`a + b − a·b`), and the cell takes the colour of the stronger of the two.
+- **Who keeps them.** Every view, inside its display bitmap; and the **host**, next to the
+  simulation (`SmoothLineKeeper` in `HostSession`, only when hosting a network game), fed
+  from the very frames it sends. Both follow the players from frame to frame
+  (`PathTracker`) and apply the same erasing events in the same order, with positions
+  rounded as they travel on the wire (thousandths of a pixel) — so host and guests hold
+  the same lines, bit for bit (tested against a real match and through a late join).
+- **Joining late.** The snapshot of a game in progress carries them (`smoothLines`:
+  a palette and runs of covered cells, two bytes per cell), so someone who joins or
+  rejoins sees the trails as everybody else does.
+- **Arena edges.** A stretch that goes through an edge is drawn as its two halves, one on
+  each side. Other jumps (portal, swap: further than 8 px in a frame) draw nothing.
+
+How it is fed: once per simulated frame while playing, the stretch each living player
+moved since the frame before (`TronRenderer.addPaths` → `ArenaDisplay.addPath`). The line
+is sampled four times per pixel; at each sample the 1×1 square centred on the point is
+split among the up to four cells it overlaps.
+
+Limits: a guest draws from the host's states, so its own player's smooth line (like its
+hard trail) trails its predicted head by the network delay; where two players of
+different colours run side by side the shared pixels can end a little more opaque than
+one layer over another, because each frame's stretch is a layer of its own; if the
+simulation worker dies mid-game the replacement host starts without the lines so far.
 
 Tried before and dropped: selectable fringes of half, one and two pixels in dimmed colours
 (two rounds), then a shade computed from the neighbouring pixels at two strengths — it

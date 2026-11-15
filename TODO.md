@@ -269,6 +269,10 @@ Design: `design/display-layer.md`.
       no dark edge on light levels
 - [x] Trails: the neighbour-based shade replaced by the smooth line of the real path,
       shared among the pixels it crosses in proportion to coverage
+- [x] Gap rule back: no smooth line on a free pixel with trail or wall on opposite sides
+- [x] Smooth lines stored as data (opacity + colour per cell), kept by the host too and
+      sent in the snapshot: late joiners see them; different colours add as layers; a
+      stretch through an arena edge is drawn on both sides
 - [x] Level picker: any subset of levels, played in turn (local set-up and network lobby)
 - [ ] **Owner: look at it on the iPhone**; tune the opacities in `display/settings.ts` and
       the twinkle in `TronRenderer.drawPlayerHead`

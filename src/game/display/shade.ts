@@ -4,6 +4,8 @@
 // drawn. Colours are packed as they sit in ImageData on a little-endian machine:
 // 0xAABBGGRR.
 
+import { SmoothLines } from './SmoothLines';
+
 export const KIND_EMPTY = 0;
 export const KIND_TRAIL = 1;
 export const KIND_LEVEL = 2;
@@ -97,10 +99,8 @@ export class DisplayCells {
   readonly kind: Uint8Array;
   /** Trail cells per row: lets the derivation skip the rows that have no trail near. */
   readonly rowTrails: Uint16Array;
-  /**
-   * The smooth line: how much of each cell the one-pixel-wide line along the path a
-   * player really followed covers (0–255), and its colour. Only shown on free cells.
-   */
+  /** The smooth lines over the trails (translucent, shown on free cells only). */
+  readonly soft: SmoothLines;
   readonly softAlpha: Uint8Array;
   readonly softColor: Uint32Array;
 
@@ -108,43 +108,18 @@ export class DisplayCells {
     this.color = new Uint32Array(width * height);
     this.kind = new Uint8Array(width * height);
     this.rowTrails = new Uint16Array(height);
-    this.softAlpha = new Uint8Array(width * height);
-    this.softColor = new Uint32Array(width * height);
+    this.soft = new SmoothLines(width, height);
+    this.softAlpha = this.soft.alpha;
+    this.softColor = this.soft.color;
   }
 
-  /**
-   * A point of a path, in pixels (a pixel spans [n, n+1)): the 1×1 square centred on it
-   * is shared out among the up to four cells it overlaps, in proportion to the overlap.
-   * A cell keeps the most it was ever covered.
-   */
+  /** A point of a path: see SmoothLines.splat. */
   splat(px: number, py: number, color: number): void {
-    const fx = Math.floor(px - 0.5);
-    const fy = Math.floor(py - 0.5);
-    const wx = px - 0.5 - fx;
-    const wy = py - 0.5 - fy;
-    for (let dy = 0; dy < 2; dy++) {
-      const y = fy + dy;
-      if (y < 0 || y >= this.height) continue;
-      for (let dx = 0; dx < 2; dx++) {
-        const x = fx + dx;
-        if (x < 0 || x >= this.width) continue;
-        const cover = Math.round(255 * (dx === 0 ? 1 - wx : wx) * (dy === 0 ? 1 - wy : wy));
-        const i = y * this.width + x;
-        if (cover > this.softAlpha[i]!) {
-          this.softAlpha[i] = cover;
-          this.softColor[i] = color;
-        }
-      }
-    }
+    this.soft.splat(px, py, color);
   }
 
-  // The smooth line never reaches further than one cell from the trail cells of its path,
-  // so erasing it one cell around erased cells leaves no ghost
   private clearSoft(x0: number, y0: number, x1: number, y1: number): void {
-    const xa = Math.max(0, x0 - 1), xb = Math.min(this.width - 1, x1 + 1);
-    for (let y = Math.max(0, y0 - 1); y <= Math.min(this.height - 1, y1 + 1); y++) {
-      this.softAlpha.fill(0, y * this.width + xa, y * this.width + xb + 1);
-    }
+    this.soft.clearAround(x0, y0, x1, y1);
   }
 
   inBounds(x: number, y: number): boolean {
@@ -324,9 +299,21 @@ export function shadeCells(
         if ((r > 0 && l + r - 1 <= 2 * R) || (d > 0 && u + d - 1 <= 2 * R)) near = 0;
       }
       if (near === 0) {
-        // A free cell shows what the smooth line of a trail passing by left on it
+        // A free cell shows what the smooth line of a trail passing by left on it, unless
+        // it is a gap: something (trail or wall) on two opposite sides of it. A gap one
+        // can drive through must look open.
         const alpha = softAlpha[i]!;
-        const pixel = alpha === 0 ? 0 : ((softColor[i]! & 0x00ffffff) | (alpha << 24)) >>> 0;
+        let pixel = 0;
+        if (alpha !== 0) {
+          const l = x > 0, r = x < W - 1, u = y > 0, d = y < H - 1;
+          const gap =
+            (l && r && kind[i - 1] !== 0 && kind[i + 1] !== 0) ||
+            (u && d && kind[i - W] !== 0 && kind[i + W] !== 0) ||
+            (l && r && u && d && (
+              (kind[i - W - 1] !== 0 && kind[i + W + 1] !== 0) ||
+              (kind[i - W + 1] !== 0 && kind[i + W - 1] !== 0)));
+          if (!gap) pixel = ((softColor[i]! & 0x00ffffff) | (alpha << 24)) >>> 0;
+        }
         for (let sy = 0; sy < S; sy++) {
           const o = base + sy * stride;
           for (let sx = 0; sx < S; sx++) {

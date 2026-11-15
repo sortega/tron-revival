@@ -8,6 +8,7 @@
 import type { SlotIndex } from '../../types/lobby';
 import type { GameConfig, TronGameStateData, TronInput } from '../../types/game';
 import type { PixelGrid } from '../PixelGrid';
+import type { SmoothLinesData } from '../display/SmoothLines';
 import { perfEnd, perfSample, perfStart } from '../perf';
 import type { PerfDump, PerfSummary } from '../perf';
 import { defaultHumanisation } from '../ai/humanProfiles';
@@ -24,7 +25,7 @@ export interface AuthoritativeSession extends GameSession {
 export class WorkerHostSession implements AuthoritativeSession {
   onFrame: ((frame: TronGameStateData) => void) | null = null;
   onEnded: ((reason: string) => void) | null = null;
-  onSnapshot: ((arena: PixelGrid) => void) | null = null;
+  onSnapshot: ((arena: PixelGrid, smoothLines?: SmoothLinesData) => void) | null = null;
 
   private worker: Worker | null;
   /** Set if the worker could not start: the game then runs on this thread. */

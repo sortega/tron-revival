@@ -11,6 +11,8 @@ import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
 import { PixelGrid } from './PixelGrid';
 import { ArenaDisplay, CanvasLayerSink } from './display/ArenaDisplay';
 import { SOFT } from './display/settings';
+import { PathTracker } from './display/SmoothLines';
+import type { SmoothLinesData } from './display/SmoothLines';
 import { SpriteAtlas } from '../sprites';
 import { SPRITE_HASH } from './spriteHash';
 
@@ -24,7 +26,6 @@ const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
 const STATUS_WIDTH = 50;
 const PLAYER_HEAD_SIZE = 1;
-const PATH_JUMP = 8;  // A player moving further than this in a frame did not travel there
 
 export class TronRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -354,34 +355,23 @@ export class TronRenderer {
     this.display.addLevel(segments, color);
   }
 
-  // Where each player was on the last frame, in pixels with fractions
-  private readonly lastExact = new Map<SlotIndex, { x: number; y: number }>();
+  // Follows the players to draw the path each one really took
+  private readonly paths = new PathTracker(PLAY_WIDTH, PLAY_HEIGHT);
 
   /**
    * Once per simulated frame while playing: the stretch each player moved goes on the
    * display as a smooth line over the hard trail pixels (design/display-layer.md).
    */
   addPaths(players: readonly TronPlayerState[]): void {
-    for (const state of players) {
-      if (!state.alive) {
-        this.lastExact.delete(state.slotIndex);
-        continue;
-      }
-      const x = state.x / 1000;
-      const y = state.y / 1000;
-      const last = this.lastExact.get(state.slotIndex);
-      // Not across a jump: the edge of the arena, a portal, a swap
-      if (last && Math.abs(x - last.x) < PATH_JUMP && Math.abs(y - last.y) < PATH_JUMP && (x !== last.x || y !== last.y)) {
-        const color = this.players.find(p => p.slotIndex === state.slotIndex)?.color;
-        if (color) this.display.addPath(last.x, last.y, x, y, color);
-      }
-      this.lastExact.set(state.slotIndex, { x, y });
-    }
+    this.paths.update(players, (slot, ax, ay, bx, by) => {
+      const color = this.players.find(p => p.slotIndex === slot)?.color;
+      if (color) this.display.addPath(ax, ay, bx, by, color);
+    });
   }
 
   // Clear all trails and restore level (for new round)
   clearTrails(): void {
-    this.lastExact.clear();
+    this.paths.reset();
     this.ridiculousDeathSlots.clear();
     this.deathCauses.clear();
     this.colorBlindnessFrames = 0;
@@ -411,10 +401,11 @@ export class TronRenderer {
 
   // Paint a whole arena (joining a game in progress). The level image stays hidden
   // until the next round / eraser: the snapshot already contains what is left of it.
-  paintArena(arena: PixelGrid): void {
+  paintArena(arena: PixelGrid, smoothLines?: SmoothLinesData): void {
     this.levelHidden = true;
     const trailColors = new Set(this.players.map(p => p.color.toLowerCase()));
     this.display.paintSnapshot(arena, color => trailColors.has(color.toLowerCase()));
+    this.display.loadSmoothLines(smoothLines);
   }
 
   // Remember why a player died, to show it on the round summary

@@ -8,6 +8,8 @@ import { PixelGrid } from '../src/game/PixelGrid';
 import { PLAY_WIDTH, PLAY_HEIGHT } from '../src/game/constants';
 import { createRng } from '../src/game/rng';
 import { loadLevelGrid } from './helpers';
+import { PathTracker, SmoothLineKeeper, SmoothLines } from '../src/game/display/SmoothLines';
+import type { TronPlayerState } from '../src/types/game';
 
 /** Layers kept in memory, like the canvases would. */
 class MemorySink implements LayerSink {
@@ -151,6 +153,94 @@ describe('smooth line over the hard trail', () => {
   });
 });
 
+describe('gaps stay open', () => {
+  it('a free pixel between two trails (or a trail and a wall) shows no smooth line', () => {
+    // Two trails one pixel apart, both spilling onto the row between them
+    const { sink, display } = drive(straight(50.8));          // Hard row 50, 30 % on row 51
+    for (let x = 100; x < 120; x++) display.addTrail([{ x, y: 52 }], GREEN);
+    display.addPath(100.5, 52.2, 120.5, 52.2, GREEN);         // 30 % on row 51 too
+    display.flush();
+    for (let x = 101; x < 119; x++) expect(at(sink, x, 51), `x=${x}`).toBe(0);
+    expect(alphaOf(at(sink, 110, 53))).toBe(0);                // Nothing below, either: centred enough
+    // The outer side of a trail keeps its line
+    const outer = drive(straight(50.3));
+    for (let x = 100; x < 120; x++) outer.display.addTrail([{ x, y: 52 }], GREEN);
+    outer.display.flush();
+    expect(alphaOf(at(outer.sink, 110, 49))).toBeCloseTo(0.2, 1);
+    // Against a wall, and diagonally
+    const wall = drive(straight(50.8));
+    wall.display.addLevel([{ x: 110, y: 52 }], '#808080');
+    wall.display.addLevel([{ x: 105, y: 52 }], '#808080');   // Diagonal to (104, 51) and (106, 51)
+    wall.display.flush();
+    expect(at(wall.sink, 110, 51)).toBe(0);
+    expect(at(wall.sink, 104, 51)).toBe(0);                    // Between (103, 50) and (105, 52)
+    expect(alphaOf(at(wall.sink, 108, 51))).toBeCloseTo(0.3, 1);
+    // The gap opens again when one side is erased
+    wall.display.clearRect(110, 52, 1, 1);
+    wall.display.addPath(100.5, 50.8, 120.5, 50.8, RED);
+    wall.display.flush();
+    expect(alphaOf(at(wall.sink, 110, 51))).toBeCloseTo(0.3, 1);
+  });
+});
+
+describe('smooth lines as data', () => {
+  const red = packCss(RED), green = packCss(GREEN);
+
+  it('lines of different colours add up like translucent layers; one colour keeps its most', () => {
+    const lines = new SmoothLines(20, 20);
+    lines.addPath(2.5, 5.2, 12.5, 5.2, red);     // 30 % on row 4
+    lines.addPath(2.5, 5.2, 12.5, 5.2, red);
+    expect(lines.alpha[4 * 20 + 6]! / 255).toBeCloseTo(0.3, 1);
+    lines.addPath(2.5, 3.9, 12.5, 3.9, green);   // 40 % on row 4, from the other side
+    expect(lines.alpha[4 * 20 + 6]! / 255).toBeCloseTo(0.3 + 0.4 - 0.12, 1);
+    expect(lines.color[4 * 20 + 6]).toBe(green); // The stronger of the two
+  });
+
+  it('survives the trip in a snapshot', () => {
+    const lines = new SmoothLines(PLAY_WIDTH, PLAY_HEIGHT);
+    const rng = createRng(3);
+    for (let n = 0; n < 300; n++) {
+      const x = rng() * PLAY_WIDTH, y = rng() * PLAY_HEIGHT;
+      lines.addPath(x, y, x + rng() * 6 - 3, y + rng() * 6 - 3, n % 2 ? red : green);
+    }
+    const data = lines.encode();
+    const copy = new SmoothLines(PLAY_WIDTH, PLAY_HEIGHT);
+    copy.addPath(1, 1, 5, 5, red);               // Replaced by the load
+    copy.load(data);
+    let covered = 0;
+    for (let i = 0; i < lines.alpha.length; i++) {
+      if (lines.alpha[i] !== copy.alpha[i]) throw new Error(`alpha differs at ${i}`);
+      if (lines.alpha[i] !== 0) {
+        covered++;
+        if (lines.color[i] !== copy.color[i]) throw new Error(`colour differs at ${i}`);
+      }
+    }
+    expect(covered).toBeGreaterThan(1000);
+    expect(data.data.length).toBeLessThan(covered * 4);
+    // Garbage does not throw
+    copy.load({ palette: [], data: Uint8Array.from([200, 200, 200, 7, 9]) });
+    copy.load(undefined);
+    expect(copy.alpha.some(a => a !== 0)).toBe(false);
+  });
+
+  it('a path through an edge of the arena is drawn on both sides; a jump is not drawn', () => {
+    const tracker = new PathTracker(PLAY_WIDTH, PLAY_HEIGHT);
+    const out: number[][] = [];
+    const player = (x: number, y: number): TronPlayerState[] =>
+      [{ slotIndex: 0, alive: true, x: x * 1000, y: y * 1000 } as TronPlayerState];
+    const emit = (_slot: number, ...p: number[]): void => { out.push(p); };
+    tracker.update(player(748.5, 100.25), emit);
+    tracker.update(player(749.75, 100.25), emit);
+    tracker.update(player(1, 100.25), emit);       // Wrapped
+    expect(out).toEqual([[748.5, 100.25, 749.75, 100.25], [749.75, 100.25, 751, 100.25], [-0.25, 100.25, 1, 100.25]]);
+    out.length = 0;
+    tracker.update(player(300, 400), emit);        // Portal
+    expect(out).toEqual([]);
+    tracker.update(player(301, 400), emit);
+    expect(out).toEqual([[300, 400, 301, 400]]);
+  });
+});
+
 describe('ArenaDisplay', () => {
   it('incremental updates equal a derivation from scratch: no ghosts after erasing', () => {
     for (const [name, style] of STYLES) {
@@ -266,6 +356,10 @@ describe('display follows the game', () => {
     const inputs = new Map();
     let erased = 0;
     let checks = 0;
+    // What the host keeps for snapshots, and the paths as the view feeds them
+    const keeper = new SmoothLineKeeper(PLAY_WIDTH, PLAY_HEIGHT, slot => packCss(players[slot]!.color));
+    const tracker = new PathTracker(PLAY_WIDTH, PLAY_HEIGHT);
+    let softCells = 0;
 
     const compare = (): void => {
       let wrong = 0;
@@ -279,6 +373,17 @@ describe('display follows the game', () => {
         }
       }
       expect(wrong).toBe(0);
+      // The host's smooth lines are the view's, and a late joiner gets them from the snapshot
+      const joined = new ArenaDisplay(PLAY_WIDTH, PLAY_HEIGHT, new MemorySink(), SOFT);
+      joined.loadSmoothLines(keeper.lines.encode());
+      let softWrong = 0;
+      for (let i = 0; i < PLAY_WIDTH * PLAY_HEIGHT; i++) {
+        const a = display.cells.softAlpha[i]!;
+        if (a !== 0) softCells++;
+        if (a !== keeper.lines.alpha[i] || a !== joined.cells.softAlpha[i]) softWrong++;
+        else if (a !== 0 && (display.cells.softColor[i] !== keeper.lines.color[i] || display.cells.softColor[i] !== joined.cells.softColor[i])) softWrong++;
+      }
+      expect(softWrong).toBe(0);
       checks++;
     };
 
@@ -287,8 +392,13 @@ describe('display follows the game', () => {
       game.tick(inputs);
       const f = game.serialize();
       // Same order as TronGame.applyFrameEvents
+      keeper.apply(f);
+      if (f.roundStarted) tracker.reset();
       if (f.roundStarted || f.eraserUsed) display.restoreLevel();
       for (const { slotIndex, segments } of f.newTrailSegments) display.addTrail(segments, players[slotIndex]!.color);
+      if (f.round.phase === 'playing') {
+        tracker.update(f.round.players, (slot, ax, ay, bx, by) => display.addPath(ax, ay, bx, by, players[slot]!.color));
+      }
       for (const { color, segments } of f.borderSegments ?? []) display.addLevel(segments, color);
       const lines = f.clearedLines ?? [];
       for (let i = 0; i + 3 < lines.length; i += 4) display.clearLine(lines[i]!, lines[i + 1]!, lines[i + 2]!, lines[i + 3]!);
@@ -299,6 +409,7 @@ describe('display follows the game', () => {
     }
     compare();
     expect(checks).toBeGreaterThan(5);
+    expect(softCells).toBeGreaterThan(1000);
     expect(erased).toBeGreaterThan(20);           // Weapons were used: the erasing paths ran
     expect(game.currentRound).toBeGreaterThan(1);
     // And what is on the layers is what a derivation from scratch gives: no ghosts

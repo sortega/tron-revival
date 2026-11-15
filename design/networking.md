@@ -304,8 +304,13 @@ interface Snapshot {
   palette: string[];     // Collision grid colours
   runs: number[];        // Run-length encoded grid: [paletteIndex, count, ...]
   state: Uint8Array;     // Full serialized frame for that tick
+  smoothLines?: { palette: number[]; data: Uint8Array };  // Translucent part of the trails
 }
 ```
+
+`smoothLines` is display only (see [display-layer.md](./display-layer.md)): the host keeps
+it from the frames it sends, and a guest that gets it continues it from the frames that
+follow, ending with the very same lines.
 
 Every state frame carries its `tick`. A joining guest buffers frames until the snapshot
 arrives, paints the grid, then applies only frames with `tick > snapshot.tick`.

@@ -7,6 +7,7 @@ import type {
   TronGameStateData, TronMatchState, TronPlayerState, TronRoundState,
 } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
+import type { SmoothLinesData } from '../game/display/SmoothLines';
 
 /** Static player data that is not repeated in every frame. */
 export interface PlayerIdentity {
@@ -120,6 +121,8 @@ export interface Snapshot {
   palette: string[];     // Collision grid colours
   runs: number[];        // Run-length encoded grid: [paletteIndex, count, ...]
   state: Uint8Array;     // Full serialized frame for that tick
+  /** Translucent part of the trails (display only; design/display-layer.md). */
+  smoothLines?: SmoothLinesData;
 }
 
 export function encodeSnapshot(snapshot: Snapshot): Uint8Array {

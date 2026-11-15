@@ -5,6 +5,7 @@
 import { PixelGrid, forEachLinePixel } from '../PixelGrid';
 import { DisplayCells, KIND_LEVEL, KIND_TRAIL, packCss, shadeCells, shadeReach } from './shade';
 import type { ShadeStyle } from './shade';
+import type { SmoothLinesData } from './SmoothLines';
 
 /** Where derived pixels go: two layers of (width·scale) × (height·scale) pixels. */
 export interface LayerSink {
@@ -22,8 +23,6 @@ const MAX_RECTS = 256;
 const BLOCK = 128;
 /** A run of nearby points grows one rectangle up to this size before starting another. */
 const RUN_SPAN = 16;
-/** Points per pixel of path at which the smooth line is sampled. */
-const PATH_SAMPLES = 4;
 
 export class ArenaDisplay {
   readonly cells: DisplayCells;
@@ -112,15 +111,14 @@ export class ArenaDisplay {
    * covers of it. Not an obstacle; shown on free cells only.
    */
   addPath(ax: number, ay: number, bx: number, by: number, color: string): void {
-    const packed = packCss(color);
-    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) * PATH_SAMPLES));
     this.run = null;
-    for (let i = 0; i <= steps; i++) {
-      const x = ax + ((bx - ax) * i) / steps;
-      const y = ay + ((by - ay) * i) / steps;
-      this.cells.splat(x, y, packed);
-      this.markPoint(Math.floor(x), Math.floor(y));
-    }
+    this.cells.soft.addPath(ax, ay, bx, by, packCss(color), (x, y) => this.markPoint(x, y));
+  }
+
+  /** The smooth lines of a whole arena (joining a game in progress). */
+  loadSmoothLines(lines: SmoothLinesData | undefined | null): void {
+    this.cells.soft.load(lines);
+    this.markAll();
   }
 
   addLevel(points: readonly { x: number; y: number }[], color: string): void {

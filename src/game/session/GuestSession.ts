@@ -6,6 +6,7 @@ import type { SlotIndex } from '../../types/lobby';
 import type { TrailSegment, TronGameStateData, TronInput, TronPlayerState } from '../../types/game';
 import { decodeSnapshot, deserializeState } from '../../network/serialization';
 import { PixelGrid } from '../PixelGrid';
+import type { SmoothLinesData } from '../display/SmoothLines';
 import type { PlayerIdentity } from '../../network/serialization';
 import { ByteRate } from './GameSession';
 import type { GameSession, GuestTransport, NetworkStats, ViewState } from './GameSession';
@@ -39,7 +40,7 @@ export class GuestSession implements GameSession {
   onFrame: ((frame: TronGameStateData) => void) | null = null;
   onEnded: ((reason: string) => void) | null = null;
   private lastStateAt: number | null = null;  // When the last state from the host arrived
-  onSnapshot: ((arena: PixelGrid) => void) | null = null;
+  onSnapshot: ((arena: PixelGrid, smoothLines?: SmoothLinesData) => void) | null = null;
   readonly runsInBackground = false;
 
   private readonly transport: GuestTransport;
@@ -98,7 +99,7 @@ export class GuestSession implements GameSession {
     }
     const held = this.held ?? [];
     this.held = null;
-    this.onSnapshot?.(PixelGrid.fromRuns(snapshot.palette, snapshot.runs));
+    this.onSnapshot?.(PixelGrid.fromRuns(snapshot.palette, snapshot.runs), snapshot.smoothLines);
     this.handleState(snapshot.state);
     // Continue the host's input numbering so stale acks cannot confuse prediction
     const ack = this.mySlot !== null ? this.latest?.acks?.[this.mySlot] : undefined;
