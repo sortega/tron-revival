@@ -30,7 +30,7 @@ export function paintTerritory(
   for (let cell = 0; cell < T_CELLS; cell++) {
     const o = cell * 4;
     let r = 0, g = 0, b = 0, a = 0;
-    if (map.blocked[cell] === 1) {
+    if (map.blocked[cell] !== 0) {
       // Obstacles stay as they are
     } else if (layer === 'risk') {
       const risk = map.risk[cell]!;

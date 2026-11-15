@@ -362,7 +362,7 @@ export class TerritorySense {
       const px = x + cos * k * COARSE_CELL;
       const py = y + sin * k * COARSE_CELL;
       const cell = cellOf(px, py);
-      if (map.blocked[cell] === 1) {
+      if (map.blocked[cell] !== 0) {
         if (k <= 2) continue;   // Its own head and fresh trail
         return null;
       }

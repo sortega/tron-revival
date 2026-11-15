@@ -36,10 +36,15 @@ if (process.env.SIM_REPORT) {
 } else {
   describe('bots', () => {
     it('beat a player that drives straight on every level', () => {
+      // Ten rounds say little about one level (three unlucky ones in a row do happen, at a
+      // true 95 %): each level loosely, all of them together tightly
+      let wins = 0;
       for (const level of LEVELS) {
         const r = runMatch({ level, drivers: ['normal', 'straight'], rounds: 10, seed: 6, maxRoundSeconds: 60 });
-        expect(winRate(r, 0), level).toBeGreaterThanOrEqual(0.8);
+        expect(winRate(r, 0), level).toBeGreaterThanOrEqual(0.6);
+        wins += winRate(r, 0) / LEVELS.length;
       }
+      expect(wins).toBeGreaterThanOrEqual(0.9);
     }, 120_000);
 
     it('almost never die in the opening seconds', () => {

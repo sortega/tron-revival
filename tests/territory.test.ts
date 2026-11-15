@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  cellOf, REFRESH_PERIOD, TerritoryMap, TIME_PER_CELL, T_CELLS, T_COLS, T_ROWS, UNREACHED,
+  cellOf, REFRESH_PERIOD, TerritoryMap, TIME_PER_CELL, T_CELLS, T_COLS, T_ROWS, UNREACHED, worldOf,
 } from '../src/game/ai/territory';
 import type { TerritoryPlayer, TerritoryWorld } from '../src/game/ai/territory';
 import { paintTerritory, VIEW_COLS, VIEW_ROWS } from '../src/game/ai/territoryView';
@@ -247,6 +247,108 @@ describe('territory map: who gets where first', () => {
     const after = build(grid, players, { team: true });
     expect(after.present[1]).toBe(0);
     expect(after.foeTime[0]![mine]).toBe(after.time[3]![mine]);
+  });
+});
+
+describe('territory map: shield and crossing', () => {
+  const OWN = '#ff0000';
+  const at = (map: TerritoryMap, x: number, y: number): number => map.time[0]![cellOf(x, y)]!;
+
+  it('a shield goes through walls while it lasts, and no further', () => {
+    const grid = new PixelGrid();
+    frame(grid);
+    vline(grid, 120, 0, PLAY_HEIGHT - 1);
+    vline(grid, 600, 0, PLAY_HEIGHT - 1);
+    const none = build(grid, [player(0, 80, 300, 0)]);
+    expect(at(none, 300, 300)).toBe(UNREACHED);
+    // 30 ticks of margin, then 80 px of driving: through the near wall only
+    const some = build(grid, [{ ...player(0, 80, 300, 0), shield: 30 + 80 }]);
+    expect(at(some, 120, 300)).not.toBe(UNREACHED);        // In the wall itself
+    expect(at(some, 300, 300)).not.toBe(UNREACHED);
+    expect(at(some, 300, 300)).toBe(at(some, 100, 300) + TIME_PER_CELL * 25);
+    expect(at(some, 680, 300)).toBe(UNREACHED);            // The far wall, and the arena edge behind us
+    expect(some.reach[0]).toBeGreaterThan(none.reach[0]! * 4);
+    // About to run out: as if there were none
+    const late = build(grid, [{ ...player(0, 80, 300, 0), shield: 25 }]);
+    expect(at(late, 300, 300)).toBe(UNREACHED);
+  });
+
+  it('an enemy with a shield takes the room behind our wall', () => {
+    const grid = new PixelGrid();
+    frame(grid);
+    vline(grid, 375, 0, PLAY_HEIGHT - 1);
+    const players = [player(0, 500, 300, 0), player(1, 330, 300, 0)];
+    const safe = build(grid, players);
+    expect(safe.shared[0]).toBe(0);
+    const hunted = build(grid, [players[0]!, { ...players[1]!, shield: 400 }]);
+    expect(hunted.shared[0]).toBeGreaterThan(0);
+    expect(hunted.area[0]).toBeLessThan(safe.area[0]!);
+    expect(hunted.foeTime[0]![cellOf(420, 300)]).not.toBe(UNREACHED);
+  });
+
+  it('no shield gets through a closed door', () => {
+    const grid = new PixelGrid();
+    frame(grid);
+    vline(grid, 385, 0, 240);
+    vline(grid, 385, 340, PLAY_HEIGHT - 1);
+    const doors: DoorDefinition[] = [{ x: 385, y: 290, vertical: true }];
+    const map = build(grid, [{ ...player(0, 340, 290, 0), shield: 400 }], { doors, doorTick: 10 });
+    expect(at(map, 385, 290)).toBe(UNREACHED);             // The door
+    expect(at(map, 385, 100)).not.toBe(UNREACHED);         // The wall beside it
+    expect(at(map, 500, 290)).not.toBe(UNREACHED);         // ...and so the other side
+  });
+
+  it('a crossing item goes through cells that hold our own trail and nothing else', () => {
+    const grid = new PixelGrid();
+    frame(grid);
+    // Our own trail right across the arena, and further on a wall
+    for (let y = 1; y < PLAY_HEIGHT - 1; y++) grid.set(200, y, OWN);
+    vline(grid, 500, 0, PLAY_HEIGHT - 1);
+    // One stretch of the trail runs next to somebody else's
+    for (let y = 280; y <= 320; y++) grid.set(202, y, '#00ff00');
+    const trail = grid.paletteIndexOf(OWN);
+    const none = build(grid, [{ ...player(0, 100, 300, 0), trail }]);
+    expect(at(none, 300, 300)).toBe(UNREACHED);
+    const map = build(grid, [{ ...player(0, 100, 300, 0), crossing: 400, trail }]);
+    expect(at(map, 300, 300)).not.toBe(UNREACHED);
+    expect(at(map, 200, 100)).not.toBe(UNREACHED);         // Our trail
+    expect(at(map, 200, 300)).toBe(UNREACHED);             // Not where another one shares the cell
+    expect(at(map, 500, 300)).toBe(UNREACHED);             // The wall
+    expect(at(map, 600, 300)).toBe(UNREACHED);
+    // Without knowing which pixels are ours there is no crossing
+    const blind = build(grid, [{ ...player(0, 100, 300, 0), crossing: 400 }]);
+    expect(at(blind, 300, 300)).toBe(UNREACHED);
+  });
+
+  it('a crossing item lets us out of a cell our own trail closes', () => {
+    const grid = new PixelGrid();
+    frame(grid);
+    // Heading right with our own trail just ahead, inside the cell of the head
+    for (let y = 250; y <= 350; y++) grid.set(102, y, OWN);
+    box(grid, 60, 250, 140, 350);
+    const trail = grid.paletteIndexOf(OWN);
+    const shut = build(grid, [{ ...player(0, 100, 300, 0), trail }]);
+    expect(at(shut, 120, 300)).toBe(UNREACHED);
+    const out = build(grid, [{ ...player(0, 100, 300, 0), crossing: 200, trail }]);
+    expect(at(out, 120, 300)).not.toBe(UNREACHED);
+    expect(at(out, 300, 300)).toBe(UNREACHED);             // The box is a wall
+  });
+
+  it('reads the items off the players of a game', () => {
+    const grid = new PixelGrid();
+    grid.set(10, 10, OWN);
+    const game = {
+      pixels: grid, gameMode: 'ffa', portals: [], currentLevelIndex: 0, currentRound: 1, doorTick: 0,
+      players: [{
+        slotIndex: 0, alive: true, x: 100_000, y: 100_000, direction: 0, color: OWN,
+        activeEffects: [{ sprite: 'shield', remainingFrames: 200 }, { sprite: 'crossing', remainingFrames: 90 }],
+      }, {
+        slotIndex: 1, alive: true, x: 300_000, y: 100_000, direction: 0, color: '#00ff00', activeEffects: [],
+      }],
+    };
+    const players = worldOf(game).players;
+    expect(players[0]).toMatchObject({ shield: 200, crossing: 90, trail: grid.paletteIndexOf(OWN) });
+    expect(players[1]).toMatchObject({ shield: 0, crossing: 0 });
   });
 });
 

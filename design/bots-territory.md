@@ -48,12 +48,12 @@ wrapping around the arena edges (a level with a border is simply blocked there).
 
 | Layer | Contents | How |
 |-------|----------|-----|
-| `blocked` | Snapshot of the obstacles: trails, scenery, and the cells a level door covers now or within 37 ticks | Copy of the coarse counts + a per-level table of door cells per animation frame |
+| `blocked` | Snapshot of the obstacles: trails and scenery (1), and the cells a level door covers now or within 37 ticks (2) | Copy of the coarse counts + a per-level table of door cells per animation frame |
 | `link` | Portal cells → the cell at the other end | From `game.portals` |
 | `clearance` | Cells to the nearest blocked cell (capped at 6) | Breadth-first from all blocked cells at once (exact with wrap-around, unlike a two-pass distance transform) |
 | `risk` | How easy it is to crash in a cell, whoever you are | 6 / 3 / 1 for clearance 1 / 2 / 3; +8 in a doorway that closes within 120 ticks; +6 in the fire zone of a level gun |
 | `region`, `regionSize` | Connected free regions (through portals too) and their sizes | Flood fill labelling, on demand (`labelRegions`): tools and tests use it, the bots do not need it |
-| `time[slot]` | When each player can be in each cell | Breadth-first from the player's head |
+| `time[slot]` | When each player can be in each cell. Blocked cells have a time too where a Shield or a Crossing item gets the player through them | Breadth-first from the player's head |
 | `foeTime[slot]` | When the first *enemy* of that player can be there | Minimum over the other players; team-mates are left out |
 | `reach`, `roomy`, `area`, `shared` per slot | Cells the player can reach; of those, the ones not touching an obstacle; the ones it reaches before every enemy (its Voronoi territory); the ones an enemy can reach too (0 = the player is alone in its region) | One pass over the cells |
 
@@ -69,6 +69,17 @@ Details of the per-player search:
 - **Doors** count as closed if they are solid now or within the door margin, so a region
   behind a closed door is not reachable and a doorway about to close is not a way out.
 - **Portals** are one extra edge per portal cell.
+- **Shield and Crossing.** A player with a Shield gets into blocked cells (trails and
+  scenery, never doors, as in the game) for as long as the Shield lasts; one with a Crossing
+  item into the cells that hold its own trail and nothing else (64 pixels looked at, once
+  per cell and search). "As long as it lasts" is the effect's remaining ticks minus 30, the
+  planner's margin, at a pixel per tick: a cell entered later than that is a wall again, so
+  the item opens what the player can get to in time and nothing further. With either item
+  the head also leaves its own cell through what the item passes. This holds for every
+  player, so a bot sees an enemy with a Shield coming through the wall it hides behind
+  (`foeTime`, `shared`, `area`). What the map does not do: the room a bot counts at the end
+  of one of its own paths (`TerritorySense`) still stops at every trail, and nobody is
+  expected to pick an item up.
 
 Enemy trails are taken as they are now: nobody's future path is predicted.
 
@@ -312,6 +323,21 @@ race 56.1 – 43.4; with cut-off goals instead 52.3 – 46.4. Room relative to 1
 instead of 400 (then counted in full for every path): 57.3 – 41.8 against 54.4 – 44.3 over
 1600 rounds each. That 3-point difference is suggestive rather than established; hard has
 it in the cheap two-pass form.
+
+### Shield and Crossing on the map
+
+Added after the merge. 1280 rounds per match-up (8 levels × 2 seeds × 80), items on, the
+same seeds before and after (±3):
+
+| Match-up | Before | After |
+|----------|--------|-------|
+| hard / old-hard | 51.6 / 48.0 | 53.8 / 45.9 |
+| normal / old-normal | 55.0 / 44.4 | 55.7 / 44.1 |
+| normal / straight | 98.0 / 2.0 | 98.0 / 2.0 |
+
+No loss; the gain for hard is inside the interval. Shields and Crossing items are rare
+enough that the totals could hardly move. The cost was not measured again: without one of
+the two effects the search is the same loop with one more comparison per blocked cell.
 
 ## Cost
 

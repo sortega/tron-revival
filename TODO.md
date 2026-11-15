@@ -158,6 +158,8 @@ Design and measurements: `design/bots-human.md`
       the territory map too)
 - [ ] Human-like bots build their own map on the first tick of a round (2–3 ms once);
       build it during the countdown instead
+- [ ] The room a bot counts at the end of its own path ignores its Shield / Crossing
+      (the map's reach does not, since `time[slot]` goes through what they pass)
 - [ ] Play against the territory bots: wall-hugging endgames and no chasing from behind
       may feel different
 - [ ] Colour blindness after a Swap does not confuse bots

@@ -35,6 +35,12 @@ const GUN_RISK = 6;
 // Extra cost of the first cell for a player who would have to turn to enter it: ahead,
 // to the side, behind (a U-turn takes about 45 px of driving)
 const TURN_COST = [0, 2, 5];
+// A shield or a crossing item counts until this long before it runs out (as the planner's)
+const ITEM_MARGIN_TICKS = 30;
+/** Ticks of driving per unit of arrival time (a pixel per tick at normal speed). */
+const TICKS_PER_TIME = COARSE_CELL / TIME_PER_CELL;
+/** `blocked` of a cell a door closes (or is about to): nothing gets one through it. */
+const BLOCKED_DOOR = 2;
 
 /** The four neighbours of every cell (right, left, down, up); the arena wraps. */
 export const NEIGHBOURS = new Int32Array(T_CELLS * 4);
@@ -65,6 +71,9 @@ export interface TerritoryPlayer {
   y: number;
   direction: number;   // Degrees
   speed: number;       // 1 = normal, 2 = turbo, 0.5 = slowed
+  shield?: number;     // Ticks left of going through trails and scenery (0 = no shield)
+  crossing?: number;   // Ticks left of going through its own trail
+  trail?: number;      // What `pixels` holds for its own trail (-1 = not known)
 }
 
 /** What the map reads of the world. `TronGameState` is adapted to this by `territoryOf`. */
@@ -139,7 +148,7 @@ function gunCells(guns: readonly GunDefinition[]): Int32Array {
 }
 
 export class TerritoryMap {
-  /** 1 = the cell holds something solid (trail, scenery, a closed or closing door). */
+  /** Not 0 = the cell holds something solid: 1 trail or scenery, 2 a closed or closing door. */
   readonly blocked = new Uint8Array(T_CELLS);
   /** Cells to the nearest blocked cell (0 = blocked itself), capped. Wrap-aware. */
   readonly clearance = new Uint8Array(T_CELLS);
@@ -149,7 +158,11 @@ export class TerritoryMap {
   readonly region = new Uint16Array(T_CELLS);
   /** Cells per region label. */
   readonly regionSize = new Int32Array(T_CELLS + 1);
-  /** Per slot: when the player can be in each cell (TIME_PER_CELL per cell at normal speed). */
+  /**
+   * Per slot: when the player can be in each cell (TIME_PER_CELL per cell at normal speed).
+   * A player with a shield gets through trails and scenery while it lasts, one with a
+   * crossing item through its own trail: such cells have a time although they are blocked.
+   */
   readonly time: Uint16Array[] = [];
   /** Per slot: when the first enemy of that player can be there. */
   readonly foeTime: Uint16Array[] = [];
@@ -171,6 +184,12 @@ export class TerritoryMap {
   private readonly queue = new Int32Array(T_CELLS + 16);
   private readonly speed = new Float32Array(MAX_SLOTS).fill(1);
   private linked: number[] = [];
+  // The player being scanned: until when it goes through things, and through what
+  private shieldUntil = -1;
+  private crossUntil = -1;
+  private ownTrail = -1;
+  private scanPixels: Uint16Array | null = null;
+  private readonly ownOnly = new Uint8Array(T_CELLS);   // 0 = not looked at, 1 = yes, 2 = no
   private regionsStale = true;
   private lastTick = -1;
   private period = REFRESH_PERIOD;   // Ticks a whole refresh takes
@@ -233,7 +252,7 @@ export class TerritoryMap {
       const later = doorFrame(world.doorTick + DOOR_RISK_TICKS);
       for (let k = 0; k < cells.length; k++) {
         const at = k * DOOR_FRAME_COUNT;
-        if (solid[at + now] === 1 || solid[at + soon] === 1) blocked[cells[k]!] = 1;
+        if (solid[at + now] === 1 || solid[at + soon] === 1) blocked[cells[k]!] = BLOCKED_DOOR;
         else if (solid[at + later] === 1) risk[cells[k]!] = DOOR_RISK;
       }
     }
@@ -252,7 +271,7 @@ export class TerritoryMap {
     // Clearance: breadth-first from every blocked cell at once
     let tail = 0;
     for (let i = 0; i < T_CELLS; i++) {
-      if (blocked[i] === 1) {
+      if (blocked[i] !== 0) {
         clearance[i] = 0;
         queue[tail++] = i;
       } else {
@@ -292,7 +311,7 @@ export class TerritoryMap {
     region.fill(0);
     let label = 0;
     for (let i = 0; i < T_CELLS; i++) {
-      if (blocked[i] === 1 || region[i] !== 0) continue;
+      if (blocked[i] !== 0 || region[i] !== 0) continue;
       label++;
       region[i] = label;
       queue[0] = i;
@@ -330,7 +349,8 @@ export class TerritoryMap {
   }
 
   // When one player can be where: breadth-first from its head, slower into the cells it
-  // would have to turn around for
+  // would have to turn around for. While a shield or a crossing item lasts, also into the
+  // blocked cells it gets the player through.
   private scanPlayer(world: TerritoryWorld, slot: number): void {
     const time = this.time[slot]!;
     const player = world.players.find(p => p.slotIndex === slot);
@@ -341,6 +361,14 @@ export class TerritoryMap {
     const speed = player.speed >= 2 ? 2 : player.speed <= 0.5 ? 0.5 : 1;
     this.speed[slot] = speed;
     const step = TIME_PER_CELL / speed;   // 1, 2 or 4
+    const shield = (player.shield ?? 0) - ITEM_MARGIN_TICKS;
+    const crossing = (player.trail ?? -1) > 0 && world.pixels ? (player.crossing ?? 0) - ITEM_MARGIN_TICKS : 0;
+    this.shieldUntil = shield > 0 ? Math.floor(shield / TICKS_PER_TIME) : -1;
+    this.crossUntil = crossing > 0 ? Math.floor(crossing / TICKS_PER_TIME) : -1;
+    this.ownTrail = player.trail ?? -1;
+    this.scanPixels = world.pixels;
+    if (this.crossUntil >= 0) this.ownOnly.fill(0);
+    const through = this.shieldUntil >= 0 || this.crossUntil >= 0;
 
     const start = cellOf(player.x, player.y);
     time[start] = 0;
@@ -361,7 +389,9 @@ export class TerritoryMap {
         k--;
       }
       seedTime[k] = cost;
-      seedCell[k] = this.wayOut(world.pixels, player.x, player.y, n) ? NEIGHBOURS[start * 4 + n]! : start;
+      const open = this.shieldUntil >= 0 ||
+        this.wayOut(world.pixels, player.x, player.y, n, this.crossUntil >= 0 ? this.ownTrail : -1);
+      seedCell[k] = open ? NEIGHBOURS[start * 4 + n]! : start;
     }
 
     let head = 0;
@@ -373,7 +403,7 @@ export class TerritoryMap {
         cell = seedCell[seed]!;
         const t = seedTime[seed]!;
         seed++;
-        if (blocked[cell] === 1 || time[cell]! <= t) continue;
+        if (time[cell]! <= t || (blocked[cell] !== 0 && !(through && this.goesThrough(cell, t)))) continue;
         time[cell] = t;
       } else if (head < tail) {
         cell = queue[head++]!;
@@ -383,23 +413,52 @@ export class TerritoryMap {
       const next = time[cell]! + step;
       for (let n = cell * 4, end = n + 4; n < end; n++) {
         const other = NEIGHBOURS[n]!;
-        if (blocked[other] === 0 && time[other]! > next) {
+        if (time[other]! > next && (blocked[other] === 0 || (through && this.goesThrough(other, next)))) {
           time[other] = next;
           queue[tail++] = other;
         }
       }
       const far = link[cell]!;
-      if (far >= 0 && blocked[far] === 0 && time[far]! > next) {
+      if (far >= 0 && time[far]! > next && (blocked[far] === 0 || (through && this.goesThrough(far, next)))) {
         time[far] = next;
         queue[tail++] = far;
       }
     }
   }
 
+  // Does what the player being scanned carries get it through blocked cell `cell` at `t`?
+  // A shield through anything but a door; a crossing item through a cell that holds
+  // nothing but its own trail.
+  private goesThrough(cell: number, t: number): boolean {
+    if (this.blocked[cell] === BLOCKED_DOOR) return false;
+    if (t <= this.shieldUntil) return true;
+    if (t > this.crossUntil) return false;
+    let own = this.ownOnly[cell]!;
+    if (own === 0) {
+      own = 1;
+      const pixels = this.scanPixels!;
+      const x0 = (cell % T_COLS) * COARSE_CELL;
+      const y0 = Math.floor(cell / T_COLS) * COARSE_CELL;
+      const x1 = Math.min(PLAY_WIDTH, x0 + COARSE_CELL);
+      const y1 = Math.min(PLAY_HEIGHT, y0 + COARSE_CELL);
+      for (let y = y0; y < y1 && own === 1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const value = pixels[y * PLAY_WIDTH + x]!;
+          if (value !== 0 && value !== this.ownTrail) {
+            own = 2;
+            break;
+          }
+        }
+      }
+      this.ownOnly[cell] = own;
+    }
+    return own === 1;
+  }
+
   // Can the player leave its cell towards neighbour `n` (right, left, down, up) in a
   // straight line? Its cell is usually "blocked" by its own trail, and may hold a wall
-  // with the neighbour on the other side of it.
-  private wayOut(pixels: Uint16Array | null, x: number, y: number, n: number): boolean {
+  // with the neighbour on the other side of it. Pixels of `passable` do not count.
+  private wayOut(pixels: Uint16Array | null, x: number, y: number, n: number, passable = -1): boolean {
     if (pixels === null) return true;
     const dx = n === 0 ? 1 : n === 1 ? -1 : 0;
     const dy = n === 2 ? 1 : n === 3 ? -1 : 0;
@@ -411,7 +470,8 @@ export class TerritoryMap {
       px += dx;
       py += dy;
       if (Math.floor(px / COARSE_CELL) !== col || Math.floor(py / COARSE_CELL) !== row) return true;
-      if (pixels[py * PLAY_WIDTH + px] !== 0) return false;
+      const value = pixels[py * PLAY_WIDTH + px]!;
+      if (value !== 0 && value !== passable) return false;
     }
     return true;
   }
@@ -500,10 +560,22 @@ export function speedOf(effects: readonly { sprite: string }[]): number {
   return factor >= 2 ? 2 : factor <= 0 ? 0.5 : 1;
 }
 
+/** Ticks left of an effect (0 = the player does not have it). */
+function ticksOf(effects: readonly { sprite: string; remainingFrames?: number }[], sprite: string): number {
+  let ticks = 0;
+  for (const e of effects) {
+    if (e.sprite === sprite && (e.remainingFrames ?? 0) > ticks) ticks = e.remainingFrames!;
+  }
+  return ticks;
+}
+
 /** The game, as far as the map needs it (structural: avoids importing the simulation). */
 export interface TerritoryGame {
-  pixels: { coarse: Uint16Array; cells: Uint16Array };
-  players: readonly { slotIndex: number; alive: boolean; x: number; y: number; direction: number; activeEffects: readonly { sprite: string }[] }[];
+  pixels: { coarse: Uint16Array; cells: Uint16Array; paletteIndexOf?(color: string): number };
+  players: readonly {
+    slotIndex: number; alive: boolean; x: number; y: number; direction: number; color?: string;
+    activeEffects: readonly { sprite: string; remainingFrames?: number }[];
+  }[];
   gameMode: string;
   portals: readonly TeleportPortal[];
   currentLevelIndex: number;
@@ -520,6 +592,8 @@ export function worldOf(game: TerritoryGame): TerritoryWorld {
     players: game.players.map(p => ({
       slotIndex: p.slotIndex, alive: p.alive, x: p.x / 1000, y: p.y / 1000,
       direction: p.direction, speed: speedOf(p.activeEffects),
+      shield: ticksOf(p.activeEffects, 'shield'), crossing: ticksOf(p.activeEffects, 'crossing'),
+      trail: trailOf(game, p.color),
     })),
     team: game.gameMode === 'team',
     portals: game.portals,
@@ -527,6 +601,11 @@ export function worldOf(game: TerritoryGame): TerritoryWorld {
     doorTick: game.doorTick,
     guns: level?.guns ?? null,
   };
+}
+
+// What the collision grid holds for a player's trail
+function trailOf(game: TerritoryGame, color: string | undefined): number {
+  return color === undefined ? -1 : game.pixels.paletteIndexOf?.(color) ?? -1;
 }
 
 // A live view of a game: the same objects every tick, nothing allocated
@@ -551,6 +630,9 @@ class GameWorld implements TerritoryWorld {
       view.y = p.y / 1000;
       view.direction = p.direction;
       view.speed = speedOf(p.activeEffects);
+      view.shield = ticksOf(p.activeEffects, 'shield');
+      view.crossing = ticksOf(p.activeEffects, 'crossing');
+      view.trail = view.crossing > 0 ? trailOf(this.game, p.color) : -1;
     }
     this.views.length = players.length;
     return this.views;
