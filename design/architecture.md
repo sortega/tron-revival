@@ -91,6 +91,10 @@ time or ammunition left. A player who dies **loses the weapon and effects** (in 
 simulation, not just on screen) and the panel turns grey, like the panel of a slot nobody
 plays in. In team mode the panels use the team colours ([teams.md](./teams.md)).
 
+Every death goes off with a small **explosion** where the player was (the original's
+`Puf()`): the same animation as a bullet impact, but it clears and kills nothing, and it
+plays to the end even when the death ended the round.
+
 The round summary lists, under each dead player's name, how they died and **who did it**.
 Every death is a one-shot event `{slotIndex, cause, x, y, by?}`; `by` is the slot of the
 player responsible, which can be the victim:

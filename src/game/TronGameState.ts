@@ -308,10 +308,12 @@ export class TronGameState {
 
   // `by`: the slot of whoever is responsible (NO_OWNER for the level), if anybody
   private recordDeath(player: TronPlayer, cause: DeathCause, by?: number): void {
-    this.frameDeaths.push({
-      slotIndex: player.slotIndex, cause, x: player.getScreenX(), y: player.getScreenY(),
-      ...(by !== undefined && { by }),
-    });
+    const x = player.getScreenX();
+    const y = player.getScreenY();
+    this.frameDeaths.push({ slotIndex: player.slotIndex, cause, x, y, ...(by !== undefined && { by }) });
+    // Every death goes off with a small explosion where the player was, as in the
+    // original (`Puf()`). Animation only: it clears and kills nothing.
+    this.explosions.push({ id: this.nextExplosionId++, x, y, frame: 0 });
   }
 
   // Kill a player and handle ridiculous death if applicable

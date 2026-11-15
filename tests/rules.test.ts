@@ -214,6 +214,52 @@ describe('death', () => {
   });
 });
 
+describe('death explosion', () => {
+  it('every death goes off with a harmless explosion where the player was, also the last one', () => {
+    const game = makeGame(3);
+    game.setLevelObstacles(wallLevel());
+    skipCountdown(game);
+    game.items.length = 0;
+    place(game, 0, 100, 100, 0);
+    place(game, 1, 100, 300, 0);
+    place(game, 2, 396, 500, 0); // About to hit the wall at x = 400
+    let death: { x: number; y: number } | null = null;
+    for (let i = 0; i < 10 && !death; i++) {
+      game.tick(new Map());
+      game.items.length = 0;
+      const frame = game.serialize();
+      const d = (frame.deaths ?? [])[0];
+      if (d) {
+        death = { x: d.x, y: d.y };
+        expect(d.slotIndex).toBe(2);
+        expect(frame.round.explosions.map(e => [e.x, e.y, e.frame])).toEqual([[d.x, d.y, 1]]);
+      }
+    }
+    expect(death).not.toBeNull();
+    // Nothing else is harmed and nothing is erased: the wall is still there
+    expect(game.players[0]!.alive && game.players[1]!.alive).toBe(true);
+    expect(game.pixels.has(400, death!.y)).toBe(true);
+
+    // The death that ends the round: its explosion still plays to the end
+    game.players[1]!.x = 396 * 1000;
+    let ended = false;
+    for (let i = 0; i < 10 && !ended; i++) {
+      game.tick(new Map());
+      game.items.length = 0;
+      game.serialize();
+      ended = game.phase === 'waiting_ready';
+    }
+    expect(ended).toBe(true);
+    let frames = 0;
+    while (game.serialize().round.explosions.length > 0 && frames < 100) {
+      game.tick(new Map());
+      frames++;
+    }
+    expect(frames).toBeGreaterThan(20);
+    expect(frames).toBeLessThan(45);
+  });
+});
+
 describe('team scoring', () => {
   const team = (): ReturnType<typeof makeGame> => {
     const game = makeGame(4, 1, { mode: 'team' });
