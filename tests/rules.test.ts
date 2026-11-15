@@ -134,7 +134,8 @@ describe('who did it', () => {
       place(game, 0, 200, 300, 0);
       place(game, 1, 320, 300, 180);     // coming the other way
       game.players[0]!.equipWeapon(weapon, 200);
-      expect(deathsOf(game, 60, i => [{ action: i === 0 }, {}])).toContain(`1:${cause}:0`);
+      // (a whole rifle burst: one tracer alone lands every 5 px and may jump over a head)
+      expect(deathsOf(game, 60, i => [{ action: i < 5 }, {}])).toContain(`1:${cause}:0`);
     }
   });
 
@@ -408,7 +409,7 @@ describe('collisions', () => {
     const deaths = (game: ReturnType<typeof makeGame>, ticks: number, press: Partial<TronInput>[] = []): string[] => {
       const out: string[] = [];
       for (let i = 0; i < ticks && game.phase === 'playing'; i++) {
-        game.tick(inputs(...(i === 0 ? press : [])));
+        game.tick(inputs(...(i < 5 ? press : [])));
         game.items.length = 0;
         for (const d of game.serialize().deaths ?? []) out.push(`${d.slotIndex}:${d.cause}:${d.by ?? '-'}`);
       }

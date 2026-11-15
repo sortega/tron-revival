@@ -319,6 +319,13 @@ Rules: `design/projectiles.md`.
 - [x] A tracer meeting a player head-on was swallowed by the trail right behind the head
 - [x] A single tracer or bullet crossing a flying H-bomb sets it off (whole-path test)
 - [x] A tracer hitting something on the tick it wraps erased a line across the whole arena
+- [x] Tracers act where they land, as in the original (`design/projectiles.md`): they
+      jump over thin trails, clear 3×3 where they end; Uzi 10–50 px in one tick, rifle 5
+      on consecutive ticks every 20. Compared with the original running in DOSBox
+      (`npm run original`)
+- [ ] `clearedLines` frame events are no longer emitted by anything: remove them from the
+      protocol and the renderer
+- [ ] Bots judge lines of fire as if tracers still swept their path
 - [x] H-bomb blast is a circle (cleared area, players, items, satellites)
 - [x] Satellites (`design/bodyguards.md`): intercept shots on their course instead of
       chasing them, attack players who enter their area; 10 px/tick; tracers cannot harm

@@ -212,9 +212,10 @@ describe('satellites under shotgun fire', () => {
     expect(kills).toBeLessThan(cases / 2);
   });
 
-  it('sustained fire overwhelms a lone satellite without destroying it', () => {
+  it('sustained fire gets past a lone satellite about half the time, without destroying it', () => {
     const { kills, cases, destroyed } = shotgun(1, 6);
-    expect(kills).toBeGreaterThan(cases * 0.75);
+    expect(kills).toBeGreaterThan(cases * 0.3);
+    expect(kills).toBeLessThan(cases * 0.75);
     expect(destroyed).toBe(0);
   });
 

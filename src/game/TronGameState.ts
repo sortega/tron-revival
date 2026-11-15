@@ -187,9 +187,9 @@ export class TronGameState {
     shotsRemaining: number;    // Shots left in current burst (0-5)
     shotDelay: number;         // Delay counter between shots in burst
   }> = new Map();
-  private readonly RIFLE_BURST_INTERVAL = 15;   // Ticks between the starts of two bursts (the original: 20)
+  private readonly RIFLE_BURST_INTERVAL = 20;   // Ticks between the starts of two bursts
   private readonly RIFLE_SHOTS_PER_BURST = 5;
-  private readonly RIFLE_SHOT_DELAY = 1;        // Frames between shots in burst
+  private readonly RIFLE_SHOT_DELAY = 0;        // Ticks skipped between the shots of a burst
   private readonly PROJECTILE_OWNER_COOLDOWN = 10; // Frames before owner collision is checked
   private readonly TRACER_LIFESPAN = 120;       // Frames before tracer expires
   private readonly TRACER_KILL_REACH = 1;       // Kills within 1 px on both axes: the 3x3 box of the original
@@ -198,9 +198,9 @@ export class TronGameState {
   // Uzi weapon constants
   private readonly UZI_TRACERS_PER_FRAME = 20;  // Spray 20 bullets per frame
   private readonly UZI_SPREAD_DEGREES = 30;     // ±30° random deviation
-  private readonly UZI_MIN_SPEED = 5000;        // 5 pixels/frame in fixed-point
-  private readonly UZI_MAX_SPEED = 25000;       // 25 pixels/frame in fixed-point
-  private readonly UZI_TRACER_LIFESPAN = 2;     // 2 frames to be visible for at least one render
+  private readonly UZI_MIN_SPEED = 10000;       // 10 pixels/frame in fixed-point
+  private readonly UZI_MAX_SPEED = 50000;       // 50 pixels/frame in fixed-point
+  private readonly UZI_TRACER_LIFESPAN = 1;     // One jump (it stays lit for the tick after)
 
   // Shotgun weapon constants
   private readonly SHOTGUN_PELLETS = 30;        // 30 pellets per shot
@@ -918,17 +918,23 @@ export class TronGameState {
       for (const p of this.projectiles) {
         if (p.type !== 'tracer') continue;
         const rad = (p.direction * Math.PI) / 180;
+        const speed = (p.remainingFrames ?? 1) <= 0 ? 0 : p.speed;   // Spent: lit where it landed
         tracerPaths.push({
           ownerSlot: p.ownerSlot,
           x0: p.x / 1000,
           y0: p.y / 1000,
-          x1: (p.x + Math.cos(rad) * p.speed) / 1000,
-          y1: (p.y + Math.sin(rad) * p.speed) / 1000,
+          x1: (p.x + Math.cos(rad) * speed) / 1000,
+          y1: (p.y + Math.sin(rad) * speed) / 1000,
         });
       }
     }
 
     for (const proj of this.projectiles) {
+      if (proj.type === 'tracer') {
+        this.tickTracer(proj, toRemove, anyBomb);
+        continue;
+      }
+
       // Store previous position for line collision check
       const prevX = Math.floor(proj.x / 1000);
       const prevY = Math.floor(proj.y / 1000);
@@ -981,48 +987,14 @@ export class TronGameState {
             Math.round(unwrappedY + Math.sin(dirRad) * this.BOMB_HALF_LENGTH),
             this.BOMB_HALF_WIDTH)
         : this.checkLineCollision(prevX, prevY, unwrappedX, unwrappedY);
-      if (impactPoint && proj.type === 'tracer') {
-        // A head reached before the solid pixel is hit first: a tracer meeting a player
-        // head-on must not be swallowed by the trail right behind that head
-        const length = Math.hypot(unwrappedX - prevX, unwrappedY - prevY);
-        const pixelT = length > 0 ? Math.hypot(impactPoint.rawX - prevX, impactPoint.rawY - prevY) / length : 0;
-        const guard = this.findBlocker(proj, prevX, prevY, unwrappedX, unwrappedY);
-        const before = Math.min(pixelT, guard ? guard.t : Infinity);
-        const ownerSafe = (proj.ownerCooldown ?? 0) > 1;
-        if (this.strikePlayerOnPath(proj, prevX, prevY, unwrappedX, unwrappedY, before, false, ownerSafe)) {
-          toRemove.add(proj.id);
-          continue;
-        }
-      }
       if (impactPoint) {
         if (proj.type === 'bullet') {
           this.projectileImpact(impactPoint.x, impactPoint.y, proj.ownerSlot);
-        } else if (proj.type === 'bomb') {
-          this.bombImpact(impactPoint.x, impactPoint.y, proj.ownerSlot);
         } else {
-          // Clear path up to impact point, then expire
-          // (to the hit as it lies on the path: beyond an edge it must not be wrapped,
-          // or the line would be drawn back across the whole arena)
-          this.clearPixelPath(prevX, prevY, impactPoint.rawX, impactPoint.rawY);
-          this.tracerExpire(impactPoint.x, impactPoint.y);
+          this.bombImpact(impactPoint.x, impactPoint.y, proj.ownerSlot);
         }
         toRemove.add(proj.id);
         continue;
-      }
-
-      // Tracer-specific: clear pixels along path and decrement lifespan
-      if (proj.type === 'tracer') {
-        this.clearPixelPath(prevX, prevY, unwrappedX, unwrappedY);
-
-        // Decrement lifespan
-        if (proj.remainingFrames !== undefined) {
-          proj.remainingFrames--;
-          if (proj.remainingFrames <= 0) {
-            this.tracerExpire(newX, newY);
-            toRemove.add(proj.id);
-            continue;
-          }
-        }
       }
 
       // Decrement owner cooldown
@@ -1085,16 +1057,12 @@ export class TronGameState {
             hitItem = true;
             break;
           } else {
-            // Bullets and tracers damage item HP
-            const damage = proj.type === 'bullet' ? this.GLOCK_DAMAGE : this.TRACER_DAMAGE;
-            item.hp -= damage;
+            // Bullets damage item HP
+            item.hp -= this.GLOCK_DAMAGE;
             if (item.hp <= 0) {
               item.active = false;
             }
             // Projectile is consumed (no explosion for item hits)
-            if (proj.type === 'tracer') {
-              this.tracerExpire(item.x, item.y);
-            }
             toRemove.add(proj.id);
             hitItem = true;
             break;
@@ -1157,18 +1125,94 @@ export class TronGameState {
     this.removeDeadBodyguards();
   }
 
+  /**
+   * One tick of a tracer (design/projectiles.md). As in the original it is a point that
+   * jumps `speed` pixels a tick and acts where it lands: it kills the heads in the 3x3
+   * pixels around that point and is spent if the pixel is solid; a spent tracer stays lit
+   * for a tick and then goes, taking the 3x3 pixels around it. Trails it jumps over are
+   * left alone. Satellites, flying bombs and items are met on the way, anywhere on the path.
+   */
+  private tickTracer(proj: Projectile, toRemove: Set<number>, anyBomb: boolean): void {
+    if ((proj.remainingFrames ?? 1) <= 0) {
+      this.tracerExpire(Math.floor(proj.x / 1000), Math.floor(proj.y / 1000));
+      toRemove.add(proj.id);
+      return;
+    }
+
+    const prevX = Math.floor(proj.x / 1000);
+    const prevY = Math.floor(proj.y / 1000);
+    const dirRad = (proj.direction * Math.PI) / 180;
+    proj.x += Math.cos(dirRad) * proj.speed;
+    proj.y += Math.sin(dirRad) * proj.speed;
+    // (the path as travelled: its end may lie beyond an edge)
+    const unwrappedX = Math.floor(proj.x / 1000);
+    const unwrappedY = Math.floor(proj.y / 1000);
+    if (proj.x >= PLAY_WIDTH * 1000) proj.x -= PLAY_WIDTH * 1000;
+    if (proj.x < 0) proj.x += PLAY_WIDTH * 1000;
+    if (proj.y >= PLAY_HEIGHT * 1000) proj.y -= PLAY_HEIGHT * 1000;
+    if (proj.y < 0) proj.y += PLAY_HEIGHT * 1000;
+    const newX = Math.floor(proj.x / 1000);
+    const newY = Math.floor(proj.y / 1000);
+
+    for (const portal of this.portals) {
+      if (Math.hypot(newX - portal.x1, newY - portal.y1) < PORTAL_RADIUS) {
+        this.teleportProjectile(proj, portal.x2, portal.y2);
+        return;
+      }
+      if (Math.hypot(newX - portal.x2, newY - portal.y2) < PORTAL_RADIUS) {
+        this.teleportProjectile(proj, portal.x1, portal.y1);
+        return;
+      }
+    }
+
+    if (proj.ownerCooldown !== undefined && proj.ownerCooldown > 0) proj.ownerCooldown--;
+    const skipOwner = proj.ownerCooldown !== undefined && proj.ownerCooldown > 0;
+
+    // On the way: a satellite stops it, a flying bomb is set off, whichever comes first
+    const blocker = this.findBlocker(proj, prevX, prevY, unwrappedX, unwrappedY);
+    const bombHit = anyBomb ? this.findBombOnPath(prevX, prevY, unwrappedX, unwrappedY, toRemove) : null;
+    if (bombHit && (!blocker || bombHit.t <= blocker.t)) {
+      const bomb = bombHit.bomb;
+      toRemove.add(bomb.id);
+      this.bombImpact(Math.floor(bomb.x / 1000), Math.floor(bomb.y / 1000), bomb.ownerSlot);
+      toRemove.add(proj.id);
+      return;
+    }
+    if (blocker) {
+      const stopX = prevX + (unwrappedX - prevX) * blocker.t;
+      const stopY = prevY + (unwrappedY - prevY) * blocker.t;
+      if (this.blockProjectile(blocker.bg, proj, stopX, stopY)) toRemove.add(proj.id);
+      return;
+    }
+    for (const item of this.items) {
+      if (!item.active) continue;
+      if (this.distanceToPath(item.x, item.y, prevX, prevY, unwrappedX, unwrappedY) >= ITEM_COLLISION_RADIUS) continue;
+      item.hp -= this.TRACER_DAMAGE;
+      if (item.hp <= 0) item.active = false;
+      this.tracerExpire(item.x, item.y);
+      toRemove.add(proj.id);
+      return;
+    }
+
+    // Where it lands
+    proj.remainingFrames = (proj.remainingFrames ?? 1) - 1;
+    if (this.pixels.has(newX, newY)) proj.remainingFrames = 0;
+    if (this.phase === 'waiting_ready') return;
+    for (const player of this.players) {
+      if (!player.alive || (skipOwner && player.slotIndex === proj.ownerSlot)) continue;
+      if (Math.abs(this.wrapDelta(player.getScreenX() - newX, PLAY_WIDTH)) > this.TRACER_KILL_REACH) continue;
+      if (Math.abs(this.wrapDelta(player.getScreenY() - newY, PLAY_HEIGHT)) > this.TRACER_KILL_REACH) continue;
+      this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot, 'tracer', proj.ownerSlot);
+      proj.remainingFrames = 0;
+    }
+  }
+
   // Teleport a projectile to exit portal position
   private teleportProjectile(proj: Projectile, portalX: number, portalY: number): void {
     const dirRad = (proj.direction * Math.PI) / 180;
     // Exit at outer ring of destination portal, maintaining direction
     proj.x = (portalX + Math.cos(dirRad) * PORTAL_OUTER_RADIUS) * 1000;
     proj.y = (portalY + Math.sin(dirRad) * PORTAL_OUTER_RADIUS) * 1000;
-  }
-
-  // Clear pixels along projectile path (for tracer bullets). Only reported to the
-  // renderer (and to guests) if something was there: most tracers fly through nothing
-  private clearPixelPath(x0: number, y0: number, x1: number, y1: number): void {
-    if (this.pixels.clearLine(x0, y0, x1, y1)) this.frameClearedLines.push(x0, y0, x1, y1);
   }
 
   // Tracer bullet expiration (no explosion)
@@ -1268,10 +1312,6 @@ export class TronGameState {
       if (proj.type === 'bomb') {
         // A bomb collides as a box
         hit = !bombBlocked && this.bombCovers(proj, px, py, this.BOMB_PLAYER_MARGIN);
-      } else if (proj.type === 'tracer') {
-        // A tracer kills when its path passes through the 3x3 pixels around the head
-        const t = this.pathEntersBox(px, py, this.TRACER_KILL_REACH, x0, y0, x1, y1);
-        hit = t !== null && t < stopT;
       } else {
         const closest = this.closestOnPath(px, py, x0, y0, x1, y1);
         hit = closest.dist < this.BULLET_KILL_RADIUS && closest.t < stopT;
@@ -1279,11 +1319,8 @@ export class TronGameState {
       if (!hit) continue;
       if (proj.type === 'bullet') {
         this.projectileImpact(px, py, proj.ownerSlot);
-      } else if (proj.type === 'bomb') {
-        this.bombImpact(px, py, proj.ownerSlot);
       } else {
-        this.tracerExpire(px, py);
-        this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot, 'tracer', proj.ownerSlot);
+        this.bombImpact(px, py, proj.ownerSlot);
       }
       return true;
     }
@@ -1385,39 +1422,6 @@ export class TronGameState {
           x: ((Math.round(px) % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH,
           y: ((Math.round(py) % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT,
         };
-      }
-    }
-    return best;
-  }
-
-  // Does the path travelled this tick (x0,y0 → x1,y1) pass through the square of
-  // ±`reach` pixels around a point? Returns how far along the path it enters (0..1), or
-  // null. Like closestOnPath, the point is also tried wrapped around.
-  private pathEntersBox(
-    px: number, py: number, reach: number, x0: number, y0: number, x1: number, y1: number
-  ): number | null {
-    const shiftX = x1 < 0 ? -PLAY_WIDTH : x1 >= PLAY_WIDTH ? PLAY_WIDTH : 0;
-    const shiftY = y1 < 0 ? -PLAY_HEIGHT : y1 >= PLAY_HEIGHT ? PLAY_HEIGHT : 0;
-    const dx = x1 - x0;
-    const dy = y1 - y0;
-    let best: number | null = null;
-    for (const sx of shiftX !== 0 ? [0, shiftX] : [0]) {
-      for (const sy of shiftY !== 0 ? [0, shiftY] : [0]) {
-        // Slab test of the segment against the square
-        let enter = 0;
-        let leave = 1;
-        let crosses = true;
-        for (const [start, delta, centre] of [[x0, dx, px + sx], [y0, dy, py + sy]] as const) {
-          if (delta === 0) {
-            if (Math.abs(start - centre) > reach) crosses = false;
-            continue;
-          }
-          const t1 = (centre - reach - start) / delta;
-          const t2 = (centre + reach - start) / delta;
-          enter = Math.max(enter, Math.min(t1, t2));
-          leave = Math.min(leave, Math.max(t1, t2));
-        }
-        if (crosses && enter <= leave && (best === null || enter < best)) best = enter;
       }
     }
     return best;

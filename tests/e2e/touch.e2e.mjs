@@ -172,8 +172,9 @@ try {
     waiting = state.phase === 'waiting_ready' && !state.ready;
     if (!waiting) await sleep(50);
   }
-  check('the action button says READY between rounds', waiting && await label() === 'READY', await label());
-  await sleep(1200);   // Presses are ignored in the first second after a round ends
+  await sleep(150);   // (the label follows on the next display frame)
+  check('the action button says READY between rounds', waiting && await label() === 'READY', `${waiting ? '' : 'no round ended; '}${await label()}`);
+  await sleep(1050);   // Presses are ignored in the first second after a round ends
   const release = await drag([[action.x + action.width / 2, action.y + action.height / 2]], 100);
   await release();
   await sleep(100);

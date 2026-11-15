@@ -67,10 +67,15 @@ get from the far side of its orbit into the line of fire before fast pellets arr
 while it deals with one blast the next one comes. Shotgun blasts from 95 px, one every 4
 ticks, over 24 directions and orbit positions:
 
-| Blasts in a row | 1 satellite | 2 satellites | 3 satellites |
-|-----------------|-------------|--------------|--------------|
-| 1 | owner dies 8/24 | 2/24 | 1/24 |
-| 6 | 24/24 | 6/24 | 1/24 |
+| Blasts in a row | 1 satellite |
+|-----------------|-------------|
+| 6 | owner dies 13/24 |
+
+(Since tracers kill only where they land, design/projectiles.md, while a satellite still
+stops anything that passes within 5 px of it: satellites protect more than they did. With
+swept tracers six blasts killed the owner of a lone satellite 24 times out of 24. The
+figures for one blast and for two and three satellites were not measured again; the tests
+only bound them.)
 
 A single Glock bullet (bounced back) or a rifle burst is stopped in every set-up of the
 tests.
@@ -88,6 +93,6 @@ while that enemy has satellites, instead of only the satellites themselves.
   satellite happened to be; a Glock bullet is bounced back and kills its shooter.
 - An enemy driving into the area is killed by the satellite before reaching the owner; one
   passing outside it is left alone; a team-mate is not harmed.
-- Shotgun: one blast is stopped more often than not; six in a row overwhelm a lone
-  satellite without destroying it; three satellites hold out.
+- Shotgun: one blast is stopped more often than not; six in a row get past a lone
+  satellite about half the time without destroying it; three satellites hold out.
 - With two satellites and two simultaneous threats, each takes one.
