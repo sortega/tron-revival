@@ -14,6 +14,8 @@ export default defineConfig({
   server: {
     port: 3000,
     host: true, // Expose on network
+    // Reached through `tailscale serve` under the machine's tailnet name
+    allowedHosts: ['.ts.net'],
     https,
   },
   build: {
