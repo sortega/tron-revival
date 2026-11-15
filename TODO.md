@@ -267,6 +267,8 @@ Design: `design/display-layer.md`.
       the notches of slanted trails); head = solid white pixel with a faint twinkling glow
 - [x] Shade halved (12 % / 3 %, at most 30 %) and the same on every background (it blends);
       no dark edge on light levels
+- [x] Trails: the neighbour-based shade replaced by the smooth line of the real path,
+      shared among the pixels it crosses in proportion to coverage
 - [x] Level picker: any subset of levels, played in turn (local set-up and network lobby)
 - [ ] **Owner: look at it on the iPhone**; tune the opacities in `display/settings.ts` and
       the twinkle in `TronRenderer.drawPlayerHead`

@@ -723,6 +723,7 @@ export class TronGame implements Screen {
     for (const { slotIndex, segments } of state.newTrailSegments) {
       renderer.addTrailSegments(slotIndex, segments);
     }
+    if (state.round.phase === 'playing') renderer.addPaths(state.round.players);
     if (state.borderSegments) {
       for (const { color, segments } of state.borderSegments) {
         renderer.addBorderSegments(color, segments);

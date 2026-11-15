@@ -22,6 +22,8 @@ const MAX_RECTS = 256;
 const BLOCK = 128;
 /** A run of nearby points grows one rectangle up to this size before starting another. */
 const RUN_SPAN = 16;
+/** Points per pixel of path at which the smooth line is sampled. */
+const PATH_SAMPLES = 4;
 
 export class ArenaDisplay {
   readonly cells: DisplayCells;
@@ -70,6 +72,7 @@ export class ArenaDisplay {
    */
   restoreLevel(keepTrails = false): void {
     const { kind, color } = this.cells;
+    if (!keepTrails) this.cells.softAlpha.fill(0);
     for (let i = 0; i < kind.length; i++) {
       if (keepTrails && kind[i] === KIND_TRAIL) continue;
       const c = this.pristine[i]!;
@@ -100,6 +103,23 @@ export class ArenaDisplay {
     for (const p of points) {
       this.cells.set(p.x, p.y, KIND_TRAIL, packed);
       this.markPoint(p.x, p.y);
+    }
+  }
+
+  /**
+   * The path a player followed, from (ax, ay) to (bx, by) in pixels with fractions: drawn
+   * as a one-pixel-wide smooth line, each cell getting as much of the colour as the line
+   * covers of it. Not an obstacle; shown on free cells only.
+   */
+  addPath(ax: number, ay: number, bx: number, by: number, color: string): void {
+    const packed = packCss(color);
+    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) * PATH_SAMPLES));
+    this.run = null;
+    for (let i = 0; i <= steps; i++) {
+      const x = ax + ((bx - ax) * i) / steps;
+      const y = ay + ((by - ay) * i) / steps;
+      this.cells.splat(x, y, packed);
+      this.markPoint(Math.floor(x), Math.floor(y));
     }
   }
 

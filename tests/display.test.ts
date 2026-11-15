@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ArenaDisplay } from '../src/game/display/ArenaDisplay';
 import type { LayerSink } from '../src/game/display/ArenaDisplay';
-import { DisplayCells, KIND_LEVEL, KIND_TRAIL, packCss, packRgba, shadeCells } from '../src/game/display/shade';
+import { KIND_TRAIL, packCss, packRgba, shadeCells } from '../src/game/display/shade';
 import type { ShadeStyle } from '../src/game/display/shade';
 import { SOFT } from '../src/game/display/settings';
 import { PixelGrid } from '../src/game/PixelGrid';
@@ -43,7 +43,7 @@ class MemorySink implements LayerSink {
 
 /** No shade at all: only used here, to tell the cells from what is derived from them. */
 const PLAIN: ShadeStyle = { scale: 1, bands: [] };
-const STYLES: [string, ShadeStyle][] = [['soft', SOFT], ['plain', PLAIN]];
+const STYLES: [string, ShadeStyle][] = [['soft', SOFT]];
 
 /** The picture derived from scratch from the cells of a display. */
 function fromScratch(display: ArenaDisplay, style: ShadeStyle): { level: Uint32Array; trail: Uint32Array } {
@@ -65,98 +65,88 @@ const core = packRgba(0xff, 0x44, 0x44);
 const alphaOf = (pixel: number): number => (pixel >>> 24) / 255;
 const rgbOf = (pixel: number): number => pixel & 0x00ffffff;
 
-/** Derive a 16×16 arena with red trail on the given cells. */
-function derive(points: [number, number][], style: ShadeStyle = SOFT): Uint32Array {
-  const cells = new DisplayCells(16, 16);
-  for (const [x, y] of points) cells.set(x, y, KIND_TRAIL, packCss(RED));
-  const trail = new Uint32Array(256);
-  shadeCells(cells, style, 0, 0, 16, 16, new Uint32Array(256), trail);
-  return trail;
+/** A display with a red trail along a path given in pixels with fractions, as the game feeds it. */
+function drive(path: [number, number][]): { sink: MemorySink; display: ArenaDisplay } {
+  const sink = new MemorySink();
+  const display = new ArenaDisplay(PLAY_WIDTH, PLAY_HEIGHT, sink, SOFT);
+  for (let i = 1; i < path.length; i++) {
+    const [ax, ay] = path[i - 1]!;
+    const [bx, by] = path[i]!;
+    // The pixel the player left becomes trail; the stretch it moved becomes smooth line
+    if (Math.floor(ax) !== Math.floor(bx) || Math.floor(ay) !== Math.floor(by)) {
+      display.addTrail([{ x: Math.floor(ax), y: Math.floor(ay) }], RED);
+    }
+    display.addPath(ax, ay, bx, by, RED);
+  }
+  display.flush();
+  return { sink, display };
 }
-const at = (trail: Uint32Array, x: number, y: number): number => trail[y * 16 + x]!;
+const at = (sink: MemorySink, x: number, y: number): number => sink.trail[y * PLAY_WIDTH + x]!;
+const straight = (y: number): [number, number][] => Array.from({ length: 21 }, (_, i) => [100.5 + i, y] as [number, number]);
 
-describe('soft trails', () => {
+describe('smooth line over the hard trail', () => {
   it('the trail itself is a hard pixel of the player colour, exactly where the obstacle is', () => {
-    const trail = derive([[5, 5], [6, 5], [7, 6]]);
-    for (const [x, y] of [[5, 5], [6, 5], [7, 6]] as const) expect(at(trail, x, y)).toBe(core);
-    expect(trail.filter(v => v === core).length).toBe(3);
+    const { sink } = drive(straight(50.3));
+    for (let x = 100; x < 120; x++) expect(at(sink, x, 50)).toBe(core);
   });
 
-  it('around it: the same colour, semi-transparent, one pixel out and no further', () => {
-    const trail = derive([[8, 8]]);
-    let lit = 0;
-    for (let y = 0; y < 16; y++) {
-      for (let x = 0; x < 16; x++) {
-        const pixel = at(trail, x, y);
-        if (pixel === 0) continue;
-        lit++;
-        expect(Math.max(Math.abs(x - 8), Math.abs(y - 8))).toBeLessThanOrEqual(1);
-        if (x === 8 && y === 8) continue;
-        expect(rgbOf(pixel)).toBe(rgbOf(core));
-        expect(alphaOf(pixel)).toBeGreaterThan(0.02);
-        expect(alphaOf(pixel)).toBeLessThan(0.35);
-      }
-    }
-    expect(lit).toBe(9);
-    // Beside the pixel more than at its corners
-    expect(alphaOf(at(trail, 7, 8))).toBeGreaterThan(alphaOf(at(trail, 7, 7)) * 2);
-  });
-
-  it('smooths more than it thickens: the notch of a staircase gets more than the side of a straight line', () => {
-    const straight = derive(Array.from({ length: 10 }, (_, i) => [3 + i, 8] as [number, number]));
-    const beside = alphaOf(at(straight, 8, 7));
-    const diagonal = derive(Array.from({ length: 8 }, (_, i) => [4 + i, 4 + i] as [number, number]));
-    const notch = alphaOf(at(diagonal, 8, 7));   // Touches (7,7) from the right and (8,8) from above
-    expect(notch).toBeGreaterThan(beside);
-    // Subtle either way: never close to solid
-    expect(beside).toBeGreaterThan(0.1);
-    expect(beside).toBeLessThan(0.25);
-    expect(notch).toBeLessThanOrEqual(0.31);
-  });
-
-  it('a gap between two trails is never closed by the shade, however narrow', () => {
-    for (const [name, style] of STYLES.slice(0, 1)) {
-      for (let gap = 1; gap <= 4; gap++) {
-        for (const vertical of [false, true]) {
-          // Two parallel trails with `gap` free cells between them
-          const cells = new DisplayCells(16, 16);
-          for (let t = 0; t < 16; t++) {
-            if (vertical) {
-              cells.set(4, t, KIND_TRAIL, packCss(RED));
-              cells.set(5 + gap, t, KIND_TRAIL, packCss(GREEN));
-            } else {
-              cells.set(t, 4, KIND_TRAIL, packCss(RED));
-              cells.set(t, 5 + gap, KIND_TRAIL, packCss(GREEN));
-            }
-          }
-          const trail = new Uint32Array(256);
-          shadeCells(cells, style, 0, 0, 16, 16, new Uint32Array(256), trail);
-          // Count the gap cells left completely untouched, across the middle of the trails
-          let clear = 0;
-          for (let g = 0; g < gap; g++) {
-            if ((vertical ? at(trail, 5 + g, 8) : at(trail, 8, 5 + g)) === 0) clear++;
-          }
-          expect(clear, `${name}, gap ${gap}, ${vertical ? 'vertical' : 'horizontal'}`).toBeGreaterThanOrEqual(1);
-          // The outer sides are shaded all the same
-          expect(vertical ? at(trail, 3, 8) : at(trail, 8, 3), name).not.toBe(0);
-        }
-      }
+  it('a path through the middle of its pixels adds nothing: the line covers only them', () => {
+    const { sink } = drive(straight(50.5));
+    for (let x = 98; x < 123; x++) {
+      expect(at(sink, x, 49)).toBe(0);
+      expect(at(sink, x, 51)).toBe(0);
     }
   });
 
-  it('the shade never covers a wall or another trail', () => {
-    const cells = new DisplayCells(8, 8);
-    cells.set(3, 3, KIND_TRAIL, packCss(RED));
-    cells.set(4, 3, KIND_TRAIL, packCss(GREEN));
-    cells.set(3, 4, KIND_LEVEL, packCss('#808080'));
-    for (const [name, style] of STYLES) {
-      const level = new Uint32Array(64);
-      const trail = new Uint32Array(64);
-      shadeCells(cells, style, 0, 0, 8, 8, level, trail);
-      expect(trail[3 * 8 + 4], name).toBe(packRgba(0x44, 0xff, 0x44));
-      expect(trail[4 * 8 + 3], name).toBe(0);
-      expect(level[4 * 8 + 3], name).toBe(packRgba(0x80, 0x80, 0x80));
-      expect(level.filter(v => v !== 0).length, name).toBe(1);
+  it('a path off-centre spills onto the next row in proportion to how far off it is', () => {
+    // 0.3 below the top of row 50: the line covers 80 % of row 50 and 20 % of row 49
+    const a = drive(straight(50.3)).sink;
+    expect(rgbOf(at(a, 110, 49))).toBe(rgbOf(core));
+    expect(alphaOf(at(a, 110, 49))).toBeCloseTo(0.2, 1);
+    expect(at(a, 110, 51)).toBe(0);
+    // On the border between two rows: half and half (the hard pixel is the lower row)
+    const b = drive(straight(50.0)).sink;
+    expect(at(b, 110, 50)).toBe(core);
+    expect(alphaOf(at(b, 110, 49))).toBeCloseTo(0.5, 1);
+    // 0.2 above the bottom of row 50
+    const c = drive(straight(50.8)).sink;
+    expect(alphaOf(at(c, 110, 51))).toBeCloseTo(0.3, 1);
+    expect(at(c, 110, 49)).toBe(0);
+  });
+
+  it('a slanted path fills the steps of its staircase, never further than one pixel away', () => {
+    const path: [number, number][] = Array.from({ length: 41 }, (_, i) => [100.5 + i, 50.5 + i * 0.4] as [number, number]);
+    const { sink, display } = drive(path);
+    let soft = 0;
+    for (let y = 40; y < 80; y++) {
+      for (let x = 95; x < 150; x++) {
+        const pixel = at(sink, x, y);
+        if (pixel === 0 || pixel === core) continue;
+        soft++;
+        expect(alphaOf(pixel)).toBeLessThan(1);
+        // Next to a trail cell
+        let near = false;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (display.cells.kind[(y + dy) * PLAY_WIDTH + x + dx] === KIND_TRAIL) near = true;
+        expect(near, `${x},${y}`).toBe(true);
+      }
+    }
+    expect(soft).toBeGreaterThan(30);
+  });
+
+  it('it is not drawn over a wall or another trail, and goes when the trail is erased', () => {
+    const { sink, display } = drive(straight(50.0));
+    display.addLevel([{ x: 105, y: 49 }], '#808080');
+    display.addTrail([{ x: 106, y: 49 }], GREEN);
+    display.flush();
+    expect(at(sink, 105, 49)).toBe(0);
+    expect(sink.level[49 * PLAY_WIDTH + 105]).toBe(packRgba(0x80, 0x80, 0x80));
+    expect(at(sink, 106, 49)).toBe(packRgba(0x44, 0xff, 0x44));
+    // A tracer along the trail erases the hard pixels and the smooth line beside them
+    display.clearLine(95, 50, 125, 50);
+    display.flush();
+    for (let x = 95; x < 126; x++) {
+      if (x !== 106) expect(at(sink, x, 49), `${x}`).toBe(0);
+      expect(at(sink, x, 50)).toBe(0);
     }
   });
 });
@@ -182,7 +172,14 @@ describe('ArenaDisplay', () => {
             x = (x + int(3) - 1 + PLAY_WIDTH) % PLAY_WIDTH;
             y = (y + int(3) - 1 + PLAY_HEIGHT) % PLAY_HEIGHT;
           }
-          display.addTrail(points, [RED, GREEN, '#4444ff'][int(3)]!);
+          const color = [RED, GREEN, '#4444ff'][int(3)]!;
+          display.addTrail(points, color);
+          // And the smooth line of a path through those pixels, somewhere off their centres
+          const ox = rng(), oy = rng();
+          for (let i = 1; i < points.length; i++) {
+            const a = points[i - 1]!, b = points[i]!;
+            if (Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1) display.addPath(a.x + ox, a.y + oy, b.x + ox, b.y + oy, color);
+          }
         } else if (kind < 7) {
           // Bomb-sized hole, possibly across the edges
           display.clearRect(int(PLAY_WIDTH) - 60, int(PLAY_HEIGHT) - 60, 1 + int(120), 1 + int(120));

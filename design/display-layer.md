@@ -72,21 +72,11 @@ trail if its colour is one of the players' colours.
 ### Updating
 
 Mutations mark dirty rectangles (cell coordinates, grown by as many cells as a change can
-reach: twice the fringe, because of the gap rule below). Before compositing, each dirty rectangle is re-derived into a small
+reach: one cell, for the smooth line). Before compositing, each dirty rectangle is re-derived into a small
 `ImageData` and written to both layers with `putImageData`. A normal tick dirties a
 block of a few cells per player (at most 36); a bomb dirties one 122×122 block; a tracer line is processed in strips so
 a long diagonal does not re-derive its whole bounding box. More than 256 rectangles in a
 frame collapse into their bounding box.
-
-### Gaps stay open
-
-The shade makes a trail look wider than the obstacle it is, so it must never make a gap
-you can drive through look closed. Rule, part of the derivation: **a free cell with trail
-on both sides of it — left and right, or above and below — no further apart than two
-fringes gets no shade at all.** Two trails with one free pixel between them are drawn as
-two lines with a clean, unshaded pixel between them (and shade on their outer sides only);
-whatever the distance between two trails, at least one cell of the gap is exactly as it
-would be without shade. Tested for gaps of 1 to 4 pixels, both directions.
 
 ## The look
 
@@ -94,33 +84,39 @@ There is **one look, not a setting**. (Two rounds of selectable variants — fri
 one and two pixels in dimmed colours, halo sizes, extras — were tried on a phone by the
 owner and dropped: none was liked, and the options were hard to tell apart.)
 
-### Trails: a hard pixel, softened
+### Trails: a hard pixel line, and the smooth line over it
 
-The trail is the hard, fully opaque pixel of the player's colour, exactly where the
-obstacle is. Around it, pixels that are **not obstacles** carry the same colour
-semi-transparently, so the line looks softer — closer to an anti-aliased line than to a
-thicker one:
+Two lines are drawn for every trail:
 
-- a free pixel gets, for every trail pixel touching it, **12 %** if they are side by side
-  and **3 %** if they only touch at a corner, added up, at most **30 %**;
-- so the pixel beside a straight line gets 18 % (one side by side, two at corners), while
-  the pixel in the notch of a staircase — a slanted trail — touches two trail pixels side
-  by side and gets up to 30 %: slanted trails are smoothed more than they are thickened;
-- the colour is that of the nearest trail pixel (side by side before corner);
-- the shade reaches one pixel and no further, never covers a wall or another trail, and
-  obeys the gap rule below.
+1. **The hard line**: the fully opaque pixels of the player's colour, exactly where the
+   obstacles are (the pixels the player's position fell in).
+2. **The smooth line**, over it: the path the player really followed — positions have
+   fractions of a pixel — as a one-pixel-wide line whose colour is **shared out among the
+   pixels it crosses in proportion to how much of each it covers**. A path through the
+   middle of its pixels covers only them and adds nothing; a path 0.3 of a pixel off
+   centre puts 30 % of the colour on the neighbouring pixel; a slanted path fills the
+   steps of its staircase. It never reaches further than one pixel from the hard line.
 
-Being transparent, the shade **mixes with whatever is behind it** — black, the navy of
-Blueprint, the cream of Paper — when the trail layer is composited over the background,
-so the same values serve every level. (An earlier version gave light levels an opaque
-dark edge instead; it looked foreign to the level and was dropped, as was a first, twice
-as strong, set of values that read as a thick line.)
+The smooth line is **not an obstacle**. It only shows on free pixels (never over a wall or
+another trail), where, being transparent, it mixes with whatever background is behind it.
+It is erased together with the hard pixels next to it (one pixel around anything erased),
+so nothing is left behind.
 
-Values are in `src/game/display/settings.ts` (`SOFT`). The picture is 1× (800×600 backing
-store), as it always was.
+How it is fed: once per simulated frame while playing, the renderer hands the display the
+stretch each living player moved since the frame before (`TronRenderer.addPaths` →
+`ArenaDisplay.addPath`), skipping jumps (arena edge, portal, swap). The line is sampled
+four times per pixel; at each sample the 1×1 square centred on the point is split among
+the up to four cells it overlaps, and a cell keeps the most it was ever covered
+(`DisplayCells.softAlpha` / `softColor`).
 
-Provisional (predicted) trail pixels of a guest are drawn as plain pixels, without shade,
-for the few frames until the host confirms them.
+Limits: a trail that was there before this client joined (rejoin snapshot) has no smooth
+line, since only its pixels are known; a guest draws it from the host's states, so its own
+player's smooth line trails its predicted head by the network delay; the smooth line does
+not wrap around the arena edges.
+
+Tried before and dropped: selectable fringes of half, one and two pixels in dimmed colours
+(two rounds), then a shade computed from the neighbouring pixels at two strengths — it
+thickened the line instead of following the path.
 
 ### Heads: a white pixel that twinkles
 
@@ -187,14 +183,12 @@ Blue and team purple are the weak ones on dark backgrounds.
 ## Known limits
 
 - Not seen on real hardware by anybody but the owner; nothing measured there.
-- The gap rule looks along rows and columns. Two trails that only approach each other
-  diagonally are not treated as a gap (their shade meets at a corner).
 - In an arena snapshot (rejoin) lock-border pixels have the player's colour and are taken
   for trail until the next round.
-- The shade does not wrap around the arena edges.
 - A head's glow is white whatever the player; two heads meeting are told apart by their
   trails only.
 - Door sprites (Portals) have black recesses; fine there because that level is black.
 - Item sprites with a white box look pasted on Paper.
-- The derivation still supports things the game no longer uses (several fringe bands, a
-  2× backing store); they are covered by no test any more and can go.
+- The derivation still supports things the game no longer uses (fringe bands around
+  trails with a rule that keeps gaps open, a 2× backing store); they are covered by no
+  test any more and can go.

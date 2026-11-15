@@ -23,13 +23,6 @@ export interface ShadeStyle {
   scale: number;
   /** Fringe around trails, from the trail outwards. Empty: none. */
   bands: readonly FringeBand[];
-  /**
-   * Soft shade: the opacity of a fringe pixel is not the band's but the sum of these for
-   * every trail pixel touching it (side by side / corner to corner), up to `max`. A pixel
-   * in the notch of a staircase touches more trail than one beside a straight line, so
-   * slanted trails are smoothed more than they are thickened. Needs one band of width 1.
-   */
-  soft?: { orthogonal: number; diagonal: number; max: number };
 }
 
 export function packRgba(r: number, g: number, b: number, a = 255): number {
@@ -104,11 +97,54 @@ export class DisplayCells {
   readonly kind: Uint8Array;
   /** Trail cells per row: lets the derivation skip the rows that have no trail near. */
   readonly rowTrails: Uint16Array;
+  /**
+   * The smooth line: how much of each cell the one-pixel-wide line along the path a
+   * player really followed covers (0–255), and its colour. Only shown on free cells.
+   */
+  readonly softAlpha: Uint8Array;
+  readonly softColor: Uint32Array;
 
   constructor(readonly width: number, readonly height: number) {
     this.color = new Uint32Array(width * height);
     this.kind = new Uint8Array(width * height);
     this.rowTrails = new Uint16Array(height);
+    this.softAlpha = new Uint8Array(width * height);
+    this.softColor = new Uint32Array(width * height);
+  }
+
+  /**
+   * A point of a path, in pixels (a pixel spans [n, n+1)): the 1×1 square centred on it
+   * is shared out among the up to four cells it overlaps, in proportion to the overlap.
+   * A cell keeps the most it was ever covered.
+   */
+  splat(px: number, py: number, color: number): void {
+    const fx = Math.floor(px - 0.5);
+    const fy = Math.floor(py - 0.5);
+    const wx = px - 0.5 - fx;
+    const wy = py - 0.5 - fy;
+    for (let dy = 0; dy < 2; dy++) {
+      const y = fy + dy;
+      if (y < 0 || y >= this.height) continue;
+      for (let dx = 0; dx < 2; dx++) {
+        const x = fx + dx;
+        if (x < 0 || x >= this.width) continue;
+        const cover = Math.round(255 * (dx === 0 ? 1 - wx : wx) * (dy === 0 ? 1 - wy : wy));
+        const i = y * this.width + x;
+        if (cover > this.softAlpha[i]!) {
+          this.softAlpha[i] = cover;
+          this.softColor[i] = color;
+        }
+      }
+    }
+  }
+
+  // The smooth line never reaches further than one cell from the trail cells of its path,
+  // so erasing it one cell around erased cells leaves no ghost
+  private clearSoft(x0: number, y0: number, x1: number, y1: number): void {
+    const xa = Math.max(0, x0 - 1), xb = Math.min(this.width - 1, x1 + 1);
+    for (let y = Math.max(0, y0 - 1); y <= Math.min(this.height - 1, y1 + 1); y++) {
+      this.softAlpha.fill(0, y * this.width + xa, y * this.width + xb + 1);
+    }
   }
 
   inBounds(x: number, y: number): boolean {
@@ -129,6 +165,7 @@ export class DisplayCells {
     const i = y * this.width + x;
     if (this.kind[i] === KIND_TRAIL) this.rowTrails[y] = this.rowTrails[y]! - 1;
     this.kind[i] = KIND_EMPTY;
+    this.clearSoft(x, y, x, y);
   }
 
   /** Empty `w` cells of row `y` from column `x` (all inside the arena). */
@@ -140,11 +177,13 @@ export class DisplayCells {
       this.kind[i] = KIND_EMPTY;
     }
     this.rowTrails[y] = this.rowTrails[y]! - trails;
+    this.clearSoft(x, y, x + w - 1, y);
   }
 
   clearAll(): void {
     this.kind.fill(KIND_EMPTY);
     this.rowTrails.fill(0);
+    this.softAlpha.fill(0);
   }
 
   /** After writing `kind` directly: count the trail cells again. */
@@ -187,11 +226,10 @@ export function shadeCells(
   const S = style.scale;
   const W = cells.width;
   const H = cells.height;
-  const { kind, color, rowTrails } = cells;
+  const { kind, color, rowTrails, softAlpha, softColor } = cells;
   const bands = style.bands;
   const reach = fringeWidth(style);
   const R = fringeCells(style);   // Cells to look around (7×7 at most)
-  const soft = style.soft;
 
   // Band colours of the trail colour seen last (trails come in long same-coloured runs)
   let cachedFor = -1;
@@ -286,25 +324,17 @@ export function shadeCells(
         if ((r > 0 && l + r - 1 <= 2 * R) || (d > 0 && u + d - 1 <= 2 * R)) near = 0;
       }
       if (near === 0) {
+        // A free cell shows what the smooth line of a trail passing by left on it
+        const alpha = softAlpha[i]!;
+        const pixel = alpha === 0 ? 0 : ((softColor[i]! & 0x00ffffff) | (alpha << 24)) >>> 0;
         for (let sy = 0; sy < S; sy++) {
           const o = base + sy * stride;
           for (let sx = 0; sx < S; sx++) {
             outLevel[o + sx] = 0;
-            outTrail[o + sx] = 0;
+            outTrail[o + sx] = pixel;
           }
         }
         continue;
-      }
-
-      // Soft shade: how much trail touches this cell
-      let softAlpha = 0;
-      if (soft) {
-        let sum = 0;
-        for (let t = 0; t < near; t++) {
-          if (Math.abs(nearDx[t]!) > 1 || Math.abs(nearDy[t]!) > 1) continue;
-          sum += nearDx[t] === 0 || nearDy[t] === 0 ? soft.orthogonal : soft.diagonal;
-        }
-        softAlpha = Math.round(255 * Math.min(soft.max, sum));
       }
 
       for (let sy = 0; sy < S; sy++) {
@@ -336,7 +366,6 @@ export function shadeCells(
               }
             }
           }
-          if (soft && pixel !== 0) pixel = ((pixel & 0x00ffffff) | (softAlpha << 24)) >>> 0;
           outTrail[o + sx] = pixel;
           outLevel[o + sx] = 0;
         }

@@ -24,6 +24,7 @@ const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
 const STATUS_WIDTH = 50;
 const PLAYER_HEAD_SIZE = 1;
+const PATH_JUMP = 8;  // A player moving further than this in a frame did not travel there
 
 export class TronRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -353,8 +354,34 @@ export class TronRenderer {
     this.display.addLevel(segments, color);
   }
 
+  // Where each player was on the last frame, in pixels with fractions
+  private readonly lastExact = new Map<SlotIndex, { x: number; y: number }>();
+
+  /**
+   * Once per simulated frame while playing: the stretch each player moved goes on the
+   * display as a smooth line over the hard trail pixels (design/display-layer.md).
+   */
+  addPaths(players: readonly TronPlayerState[]): void {
+    for (const state of players) {
+      if (!state.alive) {
+        this.lastExact.delete(state.slotIndex);
+        continue;
+      }
+      const x = state.x / 1000;
+      const y = state.y / 1000;
+      const last = this.lastExact.get(state.slotIndex);
+      // Not across a jump: the edge of the arena, a portal, a swap
+      if (last && Math.abs(x - last.x) < PATH_JUMP && Math.abs(y - last.y) < PATH_JUMP && (x !== last.x || y !== last.y)) {
+        const color = this.players.find(p => p.slotIndex === state.slotIndex)?.color;
+        if (color) this.display.addPath(last.x, last.y, x, y, color);
+      }
+      this.lastExact.set(state.slotIndex, { x, y });
+    }
+  }
+
   // Clear all trails and restore level (for new round)
   clearTrails(): void {
+    this.lastExact.clear();
     this.ridiculousDeathSlots.clear();
     this.deathCauses.clear();
     this.colorBlindnessFrames = 0;
