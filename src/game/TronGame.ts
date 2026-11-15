@@ -123,6 +123,8 @@ export class TronGame implements Screen {
       }
     }
 
+    // A display setting switched while nothing moves must still be redrawn
+    if (this.renderer) this.renderer.onInvalidate = () => { this.dirty = true; };
     this.session.onFrame = (frame) => this.applyFrameEvents(frame);
     this.session.onSnapshot = (arena) => this.renderer?.paintArena(arena);
     this.session.onEnded = (reason) => {

@@ -3,7 +3,7 @@
 // derives the level and trail layers (with their shade) for the dirty parts only.
 
 import { PixelGrid, forEachLinePixel } from '../PixelGrid';
-import { DisplayCells, KIND_LEVEL, KIND_TRAIL, packCss, shadeCells } from './shade';
+import { DisplayCells, KIND_LEVEL, KIND_TRAIL, packCss, shadeCells, shadeReach } from './shade';
 import type { ShadeStyle } from './shade';
 
 /** Where derived pixels go: two layers of (width·scale) × (height·scale) pixels. */
@@ -29,6 +29,7 @@ export class ArenaDisplay {
   private dirty: Rect[] = [];
   private pristine: Uint32Array;
   private run: Rect | null = null;
+  private reach: number;   // Cells around a changed cell whose shade changes with it
   /** Rectangles derived by the last flush (diagnostics). */
   lastFlushCells = 0;
 
@@ -39,6 +40,7 @@ export class ArenaDisplay {
     this.cells = new DisplayCells(width, height);
     this.pristine = new Uint32Array(width * height);
     this.style = style;
+    this.reach = shadeReach(style);
     sink.resize(width * style.scale, height * style.scale);
   }
 
@@ -49,6 +51,7 @@ export class ArenaDisplay {
   /** Change how the cells are drawn; the cells themselves stay. */
   setStyle(style: ShadeStyle): void {
     this.style = style;
+    this.reach = shadeReach(style);
     this.sink.resize(this.width * style.scale, this.height * style.scale);
     this.markAll();
   }
@@ -73,31 +76,29 @@ export class ArenaDisplay {
       kind[i] = c === 0 ? 0 : KIND_LEVEL;
       color[i] = c;
     }
+    this.cells.recount();
     this.markAll();
   }
 
   /**
-   * Show a whole arena (joining a game in progress). `trailTag` says which colours are
-   * trails (returning the slot) — anything else is level.
+   * Show a whole arena (joining a game in progress). `isTrail` says which colours are
+   * trails — anything else is level.
    */
-  paintSnapshot(arena: PixelGrid, trailTag: (color: string) => number | null): void {
+  paintSnapshot(arena: PixelGrid, isTrail: (color: string) => boolean): void {
     this.cells.clearAll();
     arena.forEachRun((x, y, length, color) => {
-      const tag = trailTag(color);
+      const kind = isTrail(color) ? KIND_TRAIL : KIND_LEVEL;
       const packed = packCss(color);
-      for (let i = 0; i < length; i++) {
-        if (tag === null) this.cells.set(x + i, y, KIND_LEVEL, packed);
-        else this.cells.set(x + i, y, KIND_TRAIL, packed, tag);
-      }
+      for (let i = 0; i < length; i++) this.cells.set(x + i, y, kind, packed);
     });
     this.markAll();
   }
 
-  addTrail(points: readonly { x: number; y: number }[], color: string, tag: number): void {
+  addTrail(points: readonly { x: number; y: number }[], color: string): void {
     const packed = packCss(color);
     this.run = null;
     for (const p of points) {
-      this.cells.set(p.x, p.y, KIND_TRAIL, packed, tag);
+      this.cells.set(p.x, p.y, KIND_TRAIL, packed);
       this.markPoint(p.x, p.y);
     }
   }
@@ -120,9 +121,7 @@ export class ArenaDisplay {
     const ys: [number, number][] = y0 + h > H ? [[y0, H - y0], [0, Math.min(H, y0 + h - H)]] : [[y0, h]];
     for (const [rx, rw] of xs) {
       for (const [ry, rh] of ys) {
-        for (let yy = ry; yy < ry + rh; yy++) {
-          this.cells.kind.fill(0, yy * W + rx, yy * W + rx + rw);
-        }
+        for (let yy = ry; yy < ry + rh; yy++) this.cells.clearRun(rx, yy, rw);
         this.mark(rx, ry, rx + rw - 1, ry + rh - 1);
       }
     }
@@ -170,8 +169,9 @@ export class ArenaDisplay {
     if (!this.cells.inBounds(x, y)) return;
     const run = this.run;
     if (run) {
-      const x0 = Math.min(run.x0, x - 1), x1 = Math.max(run.x1, x + 1);
-      const y0 = Math.min(run.y0, y - 1), y1 = Math.max(run.y1, y + 1);
+      const m = this.reach;
+      const x0 = Math.min(run.x0, x - m), x1 = Math.max(run.x1, x + m);
+      const y0 = Math.min(run.y0, y - m), y1 = Math.max(run.y1, y + m);
       if (x1 - x0 < RUN_SPAN && y1 - y0 < RUN_SPAN) {
         run.x0 = Math.max(0, x0);
         run.y0 = Math.max(0, y0);
@@ -185,9 +185,10 @@ export class ArenaDisplay {
 
   // Changed cells (inclusive); the neighbours' shade changes too
   private mark(x0: number, y0: number, x1: number, y1: number): Rect {
+    const m = this.reach;
     const rect: Rect = {
-      x0: Math.max(0, x0 - 1), y0: Math.max(0, y0 - 1),
-      x1: Math.min(this.width - 1, x1 + 1), y1: Math.min(this.height - 1, y1 + 1),
+      x0: Math.max(0, x0 - m), y0: Math.max(0, y0 - m),
+      x1: Math.min(this.width - 1, x1 + m), y1: Math.min(this.height - 1, y1 + m),
     };
     if (this.dirty.length >= MAX_RECTS) {
       // Too many: collapse everything into one bounding box

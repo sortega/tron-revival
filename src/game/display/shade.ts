@@ -8,24 +8,25 @@ export const KIND_EMPTY = 0;
 export const KIND_TRAIL = 1;
 export const KIND_LEVEL = 2;
 
-export type FringeMode = 'none' | 'color' | 'dark' | 'dim';
+/** One step of the fringe, outwards from the trail. */
+export interface FringeBand {
+  /** Width in sub-pixels. */
+  width: number;
+  /** The band is the trail colour multiplied by this (0 = black)... */
+  dim: number;
+  /** ...at this opacity, 0–255. */
+  alpha: number;
+}
 
 export interface ShadeStyle {
-  /** Device pixels per logical pixel in the derived layers. */
+  /** Layer pixels per logical pixel. */
   scale: number;
-  fringe: FringeMode;
-  /** Fringe width in sub-pixels (≤ scale). */
-  fringeWidth: number;
-  /** 0–255 */
-  fringeAlpha: number;
-  /** For 'dim': the fringe is the trail colour multiplied by this. */
-  fringeDim: number;
-  /** Also shade the sub-pixels that only touch a trail cell diagonally. */
-  diagonal: boolean;
-  /** Walls cast a shadow of `fringeWidth` sub-pixels down-right. */
+  /** Fringe around trails, from the trail outwards. Empty: none. */
+  bands: readonly FringeBand[];
+  /** Draw the dark trail colours (blue, purple) lighter. */
+  boost: boolean;
+  /** Walls cast a shadow down-right. */
   wallShadow: boolean;
-  /** Each slot's fringe has its own rhythm. */
-  pattern: boolean;
 }
 
 const SHADOW = packRgba(0, 0, 0, 120);
@@ -43,66 +44,149 @@ export function packCss(color: string): number {
   return packRgba((n >> 16) & 255, (n >> 8) & 255, n & 255);
 }
 
+/** CSS colour of a packed colour. */
+export function cssOf(packed: number): string {
+  return `rgba(${packed & 255}, ${(packed >> 8) & 255}, ${(packed >> 16) & 255}, ${((packed >>> 24) / 255).toFixed(3)})`;
+}
+
+/** WCAG relative luminance (0–1) of a packed colour. */
+export function luminance(packed: number): number {
+  const lin = (v: number): number => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(packed & 255) + 0.7152 * lin((packed >> 8) & 255) + 0.0722 * lin((packed >> 16) & 255);
+}
+
+/** Trail colours darker than this are lightened by `boost`. */
+export const BOOST_BELOW = 0.15;
+const BOOST_MIX = 0.3;
+
+/** The colour a trail of the given colour is drawn in. */
+export function trailColor(style: ShadeStyle, packed: number): number {
+  if (!style.boost || luminance(packed) >= BOOST_BELOW) return packed;
+  const mix = (v: number): number => Math.round(v + (255 - v) * BOOST_MIX);
+  return packRgba(mix(packed & 255), mix((packed >> 8) & 255), mix((packed >> 16) & 255), packed >>> 24);
+}
+
+/** Packed colour of a fringe band next to a trail drawn in the given packed colour. */
+export function bandColor(band: FringeBand, trail: number): number {
+  const d = band.dim;
+  const r = Math.round((trail & 255) * d);
+  const g = Math.round(((trail >> 8) & 255) * d);
+  const b = Math.round(((trail >> 16) & 255) * d);
+  return ((band.alpha << 24) | (b << 16) | (g << 8) | r) >>> 0;
+}
+
+/** Total fringe width in sub-pixels. */
+export function fringeWidth(style: ShadeStyle): number {
+  let w = 0;
+  for (const band of style.bands) w += band.width;
+  return w;
+}
+
+/** How many cells the fringe extends from a trail cell. */
+function fringeCells(style: ShadeStyle): number {
+  return Math.min(3, Math.ceil(fringeWidth(style) / style.scale));
+}
+
+/**
+ * How many cells away a trail cell can change what is drawn on a cell: the fringe, and
+ * twice that for the rule that keeps narrow gaps clear.
+ */
+export function shadeReach(style: ShadeStyle): number {
+  return Math.max(1, 2 * fringeCells(style));
+}
+
+// Distance (in cells, 1 = adjacent) to the first trail cell from cell i going by `step`
+// along a row or column, looking at most `max` cells; 0 if there is none. `room` is how
+// many cells there are before the edge of the arena in that direction.
+function trailWithin(kind: Uint8Array, i: number, step: number, max: number, room: number): number {
+  const n = max < room ? max : room;
+  for (let d = 1; d <= n; d++) {
+    if (kind[i + d * step] === KIND_TRAIL) return d;
+  }
+  return 0;
+}
+
 export class DisplayCells {
   readonly color: Uint32Array;
   readonly kind: Uint8Array;
-  /** Slot of a trail cell (for patterns). */
-  readonly tag: Uint8Array;
+  /** Trail cells per row: lets the derivation skip the rows that have no trail near. */
+  readonly rowTrails: Uint16Array;
 
   constructor(readonly width: number, readonly height: number) {
     this.color = new Uint32Array(width * height);
     this.kind = new Uint8Array(width * height);
-    this.tag = new Uint8Array(width * height);
+    this.rowTrails = new Uint16Array(height);
   }
 
   inBounds(x: number, y: number): boolean {
     return x >= 0 && y >= 0 && x < this.width && y < this.height;
   }
 
-  set(x: number, y: number, kind: number, color: number, tag = 0): void {
+  set(x: number, y: number, kind: number, color: number): void {
     if (!this.inBounds(x, y)) return;
     const i = y * this.width + x;
+    const delta = (kind === KIND_TRAIL ? 1 : 0) - (this.kind[i] === KIND_TRAIL ? 1 : 0);
+    if (delta !== 0) this.rowTrails[y] = this.rowTrails[y]! + delta;
     this.kind[i] = kind;
     this.color[i] = color;
-    this.tag[i] = tag;
   }
 
   clearCell(x: number, y: number): void {
     if (!this.inBounds(x, y)) return;
-    this.kind[y * this.width + x] = KIND_EMPTY;
+    const i = y * this.width + x;
+    if (this.kind[i] === KIND_TRAIL) this.rowTrails[y] = this.rowTrails[y]! - 1;
+    this.kind[i] = KIND_EMPTY;
+  }
+
+  /** Empty `w` cells of row `y` from column `x` (all inside the arena). */
+  clearRun(x: number, y: number, w: number): void {
+    const from = y * this.width + x;
+    let trails = 0;
+    for (let i = from; i < from + w; i++) {
+      if (this.kind[i] === KIND_TRAIL) trails++;
+      this.kind[i] = KIND_EMPTY;
+    }
+    this.rowTrails[y] = this.rowTrails[y]! - trails;
   }
 
   clearAll(): void {
     this.kind.fill(KIND_EMPTY);
+    this.rowTrails.fill(0);
+  }
+
+  /** After writing `kind` directly: count the trail cells again. */
+  recount(): void {
+    this.rowTrails.fill(0);
+    for (let y = 0; y < this.height; y++) {
+      let n = 0;
+      const row = y * this.width;
+      for (let x = 0; x < this.width; x++) if (this.kind[row + x] === KIND_TRAIL) n++;
+      this.rowTrails[y] = n;
+    }
   }
 }
 
-/** Does slot `tag`'s fringe show next to the trail cell (x, y)? */
-function patternOn(tag: number, x: number, y: number): boolean {
-  switch (tag & 3) {
-    case 0: return true;                                   // solid
-    case 1: return ((x + 2 * y) & 7) < 4;                  // dashes
-    case 2: return (x + 2 * y) % 3 === 0;                  // dots
-    default: return (((2 * x - y) % 12) + 12) % 12 < 9;    // long dashes
-  }
-}
-
-/** Packed colour of the fringe of a trail of the given packed colour. */
-export function fringeColor(style: ShadeStyle, trail: number): number {
-  const a = style.fringeAlpha << 24;
-  if (style.fringe === 'dark') return a >>> 0;
-  if (style.fringe === 'color') return ((trail & 0x00ffffff) | a) >>> 0;
-  const d = style.fringeDim;
-  const r = Math.round((trail & 255) * d);
-  const g = Math.round(((trail >> 8) & 255) * d);
-  const b = Math.round(((trail >> 16) & 255) * d);
-  return (a | (b << 16) | (g << 8) | r) >>> 0;
-}
+// Scratch: trail cells near the cell being derived (offsets in cells, and their index)
+const nearDx = new Int8Array(64);
+const nearDy = new Int8Array(64);
+const nearIndex = new Int32Array(64);
+// Scratch: which cells of the rectangle being derived have a trail cell within reach
+let nearMask = new Uint8Array(0);
 
 /**
  * Derive the picture of the cells in the rectangle (x0, y0, w, h) (which must lie inside
  * the arena) into two buffers of packed pixels, `stride` pixels per row: the level layer
  * and the trail layer. Every pixel of the (w·scale) × (h·scale) block is written.
+ *
+ * A sub-pixel of an empty cell is fringe if its distance to the nearest trail cell
+ * (Chebyshev, in sub-pixels; 1 = touching) is within the bands; orthogonal neighbours win
+ * ties. The fringe never covers a wall or another trail, and **a gap is never closed**:
+ * a free cell with trail on both sides of it (left and right, or above and below) no
+ * further apart than two fringes gets no fringe at all, so every gap between trails,
+ * however narrow, keeps at least one cell exactly as it is without shade.
  */
 export function shadeCells(
   cells: DisplayCells, style: ShadeStyle,
@@ -111,11 +195,43 @@ export function shadeCells(
   stride = w * style.scale,
 ): void {
   const S = style.scale;
-  const f = Math.min(style.fringeWidth, S);
   const W = cells.width;
   const H = cells.height;
-  const { kind, color, tag } = cells;
-  const fringed = style.fringe !== 'none' && f > 0;
+  const { kind, color, rowTrails } = cells;
+  const bands = style.bands;
+  const reach = fringeWidth(style);
+  const R = fringeCells(style);   // Cells to look around (7×7 at most)
+  const shadowWidth = Math.ceil(S / 2);
+
+  // Band colours of the trail colour seen last (trails come in long same-coloured runs)
+  let cachedFor = -1;
+  let cachedCore = 0;
+  const cachedBands: number[] = bands.map(() => 0);
+  const prepare = (c: number): void => {
+    if (c === cachedFor) return;
+    cachedFor = c;
+    cachedCore = trailColor(style, c);
+    for (let b = 0; b < bands.length; b++) cachedBands[b] = bandColor(bands[b]!, cachedCore);
+  };
+
+  // Mark the cells within reach of a trail cell: only those need the search below. Most
+  // of the arena is far from any trail, and many rows have none at all.
+  if (nearMask.length < w * h) nearMask = new Uint8Array(w * h);
+  const mask = nearMask;
+  mask.fill(0, 0, w * h);
+  if (R > 0) {
+    const xFrom = Math.max(0, x0 - R), xTo = Math.min(W - 1, x0 + w - 1 + R);
+    for (let yy = Math.max(0, y0 - R); yy <= Math.min(H - 1, y0 + h - 1 + R); yy++) {
+      if (rowTrails[yy] === 0) continue;
+      const row = yy * W;
+      for (let xx = xFrom; xx <= xTo; xx++) {
+        if (kind[row + xx] !== KIND_TRAIL) continue;
+        const my0 = Math.max(0, yy - R - y0), my1 = Math.min(h - 1, yy + R - y0);
+        const mx0 = Math.max(0, xx - R - x0), mx1 = Math.min(w - 1, xx + R - x0);
+        for (let my = my0; my <= my1; my++) mask.fill(1, my * w + mx0, my * w + mx1 + 1);
+      }
+    }
+  }
 
   for (let cy = 0; cy < h; cy++) {
     const y = y0 + cy;
@@ -126,9 +242,14 @@ export function shadeCells(
       const base = cy * S * stride + cx * S;
 
       if (k !== KIND_EMPTY) {
-        const c = color[i]!;
-        const level = k === KIND_LEVEL ? c : 0;
-        const trail = k === KIND_TRAIL ? c : 0;
+        let level = 0;
+        let trail = 0;
+        if (k === KIND_LEVEL) {
+          level = color[i]!;
+        } else {
+          prepare(color[i]!);
+          trail = cachedCore;
+        }
         for (let sy = 0; sy < S; sy++) {
           const o = base + sy * stride;
           for (let sx = 0; sx < S; sx++) {
@@ -139,19 +260,47 @@ export function shadeCells(
         continue;
       }
 
-      // Empty cell: its sub-pixels may carry the shade of the neighbours.
-      // Neighbour kinds (0 outside the arena): l, r, u, d and the four diagonals.
-      const hasL = x > 0, hasR = x < W - 1, hasU = y > 0, hasD = y < H - 1;
-      const kl = hasL ? kind[i - 1]! : 0;
-      const kr = hasR ? kind[i + 1]! : 0;
-      const ku = hasU ? kind[i - W]! : 0;
-      const kd = hasD ? kind[i + W]! : 0;
-      const kul = hasU && hasL ? kind[i - W - 1]! : 0;
-      const kur = hasU && hasR ? kind[i - W + 1]! : 0;
-      const kdl = hasD && hasL ? kind[i + W - 1]! : 0;
-      const kdr = hasD && hasR ? kind[i + W + 1]! : 0;
+      // Empty cell: collect the trail cells within reach, nearest ring first and
+      // orthogonal before diagonal, so that the first one found at a distance wins
+      let near = 0;
+      if (mask[cy * w + cx] !== 0) {
+        for (let ring = 1; ring <= R; ring++) {
+          for (let pass = 0; pass < 2; pass++) {
+            for (let dy = -ring; dy <= ring; dy++) {
+              const yy = y + dy;
+              if (yy < 0 || yy >= H) continue;
+              for (let dx = -ring; dx <= ring; dx++) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+                const orthogonal = dx === 0 || dy === 0;
+                if (orthogonal !== (pass === 0)) continue;
+                const xx = x + dx;
+                if (xx < 0 || xx >= W) continue;
+                const n = yy * W + xx;
+                if (kind[n] === KIND_TRAIL && near < 64) {
+                  nearDx[near] = dx;
+                  nearDy[near] = dy;
+                  nearIndex[near] = n;
+                  near++;
+                }
+              }
+            }
+          }
+        }
+      }
+      // In a gap between trails no wider than two fringes: leave it clear
+      if (near > 0) {
+        const l = trailWithin(kind, i, -1, 2 * R, x);
+        const r = l > 0 ? trailWithin(kind, i, 1, 2 * R, W - 1 - x) : 0;
+        const u = trailWithin(kind, i, -W, 2 * R, y);
+        const d = u > 0 ? trailWithin(kind, i, W, 2 * R, H - 1 - y) : 0;
+        if ((r > 0 && l + r - 1 <= 2 * R) || (d > 0 && u + d - 1 <= 2 * R)) near = 0;
+      }
+      // Wall shadow, cast down-right: walls up, left and up-left
+      const wallL = style.wallShadow && x > 0 && kind[i - 1] === KIND_LEVEL;
+      const wallU = style.wallShadow && y > 0 && kind[i - W] === KIND_LEVEL;
+      const wallUL = style.wallShadow && x > 0 && y > 0 && kind[i - W - 1] === KIND_LEVEL;
 
-      if ((kl | kr | ku | kd | kul | kur | kdl | kdr) === 0) {
+      if (near === 0 && !wallL && !wallU && !wallUL) {
         for (let sy = 0; sy < S; sy++) {
           const o = base + sy * stride;
           for (let sx = 0; sx < S; sx++) {
@@ -163,42 +312,41 @@ export function shadeCells(
       }
 
       for (let sy = 0; sy < S; sy++) {
-        const up = sy < f, down = sy >= S - f;
         const o = base + sy * stride;
         for (let sx = 0; sx < S; sx++) {
-          const left = sx < f, right = sx >= S - f;
-
-          // Trail fringe: the first trail neighbour this sub-pixel touches
-          let n = -1;
-          if (fringed) {
-            if (left && kl === KIND_TRAIL) n = i - 1;
-            else if (right && kr === KIND_TRAIL) n = i + 1;
-            else if (up && ku === KIND_TRAIL) n = i - W;
-            else if (down && kd === KIND_TRAIL) n = i + W;
-            else if (style.diagonal) {
-              if (up && left && kul === KIND_TRAIL) n = i - W - 1;
-              else if (up && right && kur === KIND_TRAIL) n = i - W + 1;
-              else if (down && left && kdl === KIND_TRAIL) n = i + W - 1;
-              else if (down && right && kdr === KIND_TRAIL) n = i + W + 1;
+          // Distance in sub-pixels to each trail cell within reach; keep the nearest
+          let best = reach + 1;
+          let bestIndex = -1;
+          for (let t = 0; t < near; t++) {
+            const dx = nearDx[t]!;
+            const dy = nearDy[t]!;
+            const ddx = dx < 0 ? sx + 1 + (-dx - 1) * S : dx > 0 ? S - sx + (dx - 1) * S : 0;
+            const ddy = dy < 0 ? sy + 1 + (-dy - 1) * S : dy > 0 ? S - sy + (dy - 1) * S : 0;
+            const d = ddx > ddy ? ddx : ddy;
+            if (d < best) {
+              best = d;
+              bestIndex = nearIndex[t]!;
             }
-            if (n >= 0 && style.pattern && !patternOn(tag[n]!, n % W, (n / W) | 0)) n = -1;
           }
-          outTrail[o + sx] = n >= 0 ? fringeColor(style, color[n]!) : 0;
+          let pixel = 0;
+          if (bestIndex >= 0) {
+            prepare(color[bestIndex]!);
+            let edge = 0;
+            for (let b = 0; b < bands.length; b++) {
+              edge += bands[b]!.width;
+              if (best <= edge) {
+                pixel = cachedBands[b]!;
+                break;
+              }
+            }
+          }
+          outTrail[o + sx] = pixel;
 
-          // Wall shadow, cast down-right
-          let shadow = false;
-          if (style.wallShadow) {
-            shadow = (left && kl === KIND_LEVEL) || (up && ku === KIND_LEVEL)
-              || (left && up && kul === KIND_LEVEL);
-          }
+          const shadow = (wallL && sx < shadowWidth) || (wallU && sy < shadowWidth)
+            || (wallUL && sx < shadowWidth && sy < shadowWidth);
           outLevel[o + sx] = shadow ? SHADOW : 0;
         }
       }
     }
   }
-}
-
-/** CSS colour of a packed colour. */
-export function cssOf(packed: number): string {
-  return `rgba(${packed & 255}, ${(packed >> 8) & 255}, ${(packed >> 16) & 255}, ${((packed >>> 24) / 255).toFixed(3)})`;
 }
