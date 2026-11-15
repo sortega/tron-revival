@@ -3,7 +3,8 @@
 
 import type { Screen, ScreenManager } from './ScreenManager';
 import { getSlotColor } from '../types/lobby';
-import { LEVELS } from '../types/game';
+import { normalizeLevelMode } from '../game/levelMode';
+import { bindLevelPicker, levelPickerHtml } from './levelPicker';
 import { CONTROL_SCHEMES } from '../game/input/controlSchemes';
 import { SLOTS, SLOT_KINDS, assignSchemes, buildLocalConfig, canStartLocal, defaultLocalSetup } from '../game/localSetup';
 import type { LocalSetupState, LocalSlotKind } from '../game/localSetup';
@@ -21,8 +22,7 @@ function loadSetup(): LocalSetupState {
         return {
           slots: parsed.slots,
           gameMode: parsed.gameMode === 'team' ? 'team' : 'ffa',
-          levelMode: parsed.levelMode === 'cycle' || LEVELS.some(l => l.id === parsed.levelMode)
-            ? parsed.levelMode! : 'cycle',
+          levelMode: normalizeLevelMode(parsed.levelMode),
         };
       }
     }
@@ -79,11 +79,7 @@ export class LocalSetup implements Screen {
           </div>
 
           <label style="color: #888; display: block; margin: 1rem 0 0.5rem;">Level:</label>
-          <select id="levelSelect" style="width: 100%; padding: 0.5rem; font-family: monospace; background: #000;
-                      color: #0ff; border: 1px solid #0ff; cursor: pointer;">
-            <option value="cycle" ${setup.levelMode === 'cycle' ? 'selected' : ''}>Cycle All</option>
-            ${LEVELS.map(l => `<option value="${l.id}" ${setup.levelMode === l.id ? 'selected' : ''}>${l.name}</option>`).join('')}
-          </select>
+          ${levelPickerHtml(setup.levelMode, true)}
 
           <button id="startBtn" ${canStart ? '' : 'disabled'} style="width: 100%; margin-top: 1.25rem; padding: 1rem;
                       font-size: 1.1rem; font-family: monospace;
@@ -107,8 +103,8 @@ export class LocalSetup implements Screen {
     }
     document.getElementById('ffaBtn')?.addEventListener('click', () => { setup.gameMode = 'ffa'; this.update(); });
     document.getElementById('teamBtn')?.addEventListener('click', () => { setup.gameMode = 'team'; this.update(); });
-    document.getElementById('levelSelect')?.addEventListener('change', (e) => {
-      setup.levelMode = (e.target as HTMLSelectElement).value;
+    bindLevelPicker(() => setup.levelMode, (mode) => {
+      setup.levelMode = mode;
       this.update();
     });
     document.getElementById('startBtn')?.addEventListener('click', () => {

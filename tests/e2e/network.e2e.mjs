@@ -149,7 +149,7 @@ try {
   check('same room', (await guest.textContent('#roomCode')).trim() === code);
   await guest.waitForSelector('#leaveSlot1', { timeout: 15000 });
   check('seats are kept', true);
-  await host.selectOption('#levelSelect', 'bricks');
+  await host.click('#level-bricks');   // From "all": only this level
   await host.waitForFunction(() => !document.querySelector('#startGameBtn')?.disabled, null, { timeout: 15000 });
   await host.click('#startGameBtn');
   await Promise.all([inGame(host), inGame(guest)]);

@@ -145,7 +145,12 @@ Main menu → **LOCAL GAME** opens a setup screen:
 - Four slot rows (slot colours as in network games). Each slot is one of
   `Off` · `Human` (+ control scheme) · `AI Easy` · `AI Normal` · `AI Hard`.
 - Game mode: FFA (≥ 2 active slots) or Teams (all 4 slots active).
-- Level: Cycle All or a specific level.
+- Levels: every level in turn, one level, or **a chosen few** played in turn (in the order
+  of the level list). The picker is one chip per level plus ALL: with all on, tapping a
+  level means "only this one"; after that a tap adds or removes a level (the last one
+  stays). The same picker is in the network lobby, for the host. The choice is the
+  `levelMode` string: `'cycle'`, a level id, or ids separated by commas
+  (`src/game/levelMode.ts`).
 - START (disabled until the mode's player count is met) and BACK.
 - The last configuration is remembered in `localStorage`.
 - Default: slot 0 Human (`solo`), slot 1 AI Normal, others Off.

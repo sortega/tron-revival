@@ -1,5 +1,6 @@
 // TronGameState - Host-authoritative game state manager
 
+import { levelIndices, nextLevelIndex } from './levelMode';
 import type { SlotIndex, GameMode, LevelMode } from '../types/lobby';
 import type {
   TronRoundState,
@@ -257,13 +258,8 @@ export class TronGameState {
     this.gameMode = gameMode;
     this.levelMode = levelMode;
 
-    // Set initial level based on levelMode
-    if (levelMode !== 'cycle') {
-      const levelIndex = LEVELS.findIndex(l => l.id === levelMode);
-      if (levelIndex >= 0) {
-        this.currentLevelIndex = levelIndex;
-      }
-    }
+    // The first of the chosen levels
+    this.currentLevelIndex = levelIndices(levelMode)[0]!;
 
     // Initialize scores and ridiculous death counts
     for (const config of playerConfigs) {
@@ -1680,10 +1676,8 @@ export class TronGameState {
     // Check if all players are ready
     if (this.playersReady.size >= this.players.length) {
       this.currentRound++;
-      // Only cycle levels if levelMode is 'cycle', otherwise keep same level
-      if (this.levelMode === 'cycle') {
-        this.currentLevelIndex = (this.currentLevelIndex + 1) % LEVELS.length;
-      }
+      // On to the next of the chosen levels (the same one if there is only one)
+      this.currentLevelIndex = nextLevelIndex(this.levelMode, this.currentLevelIndex);
       this.initRound();
     }
   }

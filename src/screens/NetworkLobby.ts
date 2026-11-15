@@ -9,7 +9,7 @@ import { DEBUG_LAG, LaggedTransport } from '../network/LaggedTransport';
 import type { LobbyState, SlotIndex, GameMode } from '../types/lobby';
 import { getSlotColor, canStartGame, getFilledSlotCount } from '../types/lobby';
 import type { BotDifficulty } from '../types/game';
-import { LEVELS } from '../types/game';
+import { bindLevelPicker, levelPickerHtml } from './levelPicker';
 import type { GameSession } from '../game/session/GameSession';
 import { createHostSession } from '../game/session/WorkerHostSession';
 import { GuestSession } from '../game/session/GuestSession';
@@ -200,11 +200,6 @@ export class NetworkLobby implements Screen {
     const levelMode = state?.levelMode ?? 'cycle';
     const canStart = state !== null && canStartGame(state);
 
-    const levelOptions = editable
-      ? `<option value="cycle" ${levelMode === 'cycle' ? 'selected' : ''}>Cycle All</option>
-         ${LEVELS.map(l => `<option value="${l.id}" ${levelMode === l.id ? 'selected' : ''}>${escapeHtml(l.name)}</option>`).join('')}`
-      : `<option>${state ? escapeHtml(levelMode === 'cycle' ? 'Cycle All' : LEVELS.find(l => l.id === levelMode)?.name ?? levelMode) : 'Loading...'}</option>`;
-
     let action: string;
     if (!state) {
       action = `<div style="background: #110; padding: 1rem; border: 1px solid #440; border-radius: 4px; color: #ff0; text-align: center; margin-bottom: 0.5rem;">Connecting to room...</div>`;
@@ -238,8 +233,7 @@ export class NetworkLobby implements Screen {
 
       <div style="margin-bottom: 1rem;">
         <label style="${LABEL}">Level:</label>
-        <select id="levelSelect" ${editable ? '' : 'disabled'} style="width: 100%; ${FIELD}
-          ${editable ? 'cursor: pointer;' : 'color: #666; border-color: #333; cursor: not-allowed;'}">${levelOptions}</select>
+        ${state ? levelPickerHtml(levelMode, editable) : '<div style="color: #666;">Loading...</div>'}
       </div>
 
       <div style="margin-bottom: 1rem;">
@@ -271,9 +265,7 @@ export class NetworkLobby implements Screen {
 
     document.getElementById('ffaBtn')?.addEventListener('click', () => this.room.setGameMode('ffa'));
     document.getElementById('teamBtn')?.addEventListener('click', () => this.room.setGameMode('team'));
-    document.getElementById('levelSelect')?.addEventListener('change', (e) => {
-      this.room.setLevelMode((e.target as HTMLSelectElement).value);
-    });
+    bindLevelPicker(() => this.lobbyState?.levelMode ?? 'cycle', (mode) => this.room.setLevelMode(mode));
     document.getElementById('nicknameInput')?.addEventListener('change', (e) => {
       const nickname = (e.target as HTMLInputElement).value.trim();
       if (nickname) this.setNickname(nickname);

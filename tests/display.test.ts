@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { ArenaDisplay } from '../src/game/display/ArenaDisplay';
 import type { LayerSink } from '../src/game/display/ArenaDisplay';
-import { DisplayCells, KIND_LEVEL, KIND_TRAIL, luminance, packCss, packRgba, shadeCells } from '../src/game/display/shade';
+import { DisplayCells, KIND_LEVEL, KIND_TRAIL, packCss, packRgba, shadeCells } from '../src/game/display/shade';
 import type { ShadeStyle } from '../src/game/display/shade';
-import { styleFor } from '../src/game/display/settings';
+import { SOFT } from '../src/game/display/settings';
 import { PixelGrid } from '../src/game/PixelGrid';
 import { PLAY_WIDTH, PLAY_HEIGHT } from '../src/game/constants';
 import { createRng } from '../src/game/rng';
@@ -41,11 +41,9 @@ class MemorySink implements LayerSink {
   }
 }
 
-const SOFT = styleFor(false);      // Dark levels: the one look of the game
-const DARK_EDGE = styleFor(true);  // Light levels (Paper)
 /** No shade at all: only used here, to tell the cells from what is derived from them. */
 const PLAIN: ShadeStyle = { scale: 1, bands: [] };
-const STYLES: [string, ShadeStyle][] = [['soft', SOFT], ['dark edge', DARK_EDGE], ['plain', PLAIN]];
+const STYLES: [string, ShadeStyle][] = [['soft', SOFT], ['plain', PLAIN]];
 
 /** The picture derived from scratch from the cells of a display. */
 function fromScratch(display: ArenaDisplay, style: ShadeStyle): { level: Uint32Array; trail: Uint32Array } {
@@ -95,8 +93,8 @@ describe('soft trails', () => {
         expect(Math.max(Math.abs(x - 8), Math.abs(y - 8))).toBeLessThanOrEqual(1);
         if (x === 8 && y === 8) continue;
         expect(rgbOf(pixel)).toBe(rgbOf(core));
-        expect(alphaOf(pixel)).toBeGreaterThan(0.03);
-        expect(alphaOf(pixel)).toBeLessThan(0.6);
+        expect(alphaOf(pixel)).toBeGreaterThan(0.02);
+        expect(alphaOf(pixel)).toBeLessThan(0.35);
       }
     }
     expect(lit).toBe(9);
@@ -111,20 +109,13 @@ describe('soft trails', () => {
     const notch = alphaOf(at(diagonal, 8, 7));   // Touches (7,7) from the right and (8,8) from above
     expect(notch).toBeGreaterThan(beside);
     // Subtle either way: never close to solid
-    expect(beside).toBeGreaterThan(0.2);
-    expect(beside).toBeLessThan(0.45);
-    expect(notch).toBeLessThanOrEqual(0.5);
-  });
-
-  it('on a light level the edge is opaque and much darker than the trail', () => {
-    const trail = derive([[8, 8]], DARK_EDGE);
-    const edge = at(trail, 7, 8);
-    expect(edge >>> 24).toBe(255);
-    expect(luminance(edge)).toBeLessThan(luminance(core) * 0.3);
+    expect(beside).toBeGreaterThan(0.1);
+    expect(beside).toBeLessThan(0.25);
+    expect(notch).toBeLessThanOrEqual(0.31);
   });
 
   it('a gap between two trails is never closed by the shade, however narrow', () => {
-    for (const [name, style] of STYLES.slice(0, 2)) {
+    for (const [name, style] of STYLES.slice(0, 1)) {
       for (let gap = 1; gap <= 4; gap++) {
         for (const vertical of [false, true]) {
           // Two parallel trails with `gap` free cells between them
@@ -226,17 +217,6 @@ describe('ArenaDisplay', () => {
     }
     display.flush();
     expect(display.lastFlushCells).toBeLessThanOrEqual(4 * 36);
-  });
-
-  it('a level with another background re-derives the same cells in its style', () => {
-    const sink = new MemorySink();
-    const display = new ArenaDisplay(PLAY_WIDTH, PLAY_HEIGHT, sink, SOFT);
-    display.addTrail([{ x: 10, y: 10 }, { x: 11, y: 10 }], RED);
-    display.flush();
-    display.setStyle(DARK_EDGE);
-    display.flush();
-    expect(same(sink.trail, fromScratch(display, DARK_EDGE).trail)).toBe(true);
-    expect(sink.trail[10 * PLAY_WIDTH + 9]! >>> 24).toBe(255);
   });
 
   it('new round / eraser: undamaged level, no trails; a late level image keeps the trails', () => {

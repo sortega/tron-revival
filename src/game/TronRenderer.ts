@@ -10,7 +10,7 @@ import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
 import { PixelGrid } from './PixelGrid';
 import { ArenaDisplay, CanvasLayerSink } from './display/ArenaDisplay';
-import { styleFor } from './display/settings';
+import { SOFT } from './display/settings';
 import { SpriteAtlas } from '../sprites';
 import { SPRITE_HASH } from './spriteHash';
 
@@ -33,7 +33,7 @@ export class TronRenderer {
   // apart from the collision bitmap (design/display-layer.md)
   private readonly layers: CanvasLayerSink;
   private readonly display: ArenaDisplay;
-  private lightBackground = false;  // The level's background is light: dark shade and halo
+  private lightBackground = false;  // The level's background is light: heads and tracers need dark on it
   private backgroundImage: HTMLImageElement | null = null;  // Display only, never a wall
   private backgroundCanvas: HTMLCanvasElement | null = null;  // The image at the display scale
   private backgroundKey = '';
@@ -136,7 +136,7 @@ export class TronRenderer {
     this.sidebarCtx.imageSmoothingEnabled = false;  // Like the main canvas
 
     this.layers = new CanvasLayerSink();
-    this.display = new ArenaDisplay(PLAY_WIDTH, PLAY_HEIGHT, this.layers, styleFor(false));
+    this.display = new ArenaDisplay(PLAY_WIDTH, PLAY_HEIGHT, this.layers, SOFT);
 
     // Load sprite atlas asynchronously - rendering methods check isLoaded() and
     // gracefully skip drawing if sprites aren't ready yet. The countdown phase
@@ -429,10 +429,7 @@ export class TronRenderer {
     });
 
     // Display-only background: never read for collisions
-    if (this.lightBackground !== !!level.lightBackground) {
-      this.lightBackground = !!level.lightBackground;
-      this.display.setStyle(styleFor(this.lightBackground));
-    }
+    this.lightBackground = !!level.lightBackground;
     this.backgroundImage = null;
     if (level.backgroundPath) {
       const background = new Image();

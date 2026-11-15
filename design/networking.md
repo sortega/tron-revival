@@ -120,7 +120,7 @@ interface Profile {
 interface SharedRoom {
   hostId: string;                       // userId of the host
   gameMode: 'ffa' | 'team';
-  levelMode: string;                    // 'cycle' or a level id
+  levelMode: string;                    // 'cycle', a level id, or ids separated by commas
   slots: (SlotEntry | null)[];          // 4 entries
   phase: 'lobby' | 'game';
   gameId: number;                       // incremented on every game start

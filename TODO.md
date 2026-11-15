@@ -265,6 +265,9 @@ Design: `design/display-layer.md`.
       iPhone and scrapped (variants, URL parameters, chips, keys, lab tool, pictures)
 - [x] One look: hard 1 px trail softened by semi-transparent pixels of its colour (more in
       the notches of slanted trails); head = solid white pixel with a faint twinkling glow
+- [x] Shade halved (12 % / 3 %, at most 30 %) and the same on every background (it blends);
+      no dark edge on light levels
+- [x] Level picker: any subset of levels, played in turn (local set-up and network lobby)
 - [ ] **Owner: look at it on the iPhone**; tune the opacities in `display/settings.ts` and
       the twinkle in `TronRenderer.drawPlayerHead`
 - [ ] Remove what the derivation no longer needs (several bands, 2× layers)

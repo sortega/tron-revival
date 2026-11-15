@@ -7,6 +7,8 @@ import type { SlotIndex } from '../src/types/lobby';
 import type { TronInput } from '../src/types/game';
 import { inputs, loadLevelGrid, makeGame, place, skipCountdown } from './helpers';
 import { describeDeath } from '../src/game/deathLabels';
+import { describeLevels, normalizeLevelMode, toggleLevel } from '../src/game/levelMode';
+import { LEVEL_DEFINITIONS } from '../src/types/game';
 
 function wallLevel(): PixelGrid {
   const level = new PixelGrid();
@@ -211,6 +213,43 @@ describe('death', () => {
     expect(state.alive).toBe(false);
     expect(state.equippedWeapon).toBeNull();
     expect(state.activeEffects).toEqual([]);
+  });
+});
+
+describe('level selection', () => {
+  const levelsPlayed = (mode: string, rounds: number): string[] => {
+    const game = makeGame(2, 1, { level: mode });
+    const played: string[] = [];
+    for (let i = 0; i < rounds; i++) {
+      played.push(LEVEL_DEFINITIONS[game.currentLevelIndex]!.id);
+      skipCountdown(game);
+      finishRoundAndReady(game);
+    }
+    return played;
+  };
+
+  it('cycles through every level, stays on a single one, or cycles through a chosen few', () => {
+    const all = LEVEL_DEFINITIONS.map(l => l.id);
+    expect(levelsPlayed('cycle', all.length + 1)).toEqual([...all, all[0]]);
+    expect(levelsPlayed('bus', 3)).toEqual(['bus', 'bus', 'bus']);
+    // In the order of the level list, whatever the order they were chosen in
+    expect(levelsPlayed('selva,blank,bus', 5)).toEqual(['blank', 'selva', 'bus', 'blank', 'selva']);
+    // Unknown ids are ignored; nothing valid means every level
+    expect(levelsPlayed('nope,bricks', 2)).toEqual(['bricks', 'bricks']);
+    expect(levelsPlayed('nope', 2)).toEqual(all.slice(0, 2));
+  });
+
+  it('the picker: a tap on "all" means only that level, then levels are added and removed', () => {
+    expect(toggleLevel('cycle', 'bricks')).toBe('bricks');
+    expect(toggleLevel('bricks', 'blank')).toBe('blank,bricks');
+    expect(toggleLevel('blank,bricks', 'blank')).toBe('bricks');
+    expect(toggleLevel('bricks', 'bricks')).toBe('bricks');   // The last one stays
+    const allButOne = LEVEL_DEFINITIONS.slice(1).map(l => l.id).join(',');
+    expect(toggleLevel(allButOne, LEVEL_DEFINITIONS[0]!.id)).toBe('cycle');
+    expect(normalizeLevelMode('bus,nope,blank')).toBe('blank,bus');
+    expect(normalizeLevelMode(undefined)).toBe('cycle');
+    expect(describeLevels('cycle')).toBe('All levels');
+    expect(describeLevels('bus,blank')).toBe('Blank, Bus');
   });
 });
 

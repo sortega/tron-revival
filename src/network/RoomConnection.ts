@@ -2,6 +2,7 @@
 // Lobby state lives in Trystero's synchronised state; the host reconciles player
 // profiles into seats. See design/networking.md.
 
+import { normalizeLevelMode } from '../game/levelMode';
 import { joinRoom, createUserIdentity, exportUserIdentity, importUserIdentity } from 'trystero';
 import type { MessageAction, RequestAction, Room, RoomError, SharedState, UserIdentity, UserState } from 'trystero';
 import type { ChatMessage, GameMode, LevelMode, LobbyState, SlotIndex } from '../types/lobby';
@@ -480,7 +481,7 @@ export class RoomConnection {
   }
 
   setLevelMode(levelMode: LevelMode): void {
-    this.updateRoom(room => ({ ...room, levelMode }));
+    this.updateRoom(room => ({ ...room, levelMode: normalizeLevelMode(levelMode) }));
   }
 
   addBot(slotIndex: SlotIndex, difficulty: BotDifficulty): void {
