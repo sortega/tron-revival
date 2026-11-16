@@ -11,6 +11,8 @@ High-level architecture of the web revival of Teratron. Detailed designs:
 - [teams.md](./teams.md) — team mode: scoring and how it is shown
 - [spectators.md](./spectators.md) — watching a game, the join code on the game screen, joining from the next round
 - [touch-controls.md](./touch-controls.md) — steering on phones
+- [screen-layout.md](./screen-layout.md) — menu, local set-up and lobby on a desktop and on a
+  phone held either way
 - [display-layer.md](./display-layer.md) — the display bitmap, kept apart from the collision
   bitmap: trail shade, head markers, levels with a background
 - [refactoring-proposal-effects-weapons.md](./refactoring-proposal-effects-weapons.md) — pending
@@ -39,7 +41,7 @@ High-level architecture of the web revival of Teratron. Detailed designs:
 ## Layers
 
 ```
-screens/            MainMenu · LocalSetup · NetworkLobby          (DOM)
+screens/            MainMenu · LocalSetup · NetworkLobby          (DOM; styles in screens.css)
 game/TronGame       game screen: layout, InputManager, TronRenderer, sound, Ticker
         │  GameSession interface
 game/session/       HostSession (authoritative; local games + network host, runs bots)

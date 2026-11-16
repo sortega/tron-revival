@@ -364,7 +364,27 @@ try {
   await phone.setViewportSize({ width: 390, height: 844 });
   await phone.waitForTimeout(300);
   await shot(phone, 'phone-lobby-spectators', true);
+  // Lobby layout on a phone (design/screen-layout.md): nothing wider than the screen,
+  // controls big enough for a finger, text fields that iOS does not zoom into
+  const lobbyLayout = (page) => page.evaluate(() => {
+    const shown = [...document.querySelectorAll('#app button, #app input, #app select')].filter(el => el.getClientRects().length > 0);
+    return {
+      fits: document.documentElement.scrollWidth <= window.innerWidth,
+      small: shown.filter(el => el.getBoundingClientRect().height < 40).map(el => el.id),
+      tinyText: shown.filter(el => el.tagName !== 'BUTTON' && parseFloat(window.getComputedStyle(el).fontSize) < 16).map(el => el.id),
+      columns: new Set(['playersPanel', 'chatPanel', 'roomSection'].map(id => Math.round(document.getElementById(id).getBoundingClientRect().left))).size,
+    };
+  });
+  const lobbyOk = (l, columns) => l.fits && l.small.length === 0 && l.tinyText.length === 0 && l.columns === columns;
+  const upright = await lobbyLayout(phone);
+  check('phone lobby upright: one column, fits, finger-sized controls', lobbyOk(upright, 1), JSON.stringify(upright));
+  await phone.setViewportSize({ width: 360, height: 640 });
+  const smallPhone = await lobbyLayout(phone);
+  check('phone lobby on a small phone fits too', lobbyOk(smallPhone, 1), JSON.stringify(smallPhone));
   await phone.setViewportSize(PHONE.viewport);
+  const sideways = await lobbyLayout(phone);
+  check('phone lobby on its side: two columns, fits, finger-sized controls', lobbyOk(sideways, 2), JSON.stringify(sideways));
+  await shot(phone, 'phone-lobby-spectators-landscape', true);
 
   // --- A new game: spectators go straight to their view ---
   await host.waitForFunction(() => !document.querySelector('#startGameBtn')?.disabled, null, { timeout: 15000 });

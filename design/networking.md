@@ -98,7 +98,7 @@ which also block most online games.
 
 - Room codes are three short words (`red-bear-moon`); the shareable link is
   `…/?room=red-bear-moon`. The lobby shows the code, copy buttons and a **QR code** of the
-  link for phones.
+  link for phones (a tap on it makes it bigger).
 - The room code stays in the URL while the player is in the room, so **a reload rejoins the
   same room** with the same identity. It is removed when the player leaves deliberately.
 - `appId` includes a protocol version (`teratron/v3`) so incompatible builds never meet.
@@ -106,6 +106,9 @@ which also block most online games.
   ([spectators.md](./spectators.md)).
 
 ## Lobby
+
+How the lobby is laid out on a desktop and on a phone held either way, and which parts of
+it are rebuilt when the room changes: [screen-layout.md](./screen-layout.md).
 
 ### Shared state
 

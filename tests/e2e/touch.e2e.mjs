@@ -36,6 +36,34 @@ try {
     if (!localStorage.getItem('teratron-touch-mode')) localStorage.setItem('teratron-touch-mode', 'buttons');
   });
   await page.goto(baseUrl);
+
+  // Menu screens on a phone, upright and on its side (design/screen-layout.md): nothing
+  // wider than the screen, controls big enough for a finger, text fields iOS does not zoom
+  // into. In browsers of their own: resizing the one that plays leaves it pannable.
+  const screens = [['main menu', '#networkGameBtn'], ['join by code', '#joinRoomBtn'], ['local set-up', '#localGameBtn']];
+  for (const viewport of [{ width: 360, height: 640 }, { width: 844, height: 390 }]) {
+    const menuContext = await browser.newContext({ viewport, hasTouch: true, isMobile: true });
+    const menu = await menuContext.newPage();
+    await menu.goto(baseUrl);
+    for (const [name, opener] of screens) {
+      await menu.tap(opener);
+      const l = await menu.evaluate(() => {
+        const shown = [...document.querySelectorAll('#app button, #app input, #app select')].filter(el => el.getClientRects().length > 0);
+        return {
+          fits: document.documentElement.scrollWidth <= window.innerWidth,
+          small: shown.filter(el => el.getBoundingClientRect().height < 40).map(el => el.id),
+          tinyText: shown.filter(el => el.tagName !== 'BUTTON' && parseFloat(window.getComputedStyle(el).fontSize) < 16).map(el => el.id),
+        };
+      });
+      const ok = l.fits && l.small.length === 0 && l.tinyText.length === 0;
+      check(`${name} fits a ${viewport.width}x${viewport.height} phone`, ok, ok ? '' : JSON.stringify(l));
+    }
+    const startBox = await menu.locator('#startBtn').boundingBox();
+    check(`local START button in view without scrolling at ${viewport.width}x${viewport.height}`,
+      startBox.y >= 0 && startBox.y + startBox.height <= viewport.height, `y ${Math.round(startBox.y)}`);
+    await menuContext.close();
+  }
+
   await page.tap('#localGameBtn');
   await page.tap('#startBtn');
   await page.waitForSelector('#steerZone');

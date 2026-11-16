@@ -19,6 +19,12 @@ a real device
       tune it, remove the losers (and nipplejs with the old stick)
 - [ ] **Display on the iPhone**: tune the opacities in `display/settings.ts` and the
       twinkle in `TronRenderer.drawPlayerHead`
+- [ ] **Menu, local set-up and lobby on the iPhone** (`design/screen-layout.md`; checked
+      only in headless Chrome at phone sizes): both orientations in Safari — nothing cut
+      off beside the notch or under the tool bars, no zoom when a field gets the focus,
+      the keyboard stays open while chat messages arrive and after SEND, the chat field
+      stays above the keyboard, the sticky START button sits right above Safari's bottom
+      bar, the small QR code scans (a tap enlarges it)
 - [ ] **Performance on real phones** (list at the end of `design/research/performance.md`):
       low-end Android hosting 3 hard bots on Portals, a firefight, iOS Safari, a 120 Hz
       screen, heat. If bot spikes show inside the worker: cap the bot plans per tick
@@ -92,6 +98,11 @@ Design: `design/display-layer.md`.
 
 ## Code and tooling
 
+- [ ] The game screen is not part of the phone layout pass: its results / round summary
+      and menus were not checked at phone sizes in both orientations
+- [ ] Lobby on a phone: the players panel is still rebuilt on every room change (a tap
+      that straddles one is lost); a share button using `navigator.share` next to the
+      copy buttons; chat is a scroll away from the seats when upright
 - [ ] Split `TronGameState` into systems (weapons, bodyguards, portals)
 - [ ] Extract the game's HTML / CSS out of `TronGame`
 - [ ] nipplejs 0.10 → 1.0 (API changed; needs a real touch device) or replace it with a

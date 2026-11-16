@@ -1,0 +1,290 @@
+/* Layout of the DOM screens (main menu, local set-up, network lobby) on desktop and on
+   phones in both orientations. See design/screen-layout.md. The game screen has its own
+   styles in TronGame. */
+
+/* A screen fills the width of the window, so that its children can be sized against it
+   (index.html centres #app, which would otherwise shrink to its content). */
+#app:has(> .ui-screen) { align-self: stretch; }
+
+.ui-screen {
+  display: flex; flex-direction: column; align-items: center;
+  width: 100%;
+  min-height: 100vh; min-height: 100dvh;
+  padding: 1rem;
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  font-family: monospace;
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%;   /* Safari inflates text in landscape */
+}
+.ui-screen button, .ui-screen input, .ui-screen select { font-family: monospace; }
+.ui-screen button { cursor: pointer; touch-action: manipulation; }
+.ui-screen button:disabled { cursor: not-allowed; }
+/* iOS Safari rounds text fields and gives them an inner shadow */
+.ui-screen input { -webkit-appearance: none; appearance: none; border-radius: 0; }
+
+.ui-title { color: #0ff; text-shadow: 0 0 10px #0ff; font-size: 2rem; text-align: center; }
+.ui-panel { background: #111; padding: 1rem; border-radius: 4px; border: 1px solid #333; }
+.ui-heading { color: #0ff; margin-bottom: 0.75rem; }
+.ui-label { color: #888; display: block; margin-bottom: 0.5rem; }
+.ui-hint { color: #577; font-size: 0.7rem; }
+.ui-field { margin-bottom: 1rem; }
+.ui-row { display: flex; gap: 0.5rem; }
+
+.ui-btn { padding: 0.5rem; border: 1px solid; }
+.ui-btn-blue { background: #002; color: #08f; border-color: #08f; }
+.ui-btn-green { background: #020; color: #0f0; border-color: #0f0; }
+.ui-btn-red { background: #200; color: #f44; border-color: #f44; }
+.ui-btn-teal { background: #021; color: #0c8; border-color: #0c8; }
+.ui-btn-sm { padding: 0.25rem 0.5rem; font-size: 0.8rem; flex: none; }
+.ui-btn-wide { width: 100%; }
+.ui-input { padding: 0.5rem; background: #000; border: 1px solid #0ff; color: #0ff; }
+.ui-select { padding: 0.4rem; background-color: #000; color: #0ff; border: 1px solid #0ff; cursor: pointer; }
+
+/* Two-way switch (game mode) */
+.ui-toggle { flex: 1; padding: 0.5rem; background: #111; color: #666; border: 1px solid #333; }
+.ui-toggle:disabled { color: #444; }
+.ui-toggle[aria-pressed="true"] { background: #030; color: #0f0; border-color: #0f0; }
+.ui-toggle[aria-pressed="true"]:disabled { background: #020; color: #0a0; border-color: #0a0; }
+
+/* The big button of a screen */
+.ui-start {
+  display: block; width: 100%; padding: 1rem; font-size: 1.1rem;
+  background: #030; color: #0f0; border: 2px solid #0f0;
+}
+.ui-start:disabled { background: #111; color: #666; border-color: #333; }
+.ui-start small { font-size: 0.7rem; display: block; }
+.ui-banner { background: #110; padding: 1rem; border: 1px solid #440; border-radius: 4px; color: #ff0; text-align: center; }
+
+/* Level picker (levelPicker.ts) */
+.level-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.level-chip {
+  padding: 0.35rem 0.55rem; font-size: 0.8rem; border-radius: 3px;
+  background: #000; color: #577; border: 1px solid #244;
+}
+.level-chip[aria-pressed="true"] { background: #033; color: #0ff; border-color: #0ff; }
+.level-list { padding: 0.35rem 0.55rem; font-size: 0.8rem; border-radius: 3px; color: #666; border: 1px solid #333; }
+.level-chips + .ui-hint { margin-top: 0.35rem; }
+
+/* A seat: colour dot, name, controls */
+.ui-seat {
+  display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; margin-bottom: 0.5rem;
+  background: #0a0a0a; border: 1px solid #333; border-radius: 4px;
+}
+.ui-seat-mine { background: #112; border-color: #08f; }
+.ui-seat-dot { width: 20px; height: 20px; flex: none; border-radius: 50%; }
+.ui-seat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Main menu ---------- */
+
+.menu-screen { justify-content: center; padding: 2rem 1rem; }
+.menu-title {
+  font-size: clamp(2rem, 11vw, 4rem); letter-spacing: 0.12em; margin-right: -0.12em;
+  color: #0ff; text-shadow: 0 0 20px #0ff, 0 0 40px #0ff; margin-bottom: 3rem; max-width: 100%;
+}
+.menu-items { display: flex; flex-direction: column; gap: 1rem; align-items: center; width: 100%; max-width: 22rem; }
+.menu-message { padding: 0.75rem 1.5rem; background: #210; color: #fa0; border: 1px solid #a60; border-radius: 4px; text-align: center; }
+.menu-main { display: flex; flex-direction: column; gap: 1rem; align-items: center; width: 100%; }
+.menu-btn {
+  width: min(100%, 17rem); padding: 1rem; font-size: 1.2rem;
+  background: #111; color: #0ff; border: 2px solid #0ff; transition: all 0.2s;
+}
+@media (hover: hover) {
+  .menu-btn:hover { background: #022; box-shadow: 0 0 10px #0ff; }
+}
+.menu-sub {
+  display: none; flex-direction: column; gap: 0.5rem; align-items: stretch; margin-top: 0.5rem;
+  width: min(100%, 17rem);
+}
+.menu-sub .ui-btn { padding: 0.75rem 1rem; font-size: 1rem; }
+.menu-join { align-items: center; width: min(100%, 20rem); }
+.menu-join label { color: #888; font-size: 0.9rem; text-align: center; }
+.menu-join input { width: 100%; font-size: 1rem; text-align: center; }
+.menu-join .ui-row { width: 100%; }
+.menu-join .ui-row .ui-btn { flex: 1; padding: 0.5rem 1rem; }
+.menu-error { color: #f44; font-size: 0.8rem; text-align: center; }
+
+/* ---------- Local set-up ---------- */
+
+.setup-title { margin-bottom: 1rem; }
+.setup-panel { width: 100%; max-width: 480px; }
+.setup-seat { padding: 0.6rem; }
+.setup-mode { margin-top: 1rem; }
+.setup-seat-detail { flex: 1; min-width: 0; color: #888; font-size: 0.85rem; }
+.setup-start { margin-top: 1.25rem; margin-bottom: 0.5rem; }
+
+/* ---------- Network lobby ---------- */
+
+.lobby-container { align-items: stretch; }
+.lobby-header { margin-bottom: 0.5rem; }
+.lobby-title { margin-bottom: 1rem; }
+.lobby-status { text-align: center; color: #ff0; margin-bottom: 0.5rem; }
+.lobby-notice { text-align: center; color: #fa0; font-size: 0.85rem; min-height: 1.2em; }
+.lobby-grid {
+  flex: 1; display: grid; grid-template-columns: 250px 350px 300px; gap: 1rem;
+  max-width: 1200px; margin: 0 auto; width: 100%; justify-content: center;
+}
+.lobby-grid > * { min-width: 0; }
+.lobby-panel-chat { display: flex; flex-direction: column; }
+.lobby-sec-leave { margin-top: 0.5rem; }
+.lobby-sec-room { margin-bottom: 1rem; }
+.lobby-heading-sub { color: #666; margin-top: 1.5rem; }
+.lobby-team-heading { margin-bottom: 0.5rem; }
+.lobby-team-rule { border: 0; border-top: 1px solid #333; margin: 1rem 0; }
+.lobby-nickname { flex: 1; min-width: 0; }
+.lobby-dice { font-size: 1rem; }
+.lobby-code {
+  background: #000; padding: 0.5rem; border: 1px solid #333; color: #0f0;
+  overflow-wrap: anywhere; text-align: center; letter-spacing: 0.1em;
+}
+.lobby-room-main .ui-row { margin-top: 0.5rem; }
+.lobby-room-main .ui-btn { flex: 1; white-space: nowrap; }
+.lobby-qr-wrap { margin-top: 0.5rem; text-align: center; }
+.lobby-qr {
+  display: block; width: 150px; max-width: 100%; margin: 0 auto; padding: 6px;
+  background: #fff; border: 0; border-radius: 4px; cursor: zoom-in;
+}
+.lobby-qr svg { display: block; width: 100%; height: auto; }
+.lobby-qr-caption { color: #666; font-size: 0.7rem; margin-top: 0.25rem; }
+.lobby-qr-big .lobby-qr { width: min(100%, 320px); cursor: zoom-out; }
+.lobby-wants { color: #0c8; }
+.lobby-seat-open .ui-seat-name, .lobby-seat-ai-level { color: #666; }
+.lobby-spectator .ui-seat-name { color: #888; }
+.link-badge { font-size: 0.7rem; white-space: nowrap; color: #5a5; flex: none; }
+.link-badge:empty { display: none; }
+.link-badge-relay { color: #fa0; }
+.lobby-bot-level { padding-top: 0.2rem; padding-bottom: 0.2rem; font-size: 0.8rem; flex: none; }
+.lobby-empty { color: #666; text-align: center; padding: 2rem; }
+.lobby-chat-messages {
+  flex: 1; overflow-y: auto; background: #000; padding: 0.5rem; border: 1px solid #333;
+  border-radius: 4px; margin-bottom: 0.5rem; min-height: 150px; max-height: 300px;
+  overflow-wrap: anywhere; overscroll-behavior: contain;
+}
+.lobby-chat-messages > div { margin-bottom: 0.5rem; color: #fff; }
+.lobby-chat-messages > .lobby-chat-empty { color: #666; font-style: italic; }
+.lobby-chat-input { flex: 1; min-width: 0; padding: 0.5rem; background: #000; color: #fff; border: 1px solid #333; }
+.lobby-chat-send { padding: 0.5rem 1rem; }
+
+/* Tablet: two columns, chat below */
+@media (max-width: 950px) {
+  .lobby-grid { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; }
+  .lobby-panel-chat { grid-column: 1 / -1; }
+}
+
+/* ---------- Touch sizes: phones in either orientation, and any touch screen ---------- */
+
+@media (max-width: 600px), (max-height: 500px), (pointer: coarse) {
+  .ui-screen button, .ui-screen input, .ui-screen select { min-height: 44px; }
+  .ui-screen input, .ui-screen select { font-size: 16px; /* below 16px iOS Safari zooms in on focus */ }
+  .ui-btn { font-size: 0.9rem; }
+  .ui-btn-sm { min-width: 44px; padding: 0.25rem 0.6rem; }
+  .level-chip { min-width: 44px; font-size: 0.85rem; }
+  .level-chips { gap: 0.4rem; }
+  .ui-hint, .lobby-qr-caption { font-size: 0.75rem; }
+  .lobby-dice { min-width: 44px; }
+  .ui-seat { padding: 0.4rem 0.6rem; min-height: 56px; gap: 0.6rem; }
+  /* The big button stays in view until the page is scrolled past it */
+  .ui-sticky {
+    position: sticky; bottom: 0; z-index: 2;
+    bottom: env(safe-area-inset-bottom, 0px);
+    box-shadow: 0 -10px 12px -6px #000;
+  }
+}
+
+/* ---------- Phone, upright: one column ---------- */
+
+@media (max-width: 600px) {
+  .ui-screen { padding: 0.5rem; padding-left: max(0.5rem, env(safe-area-inset-left)); padding-right: max(0.5rem, env(safe-area-inset-right)); padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); }
+  .ui-panel { padding: 0.75rem; }
+  .ui-title { font-size: 1.4rem; }
+  .ui-heading { font-size: 1rem; margin-bottom: 0.5rem; }
+  .ui-label { font-size: 0.8rem; margin-bottom: 0.35rem; }
+  .ui-field { margin-bottom: 0.75rem; }
+  .lobby-sec > .ui-field:last-child { margin-bottom: 0; }
+
+  .menu-screen { padding: 1.5rem 1rem; }
+  .menu-title { margin-bottom: 2rem; }
+
+  .setup-title { margin-bottom: 0.5rem; }
+  .setup-start { background: #111; margin: 0.25rem -0.75rem 0; padding: 0.5rem 0.75rem; }
+
+  .lobby-header { margin-bottom: 0.5rem; }
+  .lobby-title { margin-bottom: 0.25rem; }
+  .lobby-status { font-size: 0.9rem; margin-bottom: 0.25rem; }
+  .lobby-notice { font-size: 0.75rem; min-height: 0; }
+  .lobby-grid { display: flex; flex-direction: column; gap: 0.5rem; }
+  /* The side panel dissolves: its sections become panels of their own, in the order a
+     phone user needs them (room, seats, start, settings, chat, leave) */
+  .lobby-side { display: contents; }
+  .lobby-sec { background: #111; padding: 0.75rem; border-radius: 4px; border: 1px solid #333; margin: 0; }
+  .lobby-sec-room { order: 1; }
+  .lobby-players { order: 2; }
+  .lobby-sec-action { order: 3; }
+  .lobby-sec-settings { order: 4; }
+  .lobby-panel-chat { order: 5; }
+  .lobby-sec-leave { order: 6; background: none; border: 0; padding: 0; }
+  .lobby-sec-action { padding: 0.5rem; }
+  .lobby-sec-action .ui-banner { padding: 0.6rem; font-size: 0.9rem; border: 0; background: none; }
+  .lobby-heading-sub { margin-top: 0.75rem; }
+  .lobby-team-rule { margin: 0.5rem 0; }
+  .lobby-chat-messages { min-height: 6rem; max-height: 11rem; }
+}
+
+/* Room code with the QR code beside it (phones, both orientations) */
+@media (max-width: 600px), (max-height: 500px) {
+  .lobby-sec-room:not(.lobby-qr-big) .lobby-room { display: flex; gap: 0.75rem; align-items: center; }
+  .lobby-sec-room:not(.lobby-qr-big) .lobby-room-main { flex: 1; min-width: 0; }
+  .lobby-sec-room:not(.lobby-qr-big) .lobby-qr-wrap { flex: none; margin-top: 0; width: 100px; }
+  .lobby-sec-room:not(.lobby-qr-big) .lobby-qr { width: 100px; padding: 5px; }
+  .lobby-sec-room:not(.lobby-qr-big) .lobby-qr-caption span { display: none; }
+  .lobby-room-main .ui-btn { padding-left: 0.25rem; padding-right: 0.25rem; }
+  .lobby-code { font-size: 1rem; padding: 0.6rem 0.25rem; }
+}
+
+/* ---------- Phone, on its side: two columns, compact header ---------- */
+
+@media (max-height: 500px) and (min-width: 601px) {
+  .ui-screen { padding-top: 0.5rem; padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); }
+  .ui-panel { padding: 0.75rem; }
+  .ui-title { font-size: 1.3rem; }
+  .ui-heading { font-size: 1rem; margin-bottom: 0.5rem; }
+  .ui-label { font-size: 0.8rem; margin-bottom: 0.35rem; }
+  .ui-field { margin-bottom: 0.75rem; }
+
+  .menu-screen { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+  .menu-title { font-size: 2.5rem; margin-bottom: 1.25rem; }
+  .menu-items { max-width: 36rem; }
+  .menu-main { flex-direction: row; justify-content: center; }
+  .menu-main .menu-btn { width: auto; flex: 1; max-width: 17rem; }
+  .menu-sub { flex-direction: row; width: 100%; max-width: 30rem; margin-top: 0; }
+  .menu-sub > .ui-btn { flex: 1; }
+  .menu-join { flex-direction: column; max-width: 24rem; }
+
+  .setup-title { margin-bottom: 0.5rem; }
+  .setup-mode { margin-top: 0; }
+  .setup-panel { max-width: 900px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 1rem; align-items: start; }
+  .setup-start { background: #111; margin: 0.25rem 0 0; padding: 0.5rem 0; }
+
+  .lobby-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; column-gap: 1rem; margin-bottom: 0.5rem; }
+  .lobby-title { margin-bottom: 0; }
+  .lobby-status { margin-bottom: 0; font-size: 0.9rem; }
+  .lobby-notice { font-size: 0.75rem; min-height: 0; flex-basis: 100%; }
+  .lobby-notice:empty { display: none; }
+  .lobby-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto 1fr; gap: 0.5rem;
+    grid-template-areas: "players side" "chat side";
+  }
+  .lobby-players { grid-area: players; }
+  .lobby-panel-chat { grid-area: chat; grid-column: auto; }
+  .lobby-side { grid-area: side; display: flex; flex-direction: column; }
+  .lobby-sec { margin: 0 0 0.75rem; }
+  .lobby-sec-room { order: 1; }
+  .lobby-sec-action { order: 2; }
+  .lobby-sec-settings { order: 3; }
+  .lobby-sec-leave { order: 4; margin-bottom: 0; }
+  .lobby-heading-sub { margin-top: 0.75rem; }
+  .lobby-team-rule { margin: 0.5rem 0; }
+  .lobby-chat-messages { min-height: 5rem; max-height: 12rem; }
+  .ui-sticky { position: static; box-shadow: none; }
+  .setup-start.ui-sticky { position: sticky; }
+}

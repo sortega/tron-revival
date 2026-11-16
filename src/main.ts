@@ -3,6 +3,7 @@ import { MainMenu } from './screens/MainMenu';
 import { NetworkLobby } from './screens/NetworkLobby';
 import { LocalSetup } from './screens/LocalSetup';
 import { TronGame } from './game/TronGame';
+import './screens/screens.css';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
