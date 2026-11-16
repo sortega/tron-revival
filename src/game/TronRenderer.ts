@@ -845,13 +845,9 @@ export class TronRenderer {
               centerX,
               y + EFFECT_ICON_Y
             );
-            // Draw remaining seconds below icon in black
+            // Draw remaining seconds below icon
             const remainingSecs = Math.ceil(effect.remainingFrames / TICK_RATE);
-            ctx.fillStyle = '#000';
-            ctx.font = 'bold 14px monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            ctx.fillText(`${remainingSecs}s`, centerX, y + EFFECT_ICON_Y + 22);
+            this.drawPanelText(ctx, `${remainingSecs}s`, centerX, y + EFFECT_ICON_Y + 22);
           }
         }
 
@@ -864,27 +860,33 @@ export class TronRenderer {
             centerX,
             y + slotHeight * 0.75
           );
-          // Draw ammo/time below icon in black
+          // Draw ammo/time below icon
           const { ammo, remainingFrames } = playerState.equippedWeapon;
           if (remainingFrames !== undefined) {
             // Time-based weapon: show seconds
-            ctx.fillStyle = '#000';
-            ctx.font = 'bold 14px monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            ctx.fillText(`${Math.ceil(remainingFrames / TICK_RATE)}s`, centerX, y + slotHeight * 0.75 + 22);
+            this.drawPanelText(ctx, `${Math.ceil(remainingFrames / TICK_RATE)}s`, centerX, y + slotHeight * 0.75 + 22);
           } else if (ammo !== undefined && ammo > 1) {
             // Shot-based weapon: show ammo count (skip single-use)
-            ctx.fillStyle = '#000';
-            ctx.font = 'bold 14px monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            ctx.fillText(String(ammo), centerX, y + slotHeight * 0.75 + 22);
+            this.drawPanelText(ctx, String(ammo), centerX, y + slotHeight * 0.75 + 22);
           }
         }
 
       }
     }
+  }
+
+  // Seconds or ammunition under an icon: white with a black edge, readable on every
+  // panel colour (black alone was lost on the blue one)
+  private drawPanelText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number): void {
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#000';
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(text, x, y);
   }
 
   private drawCountdownOverlay(countdown: number): void {

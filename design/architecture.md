@@ -99,7 +99,8 @@ once a second, for the timers). Measurements and the renderer alternatives that 
 (WebGL, `ImageData`) are in [research/performance.md](./research/performance.md).
 
 The sidebar has one panel per slot, showing the player's active effect and weapon with the
-time or ammunition left. A player who dies **loses the weapon and effects** (in the
+time or ammunition left. The numbers are white with a black edge so that they read on
+every panel colour. A player who dies **loses the weapon and effects** (in the
 simulation, not just on screen) and the panel turns grey, like the panel of a slot nobody
 plays in. In team mode the panels use the team colours ([teams.md](./teams.md)).
 
