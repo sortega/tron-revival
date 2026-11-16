@@ -23,6 +23,8 @@ import { loadLevelGrid, makePlayers } from './helpers';
 // `h<strength>-`: humanisation strength (default 1).
 // `old-`: as the bots were before they read the territory map (design/bots-territory.md).
 // `g<ticks>-`: looks the whole arena over every so many ticks (the territory map's refresh).
+// `deny<0-2>-`, `defuse<0-2>-`: how far it goes in shooting items and H-bombs
+//          (`BotProfile.deniesItems`, `defusesBombs`; design/bots-territory.md, local-and-ai.md).
 // `var-<name>`: the experimental profile `PROFILE_VARIANTS[name]`, planner alone.
 export type DriverSpec = BotDifficulty | `${string}-${BotDifficulty}` | `var-${string}` | 'straight' | 'random';
 
@@ -63,6 +65,8 @@ export function makeDriver(spec: DriverSpec, slot: SlotIndex, rng: Rng): Driver 
     else if (/^g\d+$/.test(part) && profile.territory) profile = { ...profile, territory: { ...profile.territory, refreshTicks: Number(part.slice(1)) } };
     else if (part === 'old') profile = { ...profile, territory: null };
     else if (part === 'naive') profile = { ...profile, knowsMatchups: false };
+    else if (/^deny[012]$/.test(part)) profile = { ...profile, deniesItems: Number(part.slice(4)) as 0 | 1 | 2 };
+    else if (/^defuse[012]$/.test(part)) profile = { ...profile, defusesBombs: Number(part.slice(6)) as 0 | 1 | 2 };
     else if (/^h[\d.]+$/.test(part)) strength = Number(part.slice(1));
     else throw new Error(`Unknown driver ${spec}`);
   }

@@ -347,6 +347,22 @@ export class TerritorySense {
   }
 
   /**
+   * For an item at (x, y) that an enemy gets to before us - by more than we would still
+   * race for - or that only an enemy can get to: the ticks until that enemy is there.
+   * -1 if the item is ours to take, or nobody's.
+   */
+  foeFirst(x: number, y: number): number {
+    const map = this.map;
+    if (!map || map.present[this.slot] === 0) return -1;
+    const cell = this.nearestFree(map, cellOf(x, y));
+    const foe = map.foeTime[this.slot]![cell]!;
+    if (foe === UNREACHED) return -1;
+    const mine = map.time[this.slot]![cell]!;
+    if (mine !== UNREACHED && mine <= foe + ITEM_LEAD) return -1;
+    return foe * (COARSE_CELL / TIME_PER_CELL);
+  }
+
+  /**
    * Where to head to cut off the player in `preySlot`, at (x, y) heading `direction`:
    * the nearest point on its course that we reach clearly before it does. Null if there
    * is none (it is ahead of us everywhere: chasing it would be driving into its territory).

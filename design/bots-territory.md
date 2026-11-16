@@ -149,6 +149,38 @@ Two more terms come from the same path cells:
   chasing it would mean following it into its own territory: no goal. Armed bots face the
   enemy as before.
 
+### Denying items (`hard`)
+
+Items have 40 hit points: one Glock bullet (50) or four tracers (10 each) passing within
+15 px destroy one. The map says who gets to an item first, so a bot that loses the race
+can still keep the item from the winner. `BotProfile.deniesItems` (0 = off):
+
+- **Which item** (`denyTarget`, once per plan): the nearest one that
+  - an enemy reaches before the bot by more than the 3 cells it would still race for, or
+    that only an enemy can reach (`TerritorySense.foeFirst`: exactly the items the bot
+    gives up as goals), with that enemy at most 300 ticks away from it and further than
+    the shot's flight plus 12 ticks — an item about to be picked up is not worth a shot;
+  - is not one the bot would not want itself (Control Reversal, automatic Slow);
+  - is 30 px to *range* away with no solid pixel on the straight line to it (range:
+    Glock 280 px, rifle 330, shotgun 200) and, in team games, no team-mate on that line;
+  - while the gun has shots to spare: more than 6 Glock bullets or shotgun blasts, more
+    than 40 rifle rounds. The Uzi (50 px reach) and the H-bomb are not used for this.
+- **Level 1 — in its sights**: the bot fires when its heading passes within 9 px of the
+  item's centre and the way along that heading is clear. It costs a shot and nothing else.
+- **Level 2 — turning to aim**: with no item to fetch, nobody to run from and no enemy
+  to hunt within 220 px, the item becomes the goal (`goalKind = 'deny'`) if the turn and
+  the shot still fit in the enemy's lead. After 100 ticks of trying, that item is left
+  alone for the rest of the round.
+
+Surviving, escapes and second turns are the rollouts' business and come before any goal;
+fetching an item the bot can win, fleeing and a fight at hand come before this one.
+
+Once the item is within 30° of the heading the bot takes aim tick by tick instead of in
+whole manoeuvres ([local-and-ai.md](./local-and-ai.md), "Bombs in flight", *Taking aim*).
+
+What it is worth is under "Results → Shooting items and bombs": it works, it is used about
+once in five rounds, and it does not show in the win rate.
+
 ### Per profile
 
 | | easy | normal | hard |
@@ -160,6 +192,7 @@ Two more terms come from the same path cells:
 | Fills its region when alone in it | – | no | yes |
 | Cuts enemies off where it gets ahead of them; does not chase otherwise | – | (does not hunt unarmed) | yes |
 | Enemy-first cells count for less (`foeWeight`), risk cost (`riskWeight`) | – | off | off |
+| Shoots the items an enemy gets to first (`deniesItems`) | – | no | yes, and turns to aim |
 
 `BotProfile.territory` holds these switches (`TerritoryUse`); `null` reproduces the bots of
 before exactly (`npm run bench:fingerprint -- --no-territory` matches the old baseline).
@@ -181,7 +214,9 @@ before exactly (`npm run bench:fingerprint -- --no-territory` matches the old ba
 - `npm run bots:strength -- --drivers=hard,old-hard --levels=bricks --rounds=80` — head to
   head, seats rotated, deaths classified by the room the victim had a second earlier.
   `old-<profile>` is the bot without the map. `node scripts/bots/batch.mjs jobs.txt` runs
-  many such lines in parallel and totals them.
+  many such lines in parallel and totals them. `deny<0-2>-` and `defuse<0-2>-` set how far
+  a profile goes in shooting items and H-bombs; the output then lists how often it did
+  (`counts`) and how many items shots destroyed in all.
   `--log-deaths` prints, for every death, the arguments that replay it in the next two.
 - `npm run bots:snapshots -- --drivers=hard,old-hard --level=bricks --seed=3 --out=dir` —
   PNGs of a seeded match every 5 s and at every death: territory on the left, risk on the
@@ -317,6 +352,11 @@ defects, the first two fixed:
 | `fills` for normal, against old normal | 55.3 – 43.3; without it 56.9 – 41.8 |
 | `roomCap` 1400 for normal, against normal as it is | 50.7 – 47.8 |
 
+Added later and left **on** although it did not help either, as far as 1280 rounds can
+tell: `hard` shooting the items an enemy gets to first, and setting off H-bombs that fly
+at it ("Shooting items and bombs" below: 50.5 – 48.7 against hard without them, where two
+identical bots score 47.3 – 51.2 on the same seeds).
+
 What the switched-on features were worth, measured the same way against old hard on an
 earlier version of the branch: filling and the corrected room 51.6 – 47.5; with the item
 race 56.1 – 43.4; with cut-off goals instead 52.3 – 46.4. Room relative to 1400 cells
@@ -338,6 +378,93 @@ same seeds before and after (±3):
 No loss; the gain for hard is inside the interval. Shields and Crossing items are rare
 enough that the totals could hardly move. The cost was not measured again: without one of
 the two effects the search is the same loop with one more comparison per blocked cell.
+
+### Shooting items and bombs
+
+Added after the merge, for `hard` only: `deniesItems` ("Denying items" above) and
+`defusesBombs` ([local-and-ai.md](./local-and-ai.md), "Bombs in flight"). All bots here
+are human-like (strength 1). `none` is `deny0-defuse0-hard`: hard as it was.
+
+**In play** (`node scripts/bots/batch.mjs`; 1280 rounds per match-up: 8 levels × 2 seeds
+× 80, seats rotated; ±3 points):
+
+| Match-up | Win % |
+|----------|-------|
+| hard (both, level 2) – none | 50.5 – 48.7 (647 – 623) |
+| items only, level 2 – none | 50.5 – 48.7 (the same rounds: see below) |
+| items only, level 1 – none | 48.0 – 51.2 (614 – 656) |
+| bombs only, level 2 – none | 47.3 – 51.2 (606 – 656) |
+| none – none, same seeds | 47.3 – 51.2 (606 – 656) |
+| hard – normal | 53.1 – 46.3 |
+| none – normal | 53.0 – 46.6 |
+| Four players, 2 hard + 2 none (640 rounds; win % per seat, 25 = par) | 25.0 – 24.9 |
+
+Nothing here is outside the noise, in either direction. The fifth row is the yardstick:
+two *identical* bots on the same seeds, and the first-named one wins 606 rounds to 656
+(1.4 standard errors, by chance; on Blank 61 to 92). The "bombs only" row is that same
+result to the last round: in 1280 duel rounds the bomb behaviour never changed a single
+key press. Against that yardstick
+level 2 of the item behaviour is 41 rounds up (647 against 606: about 1.6 standard
+errors, since a round that goes differently changes every later round of its match and
+the two samples drift apart), level 1 is 8 rounds up, and against `normal` it is worth
+2 rounds of 1280.
+
+How often it happens, per 1280 rounds of the first match-up (one bot with, one without):
+
+| | Duel | Four players (640 rounds, two bots with) |
+|-|------|------|
+| Fired at an item to deny it (episodes) | 264 | 164 |
+| Turned towards one to do so | 144 | 68 |
+| ...the item was then destroyed by shots | 68 | 43 |
+| ...it was picked up all the same, or went in a blast | 111 | 71 |
+| H-bombs coming for the bot | 12 | 21 |
+| Fired at one / turned to face one / had one too close in the line of fire (whether about to shoot or not) | 0 / 0 / 2 | 1 / 3 / 2 |
+| Items destroyed by shots in all, whoever fired (duel `none` – `none`: 382) | 379 | 371 |
+
+So a hard bot shoots at an item about once in five rounds and destroys one about once in
+nineteen; it fails more often than not (the enemy is quicker, the shot is late or wide:
+human hands sweep across a target rather than hold it). The total of items shot to
+pieces does not rise measurably: stray fire already destroys one in three or four rounds.
+Bombs that threaten a bot are rare (one in a hundred duel rounds), and a bot that then
+holds a suitable gun and has the time is rarer still: **in 1920 rounds of play a bot
+fired at a bomb once and turned to face one three times**, which measures nothing.
+
+**The bomb behaviour by itself** (`HUMAN_REPORT=bombs npm run sim:human`): in an empty
+arena an enemy launches a bomb at a hard bot from 110–320 px and eight directions, aimed
+at where the bot will be if it drives straight on, and turns away. Bots alive when the
+bomb has gone off (the planner alone: 56 attacks per cell; human-like: 168):
+
+| Gun | Planner: level 0 | 1 | 2 | Human-like: level 0 | 1 | 2 |
+|-----|------|---|---|------|---|---|
+| Rifle | 50 | 51 | 52 | 151 | 157 | 160 |
+| Shotgun | 51 | 51 | 53 | 152 | 156 | 162 |
+| Glock | 44 | 46 | 50 | 139 | 140 | 144 |
+| None | 42 | 42 | 42 | 138 | 138 | 138 |
+
+Human-like bots killed by the bomb, the three guns together: 62 of 504 at level 0, 51 at
+level 1, 38 at level 2. That is the whole evidence for it: a third fewer deaths in a
+staged attack (about 2.5 standard errors), nothing measurable in play. Of the 168
+human-like riflemen at level 2, 28 fired at the bomb, 24 turned to face it and 62 had it
+too close in their line of fire at some point. Most bots survive at every level because
+a hard bot does not drive straight on (it goes for the bomber, or away from it) and the
+bomb, aimed at its old course, misses; an unarmed one lives 138 times of 168 for that
+reason and dies the other 30: bots still do not dodge.
+
+**Human hands and item shots** (`tests/bot-matchups.test.ts`): an item 180 px away that
+an enemy is 90 px from; human-like hard bots that destroy it in time, of 10: Glock 10
+(item dead ahead) and 9 (30° to the side), shotgun 10 and 10, rifle 10 and 4 — the rifle
+needs four of the five tracers of a burst on the item.
+
+Decision: both stay on for `hard` at level 2. They do not make it weaker by anything
+that 1280 rounds can show, and they do not make it stronger either; `deniesItems: 0` /
+`defusesBombs: 0` in `BOT_PROFILES.hard` switch them off, and `normal` is untouched.
+
+Cost (`npm run bots:cost` before and after, one run each on the same machine; the hard
+planner, µs per decision, mean): Blank 83 → 90, Bricks 106 → 107, Selva 109 → 110,
+Warzone 113 → 115, Portals 139 → 141; three bots in a tick 302 → 317 on Blank and +1 to
++2 % elsewhere; 99th percentiles within 2 % (Blank 296 → 302). What is added is an item
+list scan and at most a pixel ray per plan while a gun is held, and a projectile list
+scan per tick. Not measured in a browser or on a phone.
 
 ## Cost
 

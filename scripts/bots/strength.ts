@@ -21,10 +21,14 @@
 //   ran-out-alone      had been confined for a while, alone: lost the endgame (or filled
 //                      its region badly)
 //   ran-out-contested  confined for a while together with an enemy
+//
+// `counts` (shown when not all zero): how often the bots of a profile shot at items and
+// at H-bombs (`BotController.counts`), and `itemsShot`: items destroyed by shots, whoever
+// fired them, per level.
 
 import { appendFileSync } from 'node:fs';
 import { BOT_PROFILES } from '../../src/game/ai/BotController';
-import type { BotProfile } from '../../src/game/ai/BotController';
+import type { BotCounts, BotProfile } from '../../src/game/ai/BotController';
 import { TerritoryMap, worldOf } from '../../src/game/ai/territory';
 import { TUNING } from '../../src/game/ai/territorySense';
 import { TICK_RATE } from '../../src/game/constants';
@@ -84,11 +88,19 @@ function classify(h: Sample[]): string {
 interface Tally {
   rounds: number; wins: number; survival: number[]; early: number;
   causes: Record<string, number>;
+  counts: Record<string, number>;
+}
+
+// A driver's own counters, whether it is a planner or a human-like bot around one
+function countsOf(driver: unknown): BotCounts | null {
+  const d = driver as { counts?: BotCounts; planner?: { counts?: BotCounts } };
+  return d.counts ?? d.planner?.counts ?? null;
 }
 
 for (const level of levels) {
   const tally = new Map<string, Tally>();
-  for (const d of new Set(drivers)) tally.set(d, { rounds: 0, wins: 0, survival: [], early: 0, causes: {} });
+  for (const d of new Set(drivers)) tally.set(d, { rounds: 0, wins: 0, survival: [], early: 0, causes: {}, counts: {} });
+  let itemsShot = 0;
   let draws = 0;
   let timeouts = 0;
   const lengths: number[] = [];
@@ -107,7 +119,10 @@ for (const level of levels) {
     let currentRound = -1;
     const perRound: (string | null)[][] = [];
     const scatter = createRng(seed * 7919 + rot);
+    let bots: unknown[] = [];
+    const shot = new Set<number>();
     const results = runMatch({
+      inspect: (list) => { bots = list; },
       level: level === 'split' ? 'blank' : level, grid: level === 'split' ? splitArena() : undefined,
       drivers: seats, rounds: n, seed: seed * 100 + rot, mode, maxRoundSeconds, bare,
       setup: level === 'split' ? (game) => scatterInHalves(game, scatter) : undefined,
@@ -117,6 +132,14 @@ for (const level of levels) {
           history.forEach(h => { h.length = 0; });
           classes.fill(null);
           perRound[round] = seats.map(() => null);
+          shot.clear();
+        }
+        // Items destroyed by shots (a blast or a pick-up leaves their hit points alone)
+        for (const item of game.items) {
+          if (!item.active && item.hp <= 0 && !shot.has(item.id)) {
+            shot.add(item.id);
+            itemsShot++;
+          }
         }
         game.players.forEach((p, i) => {
           if (!p.alive && classes[i] === null) {
@@ -132,6 +155,12 @@ for (const level of levels) {
           });
         }
       },
+    });
+
+    seats.forEach((spec, i) => {
+      const counts = countsOf(bots[i]);
+      const t = tally.get(spec)!;
+      for (const [key, n] of Object.entries(counts ?? {})) t.counts[key] = (t.counts[key] ?? 0) + (n as number);
     });
 
     results.forEach((r, round) => {
@@ -163,7 +192,7 @@ for (const level of levels) {
   const median = (v: number[]): number => v.length === 0 ? 0 : [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)]!;
   const mean = (v: number[]): number => v.reduce((a, b) => a + b, 0) / Math.max(1, v.length);
   const out = {
-    level, mode, drivers, rounds, seed, bare, draws, timeouts,
+    level, mode, drivers, rounds, seed, bare, draws, timeouts, itemsShot,
     medianRound: +(median(lengths) / TICK_RATE).toFixed(1),
     profiles: Object.fromEntries([...tally].map(([spec, t]) => [spec, {
       seats: t.rounds,
@@ -172,12 +201,15 @@ for (const level of levels) {
       meanSurvival: +(mean(t.survival) / TICK_RATE).toFixed(1),
       early: t.early,
       deaths: Object.fromEntries(Object.entries(t.causes).sort((a, b) => b[1] - a[1])),
+      counts: t.counts,
     }])),
   };
   console.log(`${level.padEnd(12)} ${mode} ${drivers.join(',')} ${rounds} rounds, median ${out.medianRound}s, draws ${draws}, timeouts ${timeouts}`);
   for (const [spec, p] of Object.entries(out.profiles)) {
     console.log(`  ${spec.padEnd(16)} win ${String(p.winPct).padStart(5)}%  survival median ${String(p.medianSurvival).padStart(6)}s mean ${String(p.meanSurvival).padStart(6)}s  early ${p.early}  deaths ${JSON.stringify(p.deaths)}`);
+    if (Object.values(p.counts).some(n => n > 0)) console.log(`  ${''.padEnd(16)} counts ${JSON.stringify(p.counts)}`);
   }
+  if (itemsShot > 0) console.log(`  items destroyed by shots: ${itemsShot}`);
   if (args.has('summary')) console.log(`JSON ${JSON.stringify(out)}`);
   if (args.has('json')) appendFileSync(args.get('json')!, JSON.stringify(out) + '\n');
 }

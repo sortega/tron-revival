@@ -47,10 +47,12 @@ function collect(job) {
     if (!group) groups.set(key, group = { levels: new Map() });
     let level = group.levels.get(result.level);
     if (!level) group.levels.set(result.level, level = { rounds: 0, medians: [], profiles: {} });
+    group.itemsShot = (group.itemsShot ?? 0) + (result.itemsShot ?? 0);
     level.rounds += result.rounds;
     level.medians.push(result.medianRound);
     for (const [spec, p] of Object.entries(result.profiles)) {
-      const t = level.profiles[spec] ?? (level.profiles[spec] = { seats: 0, wins: 0, early: 0, deaths: {} });
+      const t = level.profiles[spec] ?? (level.profiles[spec] = { seats: 0, wins: 0, early: 0, deaths: {}, counts: {} });
+      for (const [what, n] of Object.entries(p.counts ?? {})) t.counts[what] = (t.counts[what] ?? 0) + n;
       t.seats += p.seats;
       t.wins += Math.round(p.winPct * p.seats / 100);
       t.early += p.early;
@@ -76,7 +78,8 @@ function summary() {
     for (const [name, level] of group.levels) {
       row(name, level.profiles, level.medians);
       for (const [spec, t] of Object.entries(level.profiles)) {
-        const sum = total[spec] ?? (total[spec] = { seats: 0, wins: 0, early: 0, deaths: {} });
+        const sum = total[spec] ?? (total[spec] = { seats: 0, wins: 0, early: 0, deaths: {}, counts: {} });
+        for (const [what, n] of Object.entries(t.counts)) sum.counts[what] = (sum.counts[what] ?? 0) + n;
         sum.seats += t.seats;
         sum.wins += t.wins;
         sum.early += t.early;
@@ -87,7 +90,10 @@ function summary() {
     for (const [spec, t] of Object.entries(total)) {
       const deaths = Object.entries(t.deaths).sort((a, b) => b[1] - a[1]).map(([cause, n]) => `${cause} ${n}`).join(', ');
       console.log(`  deaths of ${spec}: ${deaths}`);
+      const counts = Object.entries(t.counts).filter(([, n]) => n > 0).map(([what, n]) => `${what} ${n}`).join(', ');
+      if (counts) console.log(`  counts of ${spec}: ${counts}`);
     }
+    if (group.itemsShot) console.log(`  items destroyed by shots: ${group.itemsShot}`);
   }
 }
 

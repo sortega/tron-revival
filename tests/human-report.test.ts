@@ -2,7 +2,7 @@
 // (design/bots-human.md). Not part of the regular test run.
 //
 //   HUMAN_REPORT=1            all sections (slow: about an hour), or a comma-separated list of
-//                             survival,early,straight,ladder,versus,weapons,range,reversal,swap,cost,strength
+//                             survival,early,straight,ladder,versus,weapons,range,reversal,swap,bombs,cost,strength
 //   LADDER_LEVELS=<a,b>       levels of the `ladder` section (default blank,bricks,selva)
 //   OUT=<file>                also write the report there
 //   ROUNDS=<n>                scale the number of rounds (default 1 = as documented)
@@ -15,6 +15,7 @@ import { PixelGrid } from '../src/game/PixelGrid';
 import { createRng } from '../src/game/rng';
 import type { SlotIndex } from '../src/types/lobby';
 import type { TronInput } from '../src/types/game';
+import type { BotCounts } from '../src/game/ai/BotController';
 import { makeGame, place, skipCountdown } from './helpers';
 import { makeDriver, median, newStats, runMatch, survival, winRate } from './sim';
 import type { DriverSpec, MatchStats, RoundResult } from './sim';
@@ -337,6 +338,73 @@ describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
         }
       }
       say(`${d.padEnd(7)} |   ${cells[0]}  ${cells[1]}   |   ${cells[2]}  ${cells[3]}  ${cells[4]}  ${cells[5]}`);
+    }
+    say();
+  }, 3_600_000);
+
+  it.runIf(want('bombs'))('H-bombs in flight', () => {
+    // design/local-and-ai.md, "Bombs in flight"
+    say('## H-bombs: an enemy launches one at a hard bot from 110-320 px and 8 directions, aimed at where the bot');
+    say('   will be if it drives straight on, then turns away. Empty arena. Bots alive when the bomb has gone off /');
+    say('   attacks, per level of `defusesBombs` (0 = the old rule); then how many of them fired at the bomb,');
+    say('   turned to face it, held their fire because of it');
+    say('bot   gun      |  level 0  |  level 1: alive, fired, held  |  level 2: alive, fired, turned, held');
+    const DEG = Math.PI / 180;
+    for (const human of [false, true]) {
+      for (const weapon of ['rifle', 'shotgun', 'glock', 'none']) {
+        const cells: string[] = [];
+        for (const level of [0, 1, 2]) {
+          let alive = 0;
+          let n = 0;
+          let fired = 0;
+          let turned = 0;
+          let held = 0;
+          for (const dist of [110, 140, 170, 200, 240, 280, 320]) {
+            for (const angle of [0, 20, -20, 45, -45, 90, -90, 150]) {
+              for (let seed = 1; seed <= (human ? rounds(3) : 1); seed++) {
+                const g = makeGame(2, 1);
+                g.setLevelObstacles(new PixelGrid());
+                skipCountdown(g);
+                g.items.length = 0;
+                g.portals.length = 0;
+                place(g, 0, 250, 300, 0);
+                const me = g.players[0]!;
+                const bx = 250 + dist * Math.cos(angle * DEG);
+                const by = 300 + dist * Math.sin(angle * DEG);
+                let t = dist / 2;
+                for (let i = 0; i < 6; i++) t = Math.hypot(250 + t - bx, 300 - by) / 2;
+                place(g, 1, bx, by, Math.round(Math.atan2(300 - by, 250 + t - bx) / DEG));
+                g.players[1]!.equipWeapon('bomb', 1);
+                if (weapon === 'rifle') me.equipWeapon('rifle', 200);
+                if (weapon === 'shotgun') me.equipWeapon('shotgun', 20);
+                if (weapon === 'glock') me.equipWeapon('glock', 20);
+                const spec = `${human ? '' : 'raw-'}defuse${level}-hard` as DriverSpec;
+                const bot = makeDriver(spec, 0, createRng(seed * 31 + dist + angle));
+                let seen = false;
+                for (let k = 0; k < 260 && g.phase === 'playing'; k++) {
+                  g.tick(new Map<SlotIndex, TronInput>([[0, bot.decide(g)], [1, { steer: k > 0 && k < 30 ? 1 : 0, action: k === 0 }]]));
+                  g.serialize();
+                  g.items.length = 0;
+                  const flying = g.getProjectiles().some(p => p.type === 'bomb');
+                  if (seen && !flying) break;
+                  seen ||= flying;
+                }
+                n++;
+                if (me.alive) alive++;
+                const counts = (bot as unknown as { counts?: BotCounts; planner?: { counts: BotCounts } }).planner?.counts
+                  ?? (bot as unknown as { counts: BotCounts }).counts;
+                if (counts.defuseShots > 0) fired++;
+                if (counts.defuseGoals > 0) turned++;
+                if (counts.heldFire > 0) held++;
+              }
+            }
+          }
+          const cell = `${String(alive).padStart(3)}/${String(n).padEnd(3)}`;
+          cells.push(level === 0 ? cell : level === 1 ? `${cell} ${String(fired).padStart(3)} ${String(held).padStart(3)}`
+            : `${cell} ${String(fired).padStart(3)} ${String(turned).padStart(3)} ${String(held).padStart(3)}`);
+        }
+        say(`${human ? 'human' : 'raw  '} ${weapon.padEnd(8)} |  ${cells[0]}  |  ${cells[1]}              |  ${cells[2]}`);
+      }
     }
     say();
   }, 3_600_000);

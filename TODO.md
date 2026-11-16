@@ -47,8 +47,17 @@ a real device
 
 Design: `design/local-and-ai.md`, `design/bots-territory.md`, `design/bots-human.md`.
 
-- [ ] Dodge projectiles and bomb blast areas (bombs and enemy heads are hazards in the
-      rollouts; shots in flight are not)
+- [ ] Dodge projectiles and bomb blast areas (enemy heads are hazards in the rollouts;
+      shots in flight are not). `hard` now knows which bomb is coming for it
+      (`bombThreat`) but only acts on it with a gun in hand: unarmed, or once the bomb
+      is too near to shoot, it does nothing (30 of 168 die in the staged attack of
+      `HUMAN_REPORT=bombs`)
+- [ ] `normal` keeps the old bomb rule: it fires at a bomb, or through one, from as near
+      as 75 px (`defusesBombs` is hard-only so far)
+- [ ] Shooting items an enemy gets to first (`deniesItems`, hard): no gain in 1280 rounds,
+      and it fails more often than it works (68 items destroyed, 111 taken all the same).
+      Keep it, make it choosier (only weapons and shields? only when the enemy is weak
+      without it?) or drop it. The Uzi and the H-bomb are not used for it
 - [ ] Lines of fire are judged as if tracers still swept their path (they act only where
       they land now)
 - [ ] Endgame: a real space-filling planner (finish a side chamber before sealing it;
@@ -69,8 +78,8 @@ Design: `design/local-and-ai.md`, `design/bots-territory.md`, `design/bots-human
       bike holds which weapon); only finding its own bike is modelled
 - [ ] Watch a Swap under colour blindness in a real game: `easy` is lost for 1–3.6 s
       (a quarter of them die within 3 s); too much, or just right?
-- [ ] Bots that know they see late could also *lead* their shots; today the aim error only
-      ever hurts
+- [ ] Bots that know they see late could also *lead* their shots at enemies (they lead
+      the ones at H-bombs); today the aim error only ever hurts
 - [ ] Setting in the local set-up screen for the human-like strength (now only `?human=`)
 
 ## Networking

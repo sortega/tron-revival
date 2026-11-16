@@ -286,7 +286,64 @@ What the stance does:
   guarded enemy (the bullet would bounce back), nor the rifle or Uzi; the shotgun only at
   an enemy with a single satellite. The target is the nearest enemy worth shooting at.
 - **Shooting things down**: with the Uzi, shotgun or rifle, a bot fires at an enemy bullet
-  coming its way, and at an H-bomb coming its way while it is still more than 75 px off.
+  coming its way, and (`normal`) at an H-bomb coming its way while it is still more than
+  75 px off. `hard` bots treat bombs with more care: see below.
+
+### Bombs in flight (`hard`)
+
+A single tracer or bullet sets off an H-bomb in flight, where it is, and the blast kills
+within 50 px ([projectiles.md](./projectiles.md)). What bots did about it until now was one
+rule, shared with bullets (`incomingShot`): holding a tracer weapon, fire when a bomb is
+inside the gun's cone ahead, pointing at the bot within 25°, and more than 75 px away. Its
+gaps:
+
+1. **Nothing stopped a bot from firing through a bomb that is too close** — at the bomb
+   (75 px is too close for the rifle) or at an enemy behind it. While the shot flies, the
+   bomb comes on at 2 px/tick and the bot at 1: a shot at `v` px/tick fired from `d` px
+   meets the bomb `d (v − 1) / (v + 2)` px from where the bot is by then. For the rifle
+   and the Glock (5 px/tick) that is 43 px at 75 px, inside the blast.
+2. **The Glock was not used**, although a bullet sets a bomb off like a tracer does.
+3. **Only a bomb that happens to be dead ahead** was shot at: the bot did not turn
+   towards one, and it aimed at where the bomb is, not at where the shot will meet it (a
+   bomb launched from the side at where the bot will be crosses the line of sight: rifle
+   tracers fired straight at it from 240 px all pass behind it).
+4. **"Pointing at me within 25°"** is the wrong question. A bomb goes off where its nose
+   first touches something solid — which may be the bot's own trail right behind it — so
+   one passing 40 px beside the bot can kill it, and one aimed exactly at where the bot
+   is *now*, from far away, cannot.
+
+`BotProfile.defusesBombs` (0 = the old rule, which `normal` keeps; `hard`: 2) replaces the
+rule for bombs:
+
+- **Is it coming for me?** (`bombThreat`) The bomb and the bot are both moved straight
+  ahead, tick by tick, for up to 160 ticks. The bomb goes off when its nose reaches a
+  solid pixel, the trail the bot will have drawn by then, or the bot. If that happens
+  less than 62 px from where the bot is at that moment, the bomb is a threat (and stays
+  one for as long as it flies: the bot's turning must not make it flicker).
+- **Holding fire** (level 1): no shot at all, at anybody, while any bomb is in the line
+  of fire and nearer than `holdDistance(v) = 55 (v + 2) / (v − 1)`: rifle and Glock 96 px,
+  shotgun 67 px, Uzi anywhere within its reach.
+- **Shooting** (level 1): with the Glock, the rifle or the shotgun, when the heading
+  points at where the shot will **meet** the threatening bomb (`meetingPoint`: the shot's
+  flight time against the bomb's course), within the bomb's 12 px width or the shotgun's
+  ±5° spread, and the bomb is in range and not nearer than `holdDistance`.
+- **Turning to face it** (level 2): a goal that comes before every other — the meeting
+  point — when the bot holds one of the three guns and the bomb will still be at
+  `safeDistance(v) = 62 (v + 2) / (v − 1) + 30` once the turn is made (rifle and Glock
+  138 px, shotgun 105 px: the blast 62 px away in the worst case, with 10 ticks between
+  the decision and the shot). When there is no time for that, nothing changes: bots still
+  do not *dodge* bombs (TODO.md).
+- **Taking aim** (`aimed`): a plan's manoeuvres turn by 12° or more, which cannot hold a
+  heading on something 12 px wide. When the goal is something to shoot at (a bomb here, an
+  item in [bots-territory.md](./bots-territory.md), "Denying items") and it is within
+  30° of the heading, the bot steers tick by tick onto it (within 2°), as long as the
+  last plan scored "straight on" or "a touch to that side" within 25 points of its best
+  manoeuvre. Under the human layer the hands still cannot press for less than `minPress`
+  ticks, so a human-like bot sweeps across its target rather than holding it.
+
+Under the human layer the bomb is noticed a `surprise` delay after launch, like every
+shot. What was measured is in [bots-territory.md](./bots-territory.md), "Shooting items
+and bombs".
 
 ### Round flow
 
@@ -308,6 +365,7 @@ it never learns about the reversal and the bot's hands have to relearn the contr
 | Uses weapons | boxed-in only | yes | yes, + turbo |
 | Avoids enemy heads / bodyguards | no | yes | yes |
 | Hunts enemies | no | when it has the advantage | yes, except when at a disadvantage |
+| Shoots items an enemy gets to first; sets off H-bombs flying at it ([bots-territory.md](./bots-territory.md), "Denying items"; "Bombs in flight" above) | no | no (bombs: the old rule) | yes |
 | Knows the weapon and satellite match-ups | no | yes | yes |
 | Reads the territory map ([bots-territory.md](./bots-territory.md)) | no | room, item races | + fills its region, risk, cut-offs |
 

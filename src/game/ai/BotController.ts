@@ -30,6 +30,39 @@ const DOOR_MARGIN_TICKS = 25;        // Doors must stay open this long after we 
 const FLEE_RANGE = 180;              // Run from an enemy we should avoid when it is this close
 const FLEE_DISTANCE = 150;           // ...towards a point this far away, directly opposite
 
+// Shooting items an enemy gets to first (design/bots-territory.md, "Denying items")
+const DENY_GUNS: Record<string, { range: number; speed: number; reserve: number }> = {
+  glock: { range: 280, speed: 5, reserve: 6 },      // `reserve`: shots kept for fights
+  shotgun: { range: 200, speed: 15, reserve: 6 },
+  rifle: { range: 330, speed: 5, reserve: 40 },
+};
+const DENY_MIN_DIST = 30;            // Nearer than this the item is as good as taken
+const DENY_AIM = 9;                  // The shot must pass this close to the item's centre (it is hit within 15)
+const DENY_HORIZON = 300;            // The enemy must be at most this many ticks from the item...
+const DENY_DELAY = 12;               // ...and further than the shot takes, plus this, to be worth a shot
+const DENY_FIGHT_RANGE = 220;        // An enemy to hunt this near comes before turning towards an item
+const DENY_GIVE_UP = 100;            // Ticks spent turning towards an item before it is left alone
+
+// Setting off H-bombs that fly at the bot (design/local-and-ai.md, "Bombs in flight")
+const DEFUSE_GUNS: Record<string, { range: number; speed: number; spread: number }> = {
+  glock: { range: 300, speed: 5, spread: 0 },
+  rifle: { range: 350, speed: 5, spread: 0 },
+  shotgun: { range: 240, speed: 15, spread: 5 },
+  uzi: { range: 55, speed: 30, spread: 30 },        // (never from a safe distance: only to hold its fire)
+};
+const BLAST_RADIUS = 50;             // The blast of an H-bomb kills within this
+const BLAST_MARGIN = 12;             // ...and this much more is wanted between it and the bot
+const BOMB_SPEED = 2;                // px per tick
+const BOMB_NOSE = 9;                 // The bomb goes off when its nose touches something
+const BOMB_HALF_WIDTH = 6;
+const BOMB_HORIZON = 160;            // Ticks a bomb's flight is followed ahead
+const DEFUSE_DELAY = 10;             // Ticks between deciding to shoot and the shot (hesitation, tap rate, bursts)
+const EPISODE = 35;                  // Ticks without it after which a behaviour counts as triggered anew
+// Taking aim at an item or a bomb: the manoeuvres of a plan turn by 12 degrees or more
+const AIM_FINE = 30;                 // Within this many degrees of the target, steer tick by tick
+const AIM_DEAD = 2;                  // ...until this close (one tick of steering is 4 degrees)
+const AIM_COST = 25;                 // ...where that costs at most this much of the plan's score
+
 export interface BotProfile {
   lookahead: number;        // Max rollout length in pixels
   replanTicks: number;      // Re-evaluate steering every N ticks
@@ -49,6 +82,19 @@ export interface BotProfile {
   /** Extra room (px) given to enemy heads, whose position is not known exactly; default 0. */
   headMargin?: number;
   territory: TerritoryUse | null; // How it reads the territory map (design/bots-territory.md)
+  /**
+   * Shoots the items an enemy gets to first (needs the territory map): 0 or absent = no,
+   * 1 = those that come into its sights, 2 = also turns to aim when it has nothing better to do.
+   */
+  deniesItems?: 0 | 1 | 2;
+  /**
+   * H-bombs in flight: 0 or absent = shoots at one coming straight at it from more than
+   * 75 px (as `knowsMatchups` always did); 1 = works out where the bomb will go off, shoots
+   * at where the shot will meet it (with the Glock too), and holds all fire while a bomb
+   * is in the line of fire within reach of its blast; 2 = also turns to face a bomb that
+   * threatens it. See design/local-and-ai.md, "Bombs in flight".
+   */
+  defusesBombs?: 0 | 1 | 2;
 }
 
 export const BOT_PROFILES: Record<BotDifficulty, BotProfile> = {
@@ -66,6 +112,7 @@ export const BOT_PROFILES: Record<BotDifficulty, BotProfile> = {
     lookahead: 180, replanTicks: 2, clearanceSteps: 110, areaAware: true, escapes: true, mistakeChance: 0, itemInterest: 1,
     weapons: 'full', avoidsHazards: true, hunts: true, usesTurbo: true, knowsMatchups: true, reverseReactionTicks: 0,
     territory: { roomCap: 1400, foeWeight: 1, fills: true, riskWeight: 0, racesForItems: true, intercepts: true, expands: false },
+    deniesItems: 2, defusesBombs: 2,
   },
 };
 
@@ -126,6 +173,33 @@ interface EnemyView {
   dist: number;
   fighter: Fighter;
   stance: Stance;
+}
+
+// An H-bomb in flight that would kill the bot if both carried on
+interface BombThreat {
+  id: number;
+  dx: number;         // Shortest way to it
+  dy: number;
+  dist: number;
+  direction: number;  // Where it is flying, degrees
+}
+
+// An item worth shooting: an enemy is `foeTicks` from picking it up, and we are further
+interface DenyTarget {
+  item: GameItem;
+  foeTicks: number;
+}
+
+/** How often the bot did what (rising edges: see EPISODE), for tests and tuning. */
+export interface BotCounts {
+  denyShots: number;     // Fired at an item to keep it from an enemy
+  denyGoals: number;     // Turned towards one to do so
+  denied: number;        // Items it fired at that were then destroyed by shots...
+  denyTaken: number;     // ...and that somebody picked up all the same (or a blast took)
+  defuseShots: number;   // Fired at an H-bomb coming for it
+  defuseGoals: number;   // Turned to face one
+  heldFire: number;      // Did not fire because a bomb was too close in the line of fire
+  bombThreats: number;   // H-bombs that were going to kill it
 }
 
 // Everything a rollout needs to know about the world, gathered once per decision
@@ -191,6 +265,38 @@ function angleDiff(from: number, to: number): number {
   return ((to - from + 540) % 360) - 180;
 }
 
+/**
+ * Where a shot at `speed` px/tick fired now meets a bomb that is at (dx, dy) from us and
+ * flies in `direction`: relative to us, as we are now.
+ */
+function meetingPoint(dx: number, dy: number, direction: number, speed: number): { x: number; y: number } {
+  const cos = Math.cos(direction * DEG) * BOMB_SPEED;
+  const sin = Math.sin(direction * DEG) * BOMB_SPEED;
+  let x = dx;
+  let y = dy;
+  for (let i = 0; i < 3; i++) {
+    const ticks = Math.hypot(x, y) / speed;
+    x = dx + cos * ticks;
+    y = dy + sin * ticks;
+  }
+  return { x, y };
+}
+
+/**
+ * The least distance from which firing at a bomb now sets it off out of reach. A shot at
+ * `speed` px/tick fired from `dist` px meets the bomb `dist × (speed − 1) / (speed + 2)`
+ * px from where we are by then, in the worst case: the bomb coming straight at us at
+ * 2 px/tick and we at it.
+ */
+export function holdDistance(speed: number): number {
+  return (BLAST_RADIUS + 5) * (speed + BOMB_SPEED) / (speed - 1);
+}
+
+/** ...and from which deciding to fire does: the shot leaves `DEFUSE_DELAY` ticks later. */
+export function safeDistance(speed: number): number {
+  return (BLAST_RADIUS + BLAST_MARGIN) * (speed + BOMB_SPEED) / (speed - 1) + (BOMB_SPEED + 1) * DEFUSE_DELAY;
+}
+
 export class BotController {
   readonly slot: SlotIndex;
   readonly profile: BotProfile;
@@ -204,7 +310,16 @@ export class BotController {
   private lastWeapon: string | null = null;
   private goalItemId: number | null = null;
   private enemies: EnemyView[] = [];  // Refreshed every decision
+  private threat: BombThreat | null = null;      // The nearest bomb coming for us; refreshed every decision
+  private readonly threatIds = new Set<number>();   // Bombs once seen coming for us stay suspect
+  private deny: DenyTarget | null = null;        // Refreshed every plan
+  private denySince = 0;                         // When we began turning towards it
+  private denyingId = -1;
+  private readonly denyGivenUp = new Set<number>();
+  private readonly lastDone: Partial<Record<keyof BotCounts, number>> = {};
   private readonly scores: number[] = [];  // Of the candidates of the current plan
+  // Taking aim: is steering left / straight on / right for a moment all right by the last plan?
+  private readonly aimSafe = [false, false, false];
   /** How this bot reads the territory map; null if its profile does not. */
   readonly sense: TerritorySense | null;
 
@@ -217,7 +332,11 @@ export class BotController {
   trace: string[] | null = null;
 
   /** What the last plan was heading for, for tests and tuning. */
-  goalKind: 'item' | 'seek' | 'flee' | 'expand' | null = null;
+  goalKind: 'item' | 'seek' | 'flee' | 'expand' | 'deny' | 'defuse' | null = null;
+
+  /** How often the newer behaviours were triggered, for tests and tuning. */
+  readonly counts: BotCounts = { denyShots: 0, denyGoals: 0, denied: 0, denyTaken: 0, defuseShots: 0, defuseGoals: 0, heldFire: 0, bombThreats: 0 };
+  private shotAt: GameItem | null = null;        // The item last fired at, until we know what became of it
 
   /** Details of the last plan, for tests and tuning. */
   debug = { score: 0, dist: 0, steer: 0, turnSteps: 0, straightFree: 0 };
@@ -251,6 +370,7 @@ export class BotController {
     const y = me.y / 1000;
     this.enemies = this.lookAround(game, me, x, y);
     this.sense?.begin(game, this.slot, me.activeEffects);
+    this.threat = this.profile.defusesBombs ? this.bombThreat(game, me, x, y) : null;
     const ctx = this.makeContext(game, me);
     const start: PathState = { x, y, dir: me.direction, step: 0, portalCooldown: 0, cells: null, cellCount: 0 };
 
@@ -271,7 +391,7 @@ export class BotController {
 
     // Control Reversal flips the steering inside the simulation; compensate once
     // the bot has "noticed"
-    let steer = this.steer;
+    let steer = this.aimed(me, x, y);
     if (me.hasEffect('reverse')) {
       this.reverseTicks++;
       if (this.reverseTicks > this.profile.reverseReactionTicks) steer = -steer;
@@ -294,6 +414,20 @@ export class BotController {
     this.weaponHeldTicks = 0;
     this.lastWeapon = null;
     this.goalItemId = null;
+    this.threat = null;
+    this.threatIds.clear();
+    this.deny = null;
+    this.denyingId = -1;
+    this.denyGivenUp.clear();
+    this.shotAt = null;
+    this.lastDone.denyShots = this.lastDone.denyGoals = this.lastDone.defuseShots = undefined;
+    this.lastDone.defuseGoals = this.lastDone.heldFire = undefined;
+  }
+
+  // Count a behaviour once per episode
+  private did(kind: keyof BotCounts): void {
+    if (this.tick - (this.lastDone[kind] ?? -EPISODE) >= EPISODE) this.counts[kind]++;
+    this.lastDone[kind] = this.tick;
   }
 
   // === Steering ===
@@ -445,6 +579,11 @@ export class BotController {
       bestSteer = Math.floor(this.rng() * 3) - 1;
     }
     this.steer = bestSteer;
+    // (the three gentlest candidates: straight on, a touch to the left, a touch to the right)
+    const floor = Math.max(...this.scores) - AIM_COST;
+    this.aimSafe[1] = this.scores[0]! >= floor;
+    this.aimSafe[0] = this.scores[1]! >= floor;
+    this.aimSafe[2] = this.scores[2]! >= floor;
     this.debug.straightFree = straightFree;
     return straightFree;
   }
@@ -744,9 +883,58 @@ export class BotController {
     return hazards;
   }
 
+  /**
+   * The steering of this tick: the plan's, except when the goal is something to shoot at
+   * (an item to deny, a bomb to set off) and it is nearly ahead. Then the bot turns onto
+   * it tick by tick, as long as the last plan found nothing wrong with that.
+   */
+  private aimed(me: TronPlayer, x: number, y: number): number {
+    let dx: number;
+    let dy: number;
+    const gun = me.equippedWeapon ? DEFUSE_GUNS[me.equippedWeapon.sprite] : undefined;
+    if (this.goalKind === 'defuse' && this.threat && gun) {
+      const meet = meetingPoint(this.threat.dx, this.threat.dy, this.threat.direction, gun.speed);
+      dx = meet.x;
+      dy = meet.y;
+    } else if (this.goalKind === 'deny' && this.deny) {
+      dx = wrapDelta(this.deny.item.x - x, PLAY_WIDTH);
+      dy = wrapDelta(this.deny.item.y - y, PLAY_HEIGHT);
+    } else {
+      return this.steer;
+    }
+    const off = angleDiff(me.direction, Math.atan2(dy, dx) / DEG);
+    if (Math.abs(off) > AIM_FINE) return this.steer;
+    const wanted = Math.abs(off) <= AIM_DEAD ? 0 : Math.sign(off);
+    return this.aimSafe[wanted + 1] ? wanted : this.steer;
+  }
+
   // === Goals ===
 
   private chooseGoal(game: TronGameState, me: TronPlayer, x: number, y: number): { x: number; y: number } | null {
+    this.deny = this.profile.deniesItems ? this.denyTarget(game, me, x, y) : null;
+    // (for the counters: what became of the item we fired at)
+    if (this.shotAt && !this.shotAt.active) {
+      if (this.shotAt.hp <= 0) this.counts.denied++; else this.counts.denyTaken++;
+      this.shotAt = null;
+    }
+
+    // First of all: an H-bomb is coming for us and we hold something that sets it off.
+    // Face it while there is time (design/local-and-ai.md, "Bombs in flight")
+    const bomb = this.threat;
+    if (bomb && this.profile.defusesBombs === 2 && me.equippedWeapon) {
+      const gun = DEFUSE_GUNS[me.equippedWeapon.sprite];
+      if (gun && safeDistance(gun.speed) < gun.range && bomb.dist <= gun.range + 60) {
+        const meet = meetingPoint(bomb.dx, bomb.dy, bomb.direction, gun.speed);
+        const turn = Math.abs(angleDiff(me.direction, Math.atan2(meet.y, meet.x) / DEG)) / TURN_DEG;
+        // (while we turn, the bomb comes on and we do not get away from it)
+        if (bomb.dist - (BOMB_SPEED + 1) * turn >= safeDistance(gun.speed)) {
+          this.goalKind = 'defuse';
+          this.did('defuseGoals');
+          return { x: x + meet.x, y: y + meet.y };
+        }
+      }
+    }
+
     // Stick with the current item while it exists
     let target: GameItem | null = null;
     if (this.goalItemId !== null) {
@@ -794,6 +982,27 @@ export class BotController {
 
     // Go after one we have the upper hand over; hunters also go after the rest
     const prey = this.enemies.find(e => e.stance === 'seek' || (this.profile.hunts && e.stance === 'neutral'));
+
+    // No fight at hand: turn towards an item that an enemy is about to get, to shoot it
+    // (design/bots-territory.md, "Denying items")
+    const deny = this.deny;
+    if (deny && this.profile.deniesItems === 2 && !(prey && prey.dist < DENY_FIGHT_RANGE)) {
+      const dx = wrapDelta(deny.item.x - x, PLAY_WIDTH);
+      const dy = wrapDelta(deny.item.y - y, PLAY_HEIGHT);
+      const gun = DENY_GUNS[me.equippedWeapon!.sprite]!;
+      const turn = Math.abs(angleDiff(me.direction, Math.atan2(dy, dx) / DEG)) / TURN_DEG;
+      if (this.denyingId !== deny.item.id) {
+        this.denyingId = deny.item.id;
+        this.denySince = this.tick;
+      }
+      if (this.tick - this.denySince > DENY_GIVE_UP) {
+        this.denyGivenUp.add(deny.item.id);
+      } else if (deny.foeTicks >= turn + Math.hypot(dx, dy) / gun.speed + DENY_DELAY) {
+        this.goalKind = 'deny';
+        this.did('denyGoals');
+        return { x: x + dx, y: y + dy };
+      }
+    }
     if (prey && !this.sense?.filling) {
       this.goalKind = 'seek';
       // With a gun: face the enemy. Without: aim ahead of them to cut them off.
@@ -825,8 +1034,10 @@ export class BotController {
   // Is an enemy bullet, or an H-bomb still far enough to set off safely, coming at us
   // from inside the cone ahead?
   private incomingShot(game: TronGameState, me: TronPlayer, x: number, y: number, halfAngle: number, range: number): boolean {
+    const bombsToo = !this.profile.defusesBombs;   // (otherwise bombs are judged by `bombThreat`)
     for (const proj of game.getProjectiles()) {
       if (proj.type === 'tracer' || proj.ownerSlot === me.slotIndex) continue;
+      if (proj.type === 'bomb' && !bombsToo) continue;
       const dx = wrapDelta(proj.x / 1000 - x, PLAY_WIDTH);
       const dy = wrapDelta(proj.y / 1000 - y, PLAY_HEIGHT);
       const dist = Math.hypot(dx, dy);
@@ -836,6 +1047,146 @@ export class BotController {
       if (Math.abs(angleDiff(proj.direction, Math.atan2(-dy, -dx) / DEG)) <= 25) return true;
     }
     return false;
+  }
+
+  /**
+   * The nearest H-bomb in flight that will go off within reach of us if it and we both
+   * carry straight on. A bomb goes off when its nose touches something solid, our own
+   * fresh trail included, or when it reaches us; the blast kills within 50 px.
+   */
+  private bombThreat(game: TronGameState, me: TronPlayer, x: number, y: number): BombThreat | null {
+    let nearest: BombThreat | null = null;
+    let any = false;
+    const pixels = game.pixels;
+    const myCos = Math.cos(me.direction * DEG);
+    const mySin = Math.sin(me.direction * DEG);
+    for (const proj of game.getProjectiles()) {
+      if (proj.type !== 'bomb') continue;
+      any = true;
+      if (proj.ownerSlot === me.slotIndex) continue;
+      const dx = wrapDelta(proj.x / 1000 - x, PLAY_WIDTH);
+      const dy = wrapDelta(proj.y / 1000 - y, PLAY_HEIGHT);
+      const dist = Math.hypot(dx, dy);
+      if (nearest && dist >= nearest.dist) continue;
+      if (!this.threatIds.has(proj.id)) {
+        // Follow both of us ahead, in coordinates relative to where we are now
+        const cos = Math.cos(proj.direction * DEG);
+        const sin = Math.sin(proj.direction * DEG);
+        let bx = dx;
+        let by = dy;
+        let gap = Infinity;
+        for (let t = 1; t <= BOMB_HORIZON; t++) {
+          bx += cos * BOMB_SPEED;
+          by += sin * BOMB_SPEED;
+          const mx = myCos * t;
+          const my = mySin * t;
+          const nx = bx + cos * BOMB_NOSE;
+          const ny = by + sin * BOMB_NOSE;
+          // Along our trail-to-be, and how far beside it
+          const along = nx * myCos + ny * mySin;
+          const beside = Math.abs(ny * myCos - nx * mySin);
+          if (Math.hypot(bx - mx, by - my) < BLAST_MARGIN ||
+              (beside <= BOMB_HALF_WIDTH && along >= 0 && along <= t) ||
+              pixels.hasWrapped(Math.floor(x + nx), Math.floor(y + ny))) {
+            gap = Math.hypot(bx - mx, by - my);
+            break;
+          }
+        }
+        if (gap >= BLAST_RADIUS + BLAST_MARGIN) continue;
+        this.threatIds.add(proj.id);
+        this.counts.bombThreats++;
+      }
+      nearest = { id: proj.id, dx, dy, dist, direction: proj.direction };
+    }
+    if (!any && this.threatIds.size > 0) this.threatIds.clear();
+    return nearest;
+  }
+
+  /**
+   * The item most worth a shot, if any: one that an enemy gets to before us, soon, that
+   * is in range of the gun we hold with nothing in between, while we have shots to spare.
+   */
+  private denyTarget(game: TronGameState, me: TronPlayer, x: number, y: number): DenyTarget | null {
+    const weapon = me.equippedWeapon;
+    const gun = weapon ? DENY_GUNS[weapon.sprite] : undefined;
+    if (!gun || !this.sense || (weapon!.ammo ?? 0) <= gun.reserve) return null;
+    let best: DenyTarget | null = null;
+    let bestDist = gun.range;
+    for (const item of game.items) {
+      if (!item.active || this.denyGivenUp.has(item.id)) continue;
+      if (!item.mystery && BAD_ITEMS.has(item.sprite)) continue;   // They are welcome to those
+      const dx = wrapDelta(item.x - x, PLAY_WIDTH);
+      const dy = wrapDelta(item.y - y, PLAY_HEIGHT);
+      const dist = Math.hypot(dx, dy);
+      if (dist < DENY_MIN_DIST || dist >= bestDist) continue;
+      const foeTicks = this.sense.foeFirst(item.x, item.y);
+      if (foeTicks < 0 || foeTicks > DENY_HORIZON || foeTicks < dist / gun.speed + DENY_DELAY) continue;
+      // Nobody of ours in the way
+      if (game.gameMode === 'team' && game.players.some(p => p.alive && p.slotIndex !== me.slotIndex && p.slotIndex % 2 === me.slotIndex % 2 &&
+          this.between(dx, dy, dist, wrapDelta(p.x / 1000 - x, PLAY_WIDTH), wrapDelta(p.y / 1000 - y, PLAY_HEIGHT)))) continue;
+      if (!this.clearLine(game.pixels, x, y, dx / dist, dy / dist, 4, dist - ITEM_COLLISION_RADIUS)) continue;
+      best = { item, foeTicks };
+      bestDist = dist;
+    }
+    return best;
+  }
+
+  // Is the point at (rx, ry) from us near the way to the point `dist` away at (dx, dy)?
+  private between(dx: number, dy: number, dist: number, rx: number, ry: number): boolean {
+    const along = (rx * dx + ry * dy) / dist;
+    return along > 0 && along < dist && Math.abs(rx * dy - ry * dx) / dist < 20;
+  }
+
+  // No solid pixel between `from` and `to` px away from (x, y) in the direction (cos, sin)?
+  private clearLine(pixels: PixelGrid, x: number, y: number, cos: number, sin: number, from: number, to: number): boolean {
+    for (let d = from; d < to; d++) {
+      if (pixels.hasWrapped(Math.floor(x + cos * d), Math.floor(y + sin * d))) return false;
+    }
+    return true;
+  }
+
+  // Is the item to deny in our sights right now?
+  private denyShot(game: TronGameState, me: TronPlayer, x: number, y: number): boolean {
+    const deny = this.deny;
+    if (!deny || !deny.item.active || !game.items.includes(deny.item)) return false;
+    const dx = wrapDelta(deny.item.x - x, PLAY_WIDTH);
+    const dy = wrapDelta(deny.item.y - y, PLAY_HEIGHT);
+    const dist = Math.hypot(dx, dy);
+    if (dist < DENY_MIN_DIST) return false;
+    const off = Math.abs(angleDiff(me.direction, Math.atan2(dy, dx) / DEG));
+    if (off > Math.atan2(DENY_AIM, dist) / DEG) return false;
+    const rad = me.direction * DEG;
+    return this.clearLine(game.pixels, x, y, Math.cos(rad), Math.sin(rad), 4, dist - ITEM_COLLISION_RADIUS);
+  }
+
+  /**
+   * What the bombs in flight mean for the gun in our hands: 'hold' = one is in the line of
+   * fire so close that its blast would reach us; 'shoot' = the one coming for us is in
+   * our sights, and not that close.
+   */
+  private bombInSights(game: TronGameState, me: TronPlayer, x: number, y: number, weapon: string): 'shoot' | 'hold' | null {
+    const gun = DEFUSE_GUNS[weapon];
+    if (!gun) return null;
+    let verdict: 'shoot' | null = null;
+    for (const proj of game.getProjectiles()) {
+      if (proj.type !== 'bomb') continue;
+      const dx = wrapDelta(proj.x / 1000 - x, PLAY_WIDTH);
+      const dy = wrapDelta(proj.y / 1000 - y, PLAY_HEIGHT);
+      const dist = Math.hypot(dx, dy);
+      if (dist > gun.range) continue;
+      const off = Math.abs(angleDiff(me.direction, Math.atan2(dy, dx) / DEG));
+      // (the bomb is 12 px wide and 18 long)
+      if (off > Math.atan2(BOMB_NOSE + 3, dist) / DEG + gun.spread) continue;
+      if (dist < holdDistance(gun.speed)) return 'hold';
+    }
+    // The one coming for us: aim at where the shot will meet it
+    const threat = this.threat;
+    if (threat && threat.dist <= gun.range && threat.dist >= holdDistance(gun.speed)) {
+      const meet = meetingPoint(threat.dx, threat.dy, threat.direction, gun.speed);
+      const off = Math.abs(angleDiff(me.direction, Math.atan2(meet.y, meet.x) / DEG));
+      if (off <= Math.max(gun.spread, Math.atan2(BOMB_HALF_WIDTH + 2, Math.hypot(meet.x, meet.y)) / DEG)) verdict = 'shoot';
+    }
+    return verdict;
   }
 
   // === Weapons ===
@@ -868,13 +1219,32 @@ export class BotController {
     const full = this.profile.weapons === 'full';
     const pulse = this.tick % 8 < 4; // Rising edge every 8 ticks for single-shot weapons
 
+    // H-bombs in flight: set off the one coming for us, from a distance; never one that
+    // is close (design/local-and-ai.md, "Bombs in flight")
+    let defuse = false;
+    if (this.profile.defusesBombs && full) {
+      const verdict = this.bombInSights(game, me, x, y, weapon.sprite);
+      if (verdict === 'hold') {
+        this.did('heldFire');
+        return false;
+      }
+      defuse = verdict === 'shoot';
+      if (defuse) this.did('defuseShots');
+    }
+    // An item an enemy is about to pick up, in our sights (design/bots-territory.md)
+    const deny = full && !!this.profile.deniesItems && this.denyShot(game, me, x, y);
+    if (deny) {
+      this.did('denyShots');
+      this.shotAt = this.deny!.item;
+    }
+
     switch (weapon.sprite) {
       case 'glock':
-        return ((full && inCone(6, 300)) || boxedIn) && pulse;
+        return ((full && inCone(6, 300)) || boxedIn || defuse || deny) && pulse;
       case 'shotgun':
-        return ((full && inCone(8, 220)) || boxedIn || shootDown(8, 240)) && pulse;
+        return ((full && inCone(8, 220)) || boxedIn || shootDown(8, 240) || defuse || deny) && pulse;
       case 'rifle':
-        return (full && inCone(5, 350)) || straightFree < 35 || shootDown(5, 350);
+        return (full && inCone(5, 350)) || straightFree < 35 || shootDown(5, 350) || defuse || deny;
       case 'uzi':
         // (it only reaches 50 px)
         return (full && inCone(28, 70)) || straightFree < 35 || shootDown(28, 55);
