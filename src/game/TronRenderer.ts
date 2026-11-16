@@ -5,6 +5,7 @@ import type { GameMode, SlotIndex } from '../types/lobby';
 import { FFA_COLORS, TEAM_COLORS, getSlotColor, getSlotColorName } from '../types/lobby';
 import { NO_OWNER } from '../types/game';
 import { describeDeath } from './deathLabels';
+import { CONTROL_SCHEMES } from './input/controlSchemes';
 import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard, DeathCause } from '../types/game';
 import type { GamePlayer } from '../types/game';
 import { PLAY_WIDTH, PLAY_HEIGHT, TICK_RATE } from './constants';
@@ -49,6 +50,8 @@ export class TronRenderer {
 
   // Player configs for rendering
   private players: GamePlayer[];
+  // Keyboard hints next to the "this is you" sign of the countdown: not on touch layouts
+  private readonly showKeys: boolean;
 
   // Sprite atlas for items/portals
   private spriteAtlas: SpriteAtlas | null = null;
@@ -84,6 +87,7 @@ export class TronRenderer {
 
   constructor(container: HTMLElement, players: GamePlayer[], fullscreen: boolean = false) {
     this.players = players;
+    this.showKeys = !fullscreen;
 
     // Create main canvas - scaled to fit viewport while keeping aspect ratio
     this.canvas = document.createElement('canvas');
@@ -275,6 +279,7 @@ export class TronRenderer {
     switch (round.phase) {
       case 'countdown':
         this.drawCountdownOverlay(round.countdown);
+        this.drawOwnPlayerSigns(round.players, round.countdown);
         break;
       case 'waiting_ready':
         this.drawWaitingReadyOverlay(match, round.roundWinner);
@@ -889,6 +894,73 @@ export class TronRenderer {
     this.ctx.shadowBlur = 20;
     this.ctx.fillText(text, PLAY_WIDTH / 2, CANVAS_HEIGHT / 2);
     this.ctx.shadowBlur = 0;
+  }
+
+  /**
+   * During the countdown: a rotating sign around every player steered on this machine, so
+   * that one finds oneself before the round starts, with the name when there are several
+   * and, on a keyboard, the keys.
+   */
+  private drawOwnPlayerSigns(players: readonly TronPlayerState[], countdown: number): void {
+    const own = this.players.filter(p => p.control.type === 'local');
+    if (own.length === 0) return;
+    const ctx = this.ctx;
+    const spin = -countdown * Math.PI * 1.5;                       // 3/4 of a turn per second
+    const radius = 15 + 3 * Math.sin(countdown * Math.PI * 2);     // ...and breathing
+    ctx.save();
+    // (the arena only: a sign near the right edge must not spill over the status panel)
+    ctx.beginPath();
+    ctx.rect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+    ctx.clip();
+    for (const config of own) {
+      const state = players.find(p => p.slotIndex === config.slotIndex);
+      if (!state?.alive) continue;
+      const x = Math.floor(state.x / 1000) + 0.5;
+      const y = Math.floor(state.y / 1000) + 0.5;
+
+      // Three arcs going round, in the player's colour over a dark edge
+      ctx.lineCap = 'round';
+      for (const [width, style] of [[5, 'rgba(0, 0, 0, 0.7)'], [2.5, config.color]] as const) {
+        ctx.lineWidth = width;
+        ctx.strokeStyle = style;
+        for (let k = 0; k < 3; k++) {
+          const from = spin + (k * Math.PI * 2) / 3;
+          ctx.beginPath();
+          ctx.arc(x, y, radius, from, from + Math.PI * 0.42);
+          ctx.stroke();
+        }
+      }
+      // Which way it will go
+      const heading = (state.direction * Math.PI) / 180;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(heading) * (radius + 12), y + Math.sin(heading) * (radius + 12));
+      ctx.lineTo(x + Math.cos(heading + 0.35) * (radius + 4), y + Math.sin(heading + 0.35) * (radius + 4));
+      ctx.lineTo(x + Math.cos(heading - 0.35) * (radius + 4), y + Math.sin(heading - 0.35) * (radius + 4));
+      ctx.closePath();
+      ctx.fill();
+
+      // "YOU" (the name if several play here) and the keys, on the side with more room
+      const scheme = config.control.type === 'local' ? CONTROL_SCHEMES[config.control.scheme] : null;
+      const lines = [own.length > 1 ? config.nickname : 'YOU'];
+      if (this.showKeys && scheme) lines.push(...scheme.label.split(' · '));
+      const below = y < PLAY_HEIGHT / 2;
+      ctx.font = 'bold 13px monospace';
+      ctx.textBaseline = 'middle';
+      const width = Math.max(...lines.map(line => ctx.measureText(line).width));
+      const left = x < PLAY_WIDTH / 2;
+      ctx.textAlign = left ? 'left' : 'right';
+      const tx = Math.max(6 + (left ? 0 : width), Math.min(PLAY_WIDTH - 6 - (left ? width : 0), left ? x - 10 : x + 10));
+      lines.forEach((line, i) => {
+        const ty = below ? y + radius + 24 + i * 16 : y - radius - 24 - (lines.length - 1 - i) * 16;
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.strokeText(line, tx, ty);
+        ctx.fillStyle = i === 0 ? config.color : '#ddd';
+        ctx.fillText(line, tx, ty);
+      });
+    }
+    ctx.restore();
   }
 
   private drawWaitingReadyOverlay(match: TronMatchState, roundWinner: SlotIndex | 'draw' | null): void {

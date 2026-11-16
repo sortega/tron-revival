@@ -139,6 +139,22 @@ a touch device therefore supports one human (plus bots) unless a keyboard is att
 
 `InputManager` owns all key listeners and returns `Map<SlotIndex, TronInput>` each tick.
 
+### Finding yourself: the countdown sign
+
+During the countdown of every round the renderer draws, around each player **steered on
+this machine** (control type `local`; nothing for bots, remote players or spectators):
+
+- three arcs in the player's colour going round the head (3/4 of a turn per second,
+  radius breathing between 12 and 18 px), with a white arrowhead on the side it will
+  drive off to;
+- `YOU`, or the nickname when several people play on this machine;
+- on the desktop layout only, the keys of that player's scheme (`← →` / `↑`, or the two
+  lines of the solo scheme). The phone layout has its controls on screen already.
+
+The text goes on the side of the head with more room, inside the arena. It is drawn on the
+canvas over the countdown veil and disappears with it (`TronRenderer.drawOwnPlayerSigns`).
+In network games it also shows after a seat change, which is when it is most needed.
+
 ## Local game setup screen
 
 Main menu → **LOCAL GAME** opens a setup screen:
