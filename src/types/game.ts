@@ -21,10 +21,17 @@ export interface GamePlayer {
    * changes between rounds, the slot's score starts again (design/spectators.md).
    */
   owner?: string;
+  /** Set for a bot on every machine (`control` says 'ai' only where the bot runs). */
+  bot?: BotDifficulty;
 }
 
-/** A player as announced in the game stream: slot, nickname, colour, owner ('ai' = bot). */
-export type RosterEntry = [slot: number, nickname: string, color: string, owner: string];
+/** The difficulty of a bot, undefined for a human. */
+export function botOf(player: GamePlayer): BotDifficulty | undefined {
+  return player.bot ?? (player.control.type === 'ai' ? player.control.difficulty : undefined);
+}
+
+/** A player as announced in the game stream: slot, nickname, colour, owner ('ai' = bot), bot difficulty. */
+export type RosterEntry = [slot: number, nickname: string, color: string, owner: string, bot?: BotDifficulty];
 
 /** The one-shot events of a frame: must be applied exactly once, in tick order. */
 export interface FrameEvents {

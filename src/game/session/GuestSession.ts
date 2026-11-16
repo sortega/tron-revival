@@ -169,6 +169,7 @@ export class GuestSession implements GameSession {
     this.rosterKey = key;
     this.onRoster?.(identities.map((p): GamePlayer => ({
       slotIndex: p.slotIndex, nickname: p.nickname, color: p.color, owner: p.owner,
+      ...(p.bot && { bot: p.bot }),
       control: p.slotIndex === this.mySlot ? { type: 'local', scheme: 'solo' } : { type: 'remote' },
     })));
   }

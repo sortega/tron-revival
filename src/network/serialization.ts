@@ -7,6 +7,8 @@ import type {
   TronGameStateData, TronMatchState, TronPlayerState, TronRoundState,
 } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
+import { botOf } from '../types/game';
+import type { BotDifficulty } from '../types/game';
 import type { SmoothLinesData } from '../game/display/SmoothLines';
 
 /** Static player data that is not repeated in every frame. */
@@ -89,23 +91,29 @@ function unpackEarlier(packed: PackedEarlier): FrameEvents | null {
   return { ...unpackEvents({ soundEvents: [], ...rest, newTrailSegments }), tick };
 }
 
+type RosterIdentity = PlayerIdentity & { owner: string; bot?: BotDifficulty };
+
 /** The roster as it travels in the game stream (design/spectators.md). */
 export function toRoster(players: readonly GamePlayer[]): RosterEntry[] {
-  return players.map(p => [p.slotIndex, p.nickname, p.color, p.owner ?? '']);
+  return players.map((p): RosterEntry => {
+    const bot = botOf(p);
+    return bot ? [p.slotIndex, p.nickname, p.color, p.owner ?? '', bot] : [p.slotIndex, p.nickname, p.color, p.owner ?? ''];
+  });
 }
 
 /** Tolerant of malformed entries: anything unusable is dropped. */
-export function rosterIdentities(roster: readonly RosterEntry[]): (PlayerIdentity & { owner: string })[] {
-  const result: (PlayerIdentity & { owner: string })[] = [];
+export function rosterIdentities(roster: readonly RosterEntry[]): RosterIdentity[] {
+  const result: RosterIdentity[] = [];
   for (const entry of roster) {
     if (!Array.isArray(entry)) continue;
-    const [slot, nickname, color, owner] = entry;
+    const [slot, nickname, color, owner, bot] = entry;
     if (typeof slot !== 'number' || slot < 0 || slot > 3 || !Number.isInteger(slot)) continue;
     result.push({
       slotIndex: slot as SlotIndex,
       nickname: typeof nickname === 'string' ? nickname : '',
       color: typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) ? color : '#ffffff',
       owner: typeof owner === 'string' ? owner : '',
+      ...((bot === 'easy' || bot === 'normal' || bot === 'hard') && { bot }),
     });
   }
   return result;

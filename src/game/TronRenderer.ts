@@ -3,7 +3,7 @@
 import { decodePng } from './png';
 import type { GameMode, SlotIndex } from '../types/lobby';
 import { FFA_COLORS, TEAM_COLORS, getSlotColor, getSlotColorName } from '../types/lobby';
-import { NO_OWNER } from '../types/game';
+import { NO_OWNER, botOf } from '../types/game';
 import { describeDeath } from './deathLabels';
 import { CONTROL_SCHEMES } from './input/controlSchemes';
 import type { TronRoundState, TronMatchState, TrailSegment, LevelDefinition, TeleportPortal, GameItem, TronPlayerState, Projectile, Explosion, Bodyguard, DeathCause } from '../types/game';
@@ -29,6 +29,9 @@ const CANVAS_HEIGHT = 600;
 export const CANVAS_ASPECT = CANVAS_WIDTH / CANVAS_HEIGHT;
 const STATUS_WIDTH = 50;
 const PLAYER_HEAD_SIZE = 1;
+// Side panel, from the top of a player's 150 px: effect icon, robot head of a bot, weapon icon
+const EFFECT_ICON_Y = 30;
+const BOT_ICON_Y = 80;
 
 export class TronRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -762,7 +765,8 @@ export class TronRenderer {
         key += '|-';
         continue;
       }
-      key += `|${state.alive ? 1 : 0}${this.ridiculousDeathSlots.has(slotIndex) ? 'r' : ''}`;
+      const bot = botOf(this.players.find(p => p.slotIndex === slotIndex)!);
+      key += `|${state.alive ? 1 : 0}${this.ridiculousDeathSlots.has(slotIndex) ? 'r' : ''}${bot ?? ''}`;
       const effect = state.activeEffects?.[0];
       if (effect) key += `,${effect.sprite}:${Math.ceil(effect.remainingFrames / TICK_RATE)}`;
       const weapon = state.equippedWeapon;
@@ -793,6 +797,12 @@ export class TronRenderer {
       const slotIndex = i as SlotIndex;
       const player = this.players.find(p => p.slotIndex === slotIndex);
       const playerState = playerStates.find(p => p.slotIndex === slotIndex);
+
+      // A robot head marks a bot, one face per difficulty; it goes grey with the panel
+      const bot = player && botOf(player);
+      if (bot && playerState && this.spriteAtlas?.isLoaded()) {
+        this.spriteAtlas.draw(ctx, `bot_${bot}`, panelX + STATUS_WIDTH / 2, y + BOT_ICON_Y);
+      }
 
       // The panel of a dead player, or of a slot nobody plays in, is grey
       const desaturation = player && playerState?.alive ? 0 : 1;
@@ -833,7 +843,7 @@ export class TronRenderer {
               ctx,
               effect.sprite + '_sidebar',
               centerX,
-              y + slotHeight * 0.25
+              y + EFFECT_ICON_Y
             );
             // Draw remaining seconds below icon in black
             const remainingSecs = Math.ceil(effect.remainingFrames / TICK_RATE);
@@ -841,7 +851,7 @@ export class TronRenderer {
             ctx.font = 'bold 14px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            ctx.fillText(`${remainingSecs}s`, centerX, y + slotHeight * 0.25 + 22);
+            ctx.fillText(`${remainingSecs}s`, centerX, y + EFFECT_ICON_Y + 22);
           }
         }
 

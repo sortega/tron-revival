@@ -103,6 +103,14 @@ time or ammunition left. A player who dies **loses the weapon and effects** (in 
 simulation, not just on screen) and the panel turns grey, like the panel of a slot nobody
 plays in. In team mode the panels use the team colours ([teams.md](./teams.md)).
 
+A **bot** has a small robot head between its effect and its weapon, one face per
+difficulty: green eyes and a smile (easy), yellow eyes and a grille (normal), red slanted
+eyes, teeth and horns (hard). The three 24 px sprites (`bot_easy`, `bot_normal`,
+`bot_hard`) are drawn by `scripts/make-bot-icons.mjs` in the manner of the item icons.
+Every machine must know the difficulty, so `GamePlayer.bot` carries it (`control` says
+`ai` only on the machine that runs the bot) and the roster of the game stream has it as an
+optional fifth field ([spectators.md](./spectators.md)).
+
 Every death goes off with a small **explosion** where the player was (the original's
 `Puf()`): the same animation as a bullet impact, but it clears and kills nothing, and it
 plays to the end even when the death ended the round.

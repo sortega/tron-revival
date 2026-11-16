@@ -286,6 +286,7 @@ export function buildGameConfig(room: SharedRoom, selfId: string): GameConfig {
     players.push({
       slotIndex: i, nickname: entry.name, color: getSlotColor(room.gameMode, i), control,
       owner: entry.userId ?? 'ai',
+      ...(entry.ai && { bot: entry.ai }),
     });
   }
   return { players, gameMode: room.gameMode, levelMode: room.levelMode };

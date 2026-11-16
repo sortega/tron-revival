@@ -60,6 +60,7 @@ export function buildLocalConfig(setup: LocalSetupState): GameConfig {
       control: kind === 'human'
         ? { type: 'local', scheme: schemes.get(slot)! }
         : { type: 'ai', difficulty: kind.slice(3) as BotDifficulty },
+      ...(kind !== 'human' && { bot: kind.slice(3) as BotDifficulty }),
     });
   }
   return { players, gameMode: setup.gameMode, levelMode: setup.levelMode };

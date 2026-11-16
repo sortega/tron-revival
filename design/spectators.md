@@ -142,8 +142,8 @@ The room state and the game stream travel separately, so the stream itself says 
 
 ```ts
 // TronGameStateData.roster — sent when it changes, once a second, and in snapshots
-type RosterEntry = [slot: number, nickname: string, color: string, owner: string];
-// owner: userId of the human in the seat, '' for a bot
+type RosterEntry = [slot: number, nickname: string, color: string, owner: string, bot?: BotDifficulty];
+// owner: userId of the human in the seat, 'ai' for a bot; bot: its difficulty (side-panel icon)
 ```
 
 - `TronGameState.setNextPlayers(players)` stores the next roster; `initRound` applies it:
