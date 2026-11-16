@@ -38,109 +38,119 @@ const SOUND_FILES: Record<SoundName, string> = {
 };
 
 const MUTED_STORAGE_KEY = 'teratron-muted';
+const VOLUME = 0.5;
+/** The same effect is not started again within this time (ms). */
+const MIN_REPEAT_MS = 25;
+/** Events that let a browser start (or restart) audio. */
+const UNLOCK_EVENTS = ['pointerup', 'touchend', 'click', 'keydown'] as const;
 
+// Web Audio, not audio elements: phones refuse or delay elements started outside a touch
+// handler. See design/sound.md.
 export class SoundManager {
-  private sounds: Map<SoundName, HTMLAudioElement> = new Map();
-  private loadedCount = 0;
-  private totalCount = Object.keys(SOUND_FILES).length;
-  private loopingSounds: Map<string, HTMLAudioElement> = new Map();
-  private preloadPromise: Promise<void>;
-  private muted: boolean = false;
+  private readonly context: AudioContext | null;
+  private readonly output: GainNode | null = null;
+  private readonly buffers = new Map<SoundName, AudioBuffer>();
+  private readonly lastStart = new Map<SoundName, number>();
+  private readonly loopingSounds = new Map<string, AudioBufferSourceNode>();
+  /** Loops asked for before their file was decoded: key -> sound. */
+  private readonly pendingLoops = new Map<string, SoundName>();
+  private muted: boolean;
 
   constructor() {
-    // Load mute preference from localStorage
     this.muted = localStorage.getItem(MUTED_STORAGE_KEY) === 'true';
-    this.preloadPromise = this.preloadSounds();
-  }
+    const Context = typeof AudioContext !== 'undefined' ? AudioContext : null;
+    this.context = Context ? new Context() : null;
+    if (!this.context) return;
+    this.output = this.context.createGain();
+    this.output.gain.value = VOLUME;
+    this.output.connect(this.context.destination);
 
-  private preloadSounds(): Promise<void> {
-    const basePath = `${import.meta.env.BASE_URL}assets/sounds/`;
-    const loadPromises: Promise<void>[] = [];
-
-    for (const [name, file] of Object.entries(SOUND_FILES)) {
-      const audio = new Audio();
-      audio.preload = 'auto';
-
-      const loadPromise = new Promise<void>((resolve) => {
-        audio.addEventListener('canplaythrough', () => {
-          this.loadedCount++;
-          resolve();
-        }, { once: true });
-
-        audio.addEventListener('error', () => {
-          console.warn(`Failed to load sound: ${name}`);
-          this.loadedCount++;
-          resolve(); // Still resolve to not block other sounds
-        }, { once: true });
-      });
-
-      // Set src after adding listeners to ensure events fire
-      audio.src = basePath + file;
-      this.sounds.set(name as SoundName, audio);
-      loadPromises.push(loadPromise);
+    // The iPhone's silent switch should not mute the game (Safari only)
+    const session = (navigator as { audioSession?: { type: string } }).audioSession;
+    if (session) {
+      try { session.type = 'playback'; } catch { /* not supported after all */ }
     }
 
-    return Promise.all(loadPromises).then(() => {
-      console.log(`[SoundManager] Loaded ${this.loadedCount}/${this.totalCount} sounds`);
-    });
+    // The context starts suspended, and iOS suspends it again after an interruption
+    for (const type of UNLOCK_EVENTS) window.addEventListener(type, this.unlock, true);
+    document.addEventListener('visibilitychange', this.unlock);
+    void this.loadSounds();
   }
 
-  // Wait for all sounds to load
-  async waitForLoad(): Promise<void> {
-    await this.preloadPromise;
+  private unlock = (): void => {
+    const context = this.context;
+    if (!context || document.hidden || context.state === 'running') return;
+    context.resume().catch(() => { /* still not allowed: the next gesture tries again */ });
+  };
+
+  private async loadSounds(): Promise<void> {
+    const context = this.context;
+    if (!context) return;
+    const basePath = `${import.meta.env.BASE_URL}assets/sounds/`;
+    await Promise.all(Object.entries(SOUND_FILES).map(async ([name, file]) => {
+      try {
+        const response = await fetch(basePath + file);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const buffer = await context.decodeAudioData(await response.arrayBuffer());
+        this.buffers.set(name as SoundName, buffer);
+      } catch (err) {
+        console.warn(`Failed to load sound: ${name}`, err);
+      }
+    }));
+    for (const [key, name] of this.pendingLoops) this.startLoop(name, key);
+    this.pendingLoops.clear();
   }
 
-  isLoaded(): boolean {
-    return this.loadedCount >= this.totalCount;
+  private source(name: SoundName): AudioBufferSourceNode | null {
+    const buffer = this.buffers.get(name);
+    if (!this.context || !this.output || !buffer) return null;
+    const source = this.context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(this.output);
+    return source;
   }
 
   play(name: SoundName): void {
-    if (this.muted) return;
-
-    const audio = this.sounds.get(name);
-    if (audio) {
-      // Clone the audio to allow overlapping sounds
-      const clone = audio.cloneNode() as HTMLAudioElement;
-      clone.volume = 0.5;
-      clone.play().catch(() => {
-        // Ignore autoplay errors (browser may block until user interaction)
-      });
-    }
+    // Not queued while the context is suspended: everything would sound at once later
+    if (this.muted || this.context?.state !== 'running') return;
+    const now = performance.now();
+    if (now - (this.lastStart.get(name) ?? -Infinity) < MIN_REPEAT_MS) return;
+    const source = this.source(name);
+    if (!source) return;
+    this.lastStart.set(name, now);
+    source.start();
   }
 
   // Start a looping sound with a unique key (e.g., player slot)
   playLoop(name: SoundName, key: string): void {
     // Don't restart if already playing
-    if (this.loopingSounds.has(key)) return;
-    if (this.muted) return;
+    if (this.muted || this.loopingSounds.has(key)) return;
+    if (this.buffers.has(name)) this.startLoop(name, key);
+    else this.pendingLoops.set(key, name);
+  }
 
-    const audio = this.sounds.get(name);
-    if (audio) {
-      const clone = audio.cloneNode() as HTMLAudioElement;
-      clone.volume = 0.5;
-      clone.loop = true;
-      clone.play().catch(() => {});
-      this.loopingSounds.set(key, clone);
-    }
+  private startLoop(name: SoundName, key: string): void {
+    const source = this.source(name);
+    if (!source) return;
+    source.loop = true;
+    source.start();   // (heard once the context runs)
+    this.loopingSounds.set(key, source);
   }
 
   // Stop a looping sound by key
   stopLoop(key: string): void {
-    const audio = this.loopingSounds.get(key);
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
+    this.pendingLoops.delete(key);
+    const source = this.loopingSounds.get(key);
+    if (source) {
+      source.stop();
+      source.disconnect();
       this.loopingSounds.delete(key);
     }
   }
 
   // Stop all looping sounds (e.g., on round end)
   stopAllLoops(): void {
-    for (const audio of this.loopingSounds.values()) {
-      audio.pause();
-      audio.currentTime = 0;
-    }
-    this.loopingSounds.clear();
+    for (const key of [...this.loopingSounds.keys(), ...this.pendingLoops.keys()]) this.stopLoop(key);
   }
 
   // Toggle mute state
