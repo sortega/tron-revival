@@ -31,7 +31,9 @@ export interface HumanProfile {
   panicDist: number;        // Free pixels ahead under which the bot panics
   panicOversteer: Range;    // Extra ticks a turn is held when panicking
   reverse: ReverseProfile;  // Control Reversal
-  disorient: Range;         // Frozen after being swapped / teleported
+  disorient: Range;         // Lost (no reactions) after being swapped / teleported
+  dazeLag: Range;           // Extra steering lag while dazed, after having been lost
+  wrongBike: number;        // Probability of watching the wrong bike first, swapped under colour blindness
 }
 
 export const HUMAN_PROFILES: Record<BotDifficulty, HumanProfile> = {
@@ -40,21 +42,21 @@ export const HUMAN_PROFILES: Record<BotDifficulty, HumanProfile> = {
     fireHesitation: [14, 30], tapPeriod: [13, 20], steerLag: [0, 2], minPress: 4, sideMargin: 2, headMargin: 10,
     panicDist: 28, panicOversteer: [0, 1],
     reverse: { notice: [40, 70], slip: 0.8, adapt: 300, catch: [12, 20], overCorrect: 0.6 },
-    disorient: [30, 50],
+    disorient: [30, 50], dazeLag: [3, 6], wrongBike: 0.5,
   },
   normal: {
     trackDelay: 15, arenaGlance: 36, surprise: [22, 32], attention: 2, glance: [35, 60], aimSigma: 2,
     fireHesitation: [7, 14], tapPeriod: [10, 13], steerLag: [0, 2], minPress: 4, sideMargin: 2, headMargin: 7,
     panicDist: 20, panicOversteer: [0, 1],
     reverse: { notice: [22, 34], slip: 0.75, adapt: 150, catch: [10, 16], overCorrect: 0.6 },
-    disorient: [18, 28],
+    disorient: [18, 28], dazeLag: [2, 4], wrongBike: 0.35,
   },
   hard: {
     trackDelay: 11, arenaGlance: 24, surprise: [16, 22], attention: 3, glance: [35, 60], aimSigma: 1.2,
     fireHesitation: [4, 9], tapPeriod: [8, 10], steerLag: [0, 1], minPress: 3, sideMargin: 1, headMargin: 5,
     panicDist: 14, panicOversteer: [0, 1],
     reverse: { notice: [14, 20], slip: 0.5, adapt: 50, catch: [7, 11], overCorrect: 0.3 },
-    disorient: [10, 16],
+    disorient: [10, 16], dazeLag: [1, 3], wrongBike: 0.2,
   },
 };
 
@@ -101,6 +103,8 @@ export function scaleProfile(p: HumanProfile, s: number): HumanProfile {
       overCorrect: p.reverse.overCorrect * s,
     },
     disorient: scaleRange(p.disorient, s),
+    dazeLag: scaleRange(p.dazeLag, s),
+    wrongBike: Math.min(1, p.wrongBike * s),
   };
 }
 

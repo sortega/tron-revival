@@ -18,6 +18,9 @@ import { Perception } from './perception';
 
 const JUMP = 8;               // Moving further than this in a tick is a teleport (px)
 const TURNING_MEMORY = 20;    // "Have I been turning lately" looks this far back (ticks)
+const DAZE = 3;               // Dazed for this many times as long as it was lost...
+const DAZE_MAX = 280;         // ...at most (ticks)
+const BLIND_SWAP = 2.5;       // Swapped under colour blindness: lost this much longer
 
 export interface HumanBotOptions {
   /** Planner profile, when it is not the difficulty's own. */
@@ -47,6 +50,7 @@ export class HumanBot {
   private lastX = 0;
   private lastY = 0;
   private turning = 0;          // Fraction of the recent past spent steering
+  private wasBlind = false;     // Were the colours scrambled a tick ago?
   /** Is the bot in a panic (something right ahead)? For tests and tuning. */
   panic = false;
 
@@ -87,12 +91,15 @@ export class HumanBot {
         motor.reset();
         this.turning = 0;
         this.panic = false;
+        this.wasBlind = false;
       }
       return this.planner.decide(game);
     }
 
     const x = me.x / 1000;
     const y = me.y / 1000;
+    // Colour blindness ("daltonismo"): nobody's colours are what they were
+    const blind = game.colorBlindnessFrames > 0;
     if (!this.playing) {
       this.playing = true;
     } else {
@@ -103,20 +110,40 @@ export class HumanBot {
           Math.hypot(x - p.x1, y - p.y1) < PORTAL_OUTER_RADIUS + JUMP ||
           Math.hypot(x - p.x2, y - p.y2) < PORTAL_OUTER_RADIUS + JUMP);
         const ticks = drawTicks(human.disorient, this.rng);
-        motor.freeze(viaPortal ? Math.round(ticks / 2) : ticks);
+        if (viaPortal) {
+          motor.freeze(Math.round(ticks / 2));
+        } else if (blind) {
+          // No colour to look for: which bike answers my keys? Maybe not the one I am watching
+          const twice = this.rng() < human.wrongBike;
+          this.lost(Math.round(ticks * BLIND_SWAP * (twice ? 2 : 1)), true);
+        } else {
+          this.lost(ticks, false);
+        }
+      } else if (blind && !this.wasBlind) {
+        // The colours changed and nobody moved: is that still me?
+        this.lost(Math.round(drawTicks(human.disorient, this.rng) / 2), true);
       }
       // (the planner has planned at least once by now)
       this.panic = this.planner.debug.straightFree < human.panicDist;
     }
+    this.wasBlind = blind;
     this.lastX = x;
     this.lastY = y;
 
-    const world = perception.perceive(game, me, this.panic, this.turning);
+    // (dazed: eyes only for what is right in front, as in a panic)
+    const world = perception.perceive(game, me, this.panic || motor.dazed, this.turning);
     const want = this.planner.decide(world);
     const steer = motor.steer(want.steer, me.hasEffect('reverse'), this.panic);
     const action = motor.trigger(want.action, me.equippedWeapon?.sprite ?? null, this.panic);
     this.turning += ((steer !== 0 ? 1 : 0) - this.turning) / TURNING_MEMORY;
     return { steer, action };
+  }
+
+  // Lost for `ticks`, then dazed (design/bots-human.md, "Disorientation")
+  private lost(ticks: number, searching: boolean): void {
+    this.motor!.freeze(ticks, searching);
+    this.motor!.daze(Math.min(DAZE_MAX, ticks * DAZE));
+    this.planner.lostBearings();
   }
 }
 

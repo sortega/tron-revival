@@ -1,9 +1,9 @@
 {
-  "hard-normal-easy@bus": "state:bd9999e984a13587 frames:8a79f6e67f92910c wire:3731c3b8742af199 rounds:4",
+  "hard-normal-easy@bus": "state:967f3e1829b69d98 frames:94d2e752b4ba90b7 wire:23efc508d669057b rounds:5",
   "4hard@cycle": "state:50f44262a6e8de0d frames:3aa8723788533e44 wire:7054adbac5f5ad31 rounds:2",
   "normal-hard@portals": "state:e0d4fc62e9a46d2c frames:38436c1c0879dcf7 wire:1ca1a55f72b2c8e1 rounds:3",
   "3normal+human@warzone": "state:b20aaa5b37613a69 frames:77aa10a6e57e98e5 wire:9ecce6bfcbef0c04 rounds:2",
-  "hard-easy@dentistry": "state:782173b865a2209f frames:20adb3ba154e7b64 wire:caadc4c5f8e9b330 rounds:5",
+  "hard-easy@dentistry": "state:2cb7f0cfa0085d4d frames:2c20e41e1b0eae4f wire:7492abad2e09fc49 rounds:4",
   "heavy-uzi-4p": "state:7f23b3a37ce2621a frames:a15eb196093d5b8b wire:d11f96f2a3948d69 rounds:1",
   "heavy-rifle-shotgun-4p": "state:b487656049420b2f frames:40c6310835054f34 wire:3e5b38f9379bd383 rounds:2",
   "heavy-hbombs-4p": "state:f42b7474341ff3c1 frames:61a14c7ff050781c wire:6d64ffc532b0d42b rounds:1",

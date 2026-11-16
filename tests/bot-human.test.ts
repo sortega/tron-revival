@@ -632,6 +632,190 @@ describe('human bots: disorientation', () => {
   });
 });
 
+// Colour blindness is private to the simulation; tests switch it on directly
+function scrambleColours(g: Game, ticks = 280): void {
+  (g as unknown as { colorBlindnessRemainingFrames: number }).colorBlindnessRemainingFrames = ticks;
+}
+
+/**
+ * A bot drives 30 ticks in the open, then `event` happens to it. Returns for how many of
+ * its decisions it was lost (the one that notices included) and then dazed, and the keys
+ * it pressed while lost. (The bikes are held in place afterwards: only the keys are watched.)
+ */
+function disoriented(d: BotDifficulty, seed: number, event: 'swap' | 'colours' | 'both', strength?: number): { lost: number; dazed: number; keys: number[] } {
+  const g = arena(300);
+  const bot = new HumanBot(0, d, createRng(seed), strength === undefined ? {} : { strength });
+  for (let t = 0; t < 30; t++) step(g, bot.decide(g), {});
+  if (event !== 'swap') scrambleColours(g);
+  const at = event === 'colours' ? { x: g.players[0]!.x / 1000, y: g.players[0]!.y / 1000 } : { x: 400, y: 140 };
+  place(g, 0, at.x, at.y, 270);
+  const keys: number[] = [];
+  let lost = 1;
+  let dazed = 0;
+  for (let t = 0; t < 700; t++) {
+    const input = bot.decide(g);
+    if (!bot.motor) return { lost: 0, dazed: 0, keys };
+    if (!bot.motor.dazed) break;
+    if (bot.motor.frozen) {
+      lost++;
+      keys.push(input.steer);
+    } else {
+      dazed++;
+    }
+    step(g, { steer: 0 }, {});
+    if (event !== 'swap') scrambleColours(g, 280 - t);
+    place(g, 0, at.x, at.y, 270);
+    place(g, 1, 600, 500, 0);
+  }
+  return { lost, dazed, keys };
+}
+
+describe('human bots: lost and dazed after a Swap', () => {
+  it('every profile is lost for a moment, then dazed three times as long', () => {
+    for (const d of DIFFS) {
+      const profile = HUMAN_PROFILES[d];
+      for (const seed of [1, 2, 3, 4, 5]) {
+        const { lost, dazed, keys } = disoriented(d, seed, 'swap');
+        expect(lost, d).toBeGreaterThanOrEqual(profile.disorient[0]);
+        expect(lost, d).toBeLessThanOrEqual(profile.disorient[1]);
+        expect(dazed, d).toBe(lost * 3);
+        // It knows its colour: no test taps (a key that was down is let go, at most)
+        expect(keys.slice(6).every(k => k === 0), d).toBe(true);
+      }
+    }
+  });
+
+  it('under colour blindness it is lost for much longer, and wiggles to find its bike', () => {
+    for (const d of DIFFS) {
+      const profile = HUMAN_PROFILES[d];
+      let doubled = 0;
+      for (let seed = 1; seed <= 40; seed++) {
+        const { lost, dazed, keys } = disoriented(d, seed, 'both');
+        expect(lost, d).toBeGreaterThanOrEqual(Math.round(profile.disorient[0] * 2.5));
+        expect(lost, d).toBeLessThanOrEqual(Math.round(profile.disorient[1] * 2.5) * 2);
+        expect(lost, d).toBeGreaterThan(profile.disorient[1]);   // Longer than any plain swap
+        if (lost > Math.round(profile.disorient[1] * 2.5)) doubled++;
+        expect(dazed, d).toBe(Math.min(280, lost * 3));
+        // Test taps to both sides, none shorter than a key press of this player
+        expect(keys, d).toContain(1);
+        expect(keys, d).toContain(-1);
+        const taps = keys.slice(6).join('').replace(/-1/g, 'L').split('0').filter(Boolean);
+        for (const tap of taps) expect(tap.length, `${d} ${tap}`).toBe(Math.max(2, profile.minPress));
+        const left = taps.filter(tap => tap[0] === 'L').length;
+        expect(Math.abs(taps.length - 2 * left), d).toBeLessThanOrEqual(1);   // Sides alternate
+      }
+      // Some of them watch the wrong bike first (40 draws at `wrongBike`)
+      expect(doubled, d).toBeGreaterThan(40 * profile.wrongBike * 0.4);
+      expect(doubled, d).toBeLessThan(40 * profile.wrongBike * 1.7);
+    }
+  }, 60_000);
+
+  it('colours that change without a swap unsettle it briefly', () => {
+    for (const d of DIFFS) {
+      const profile = HUMAN_PROFILES[d];
+      const { lost, dazed } = disoriented(d, 3, 'colours');
+      expect(lost, d).toBeGreaterThanOrEqual(Math.round(profile.disorient[0] / 2));
+      expect(lost, d).toBeLessThanOrEqual(Math.round(profile.disorient[1] / 2));
+      expect(dazed, d).toBe(lost * 3);
+      expect(lost, d).toBeLessThan(disoriented(d, 3, 'swap').lost);
+    }
+  });
+
+  it('is the same for the same seed, scales with the strength, and strength 0 has none of it', () => {
+    for (const d of DIFFS) {
+      expect(disoriented(d, 7, 'both'), d).toEqual(disoriented(d, 7, 'both'));
+      expect(disoriented(d, 7, 'swap', 2).lost, d).toBeGreaterThan(disoriented(d, 7, 'swap').lost);
+      expect(disoriented(d, 7, 'both', 0), d).toEqual({ lost: 0, dazed: 0, keys: [] });
+    }
+  });
+
+  it('the real Swap item does it to everybody, whoever picks it up', () => {
+    for (const d of DIFFS) {
+      for (const seed of [1, 2, 3, 4, 5, 6]) {
+        const g = arena(300);
+        const bots = [new HumanBot(0, d, createRng(seed)), new HumanBot(1, d, createRng(seed + 100))];
+        for (let t = 0; t < 30; t++) step(g, bots[0]!.decide(g), bots[1]!.decide(g));
+        // Slot 1 drives over a Swap
+        const picker = g.players[1]!;
+        g.items.push({ id: 900, sprite: 'random_item', category: 'automatic', x: picker.x / 1000 + 4, y: picker.y / 1000, active: true, hp: 40 });
+        const before = g.players.map(p => p.x);
+        g.tick(inputs(bots[0]!.decide(g), bots[1]!.decide(g)));
+        g.serialize();
+        const swapped = g.players[0]!.x !== before[0]! + 1000;
+        // (one Swap in ten scrambles the colours, and such a one may leave everybody in place)
+        expect(swapped || g.colorBlindnessFrames > 0, d).toBe(true);
+        for (const bot of bots) {
+          bot.decide(g);
+          expect(bot.motor!.frozen, d).toBe(true);
+          expect(bot.motor!.dazed, d).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('a dazed bot has tunnel vision and slow hands', () => {
+    // Slow hands: the same change of intention lands later
+    const lagOf = (dazed: boolean): number => {
+      let total = 0;
+      for (let seed = 1; seed <= 40; seed++) {
+        const motor = new Motor(HUMAN_PROFILES.normal, createRng(seed));
+        for (let t = 0; t < 5; t++) motor.steer(0, false, false);
+        if (dazed) motor.daze(200);
+        let lag = 0;
+        while (motor.steer(1, false, false) === 0) lag++;
+        total += lag;
+      }
+      return total / 40;
+    };
+    const usual = lagOf(false);
+    const slow = lagOf(true);
+    expect(slow).toBeGreaterThanOrEqual(usual + HUMAN_PROFILES.normal.dazeLag[0]);
+    expect(slow).toBeLessThanOrEqual(usual + HUMAN_PROFILES.normal.dazeLag[1]);
+
+    // Tunnel vision: an item that appears while it is dazed is not seen until it is over
+    const g = arena(300);
+    const bot = new HumanBot(0, 'hard', createRng(2));
+    for (let t = 0; t < 30; t++) step(g, bot.decide(g), {});
+    place(g, 0, 400, 300, 0);
+    const seen = (): boolean => bot.planner.goalKind === 'item';
+    let whileDazed = false;
+    let after = false;
+    for (let t = 0; t < 200; t++) {
+      g.items.push(item(77, 480, 300));
+      const input = bot.decide(g);
+      if (bot.motor!.dazed) whileDazed ||= seen(); else after ||= seen();
+      step(g, { steer: 0 }, {});
+      place(g, 0, 400, 300, 0);
+      void input;
+    }
+    expect(whileDazed).toBe(false);
+    expect(after).toBe(true);
+  });
+
+  it('forgets the item it was heading for', () => {
+    const g = arena(300);
+    const bot = new HumanBot(0, 'hard', createRng(2));
+    for (let t = 0; t < 60; t++) {
+      g.items.push(item(5, 330, 300));
+      const input = bot.decide(g);
+      step(g, t < 40 ? { steer: 0 } : input, {});
+      if (t < 40) place(g, 0, 250, 300, 0);
+    }
+    expect(bot.planner.goalKind).toBe('item');
+    // Swapped to the other side of the arena: the item it was after is 300 px away now,
+    // and one right next to it is not
+    place(g, 0, 620, 500, 0);
+    for (let t = 0; t < 120; t++) {
+      g.items.push(item(5, 330, 300), item(6, 690, 500));
+      bot.decide(g);
+      step(g, { steer: 0 }, {});
+      place(g, 0, 620, 500, 0);
+    }
+    const planner = bot.planner as unknown as { goalItemId: number | null };
+    expect(planner.goalItemId).toBe(6);
+  });
+});
+
 describe('human bots: disorientation (keys)', () => {
   it('lets go of a held key after a startled moment, and takes it up again afterwards', () => {
     const profile = HUMAN_PROFILES.normal;

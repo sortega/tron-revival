@@ -282,6 +282,11 @@ export class BotController {
     return { steer, action };
   }
 
+  /** The bot is suddenly somewhere else (Swap): what it was heading for is no longer near. */
+  lostBearings(): void {
+    this.goalItemId = null;
+  }
+
   private resetRound(): void {
     this.steer = 0;
     this.ticksSincePlan = Infinity;

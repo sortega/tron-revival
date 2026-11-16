@@ -284,6 +284,11 @@ export class TronGameState {
     return this.bodyguards;
   }
 
+  /** Ticks of colour blindness left (0 = none): it confuses bots too (design/bots-human.md). */
+  get colorBlindnessFrames(): number {
+    return this.colorBlindnessRemainingFrames;
+  }
+
   // Queue a sound event for network sync
   private queueSound(sound: string): void {
     this.frameSoundEvents.push({ sound });

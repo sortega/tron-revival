@@ -72,11 +72,12 @@ if (process.env.SIM_REPORT) {
     }, 120_000);
 
     it('hard beats easy', () => {
-      // Two seeds: a single run of 14 rounds swings too much with every rule change
-      const r = [5, 6].flatMap(seed =>
+      // Six seeds, 84 rounds: the true rate is about 70 %, and 28 rounds swing by ±17
+      // points with every rule change (they gave 16 of 28 once: design/bots-human.md)
+      const r = [5, 6, 7, 8, 9, 10].flatMap(seed =>
         runMatch({ level: 'blank', drivers: ['hard', 'easy'], rounds: 14, seed, maxRoundSeconds: 90 }));
-      expect(winRate(r, 0)).toBeGreaterThan(0.6);
-    }, 120_000);
+      expect(winRate(r, 0)).toBeGreaterThan(0.55);
+    }, 240_000);
 
     it('play team games to completion', () => {
       const r = runMatch({ level: 'selva', drivers: ['normal', 'normal', 'easy', 'hard'], rounds: 3, seed: 4, mode: 'team', maxRoundSeconds: 90 });

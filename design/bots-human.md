@@ -19,6 +19,8 @@ Related: [local-and-ai.md](./local-and-ai.md) (the planner, profiles, match-ups)
   hesitate before pulling the trigger and tap at a human rate.
 - Changed controls: under *Control Reversal* bots steer the wrong way, wobble,
   over-correct and adapt gradually; they are briefly confused again when it ends.
+- Losing one's bearings: after a *Swap* every bot needs a moment to find itself, and
+  much longer when the colours are scrambled as well (colour blindness).
 - Skill levels differ: `hard` is a good human (≈160 ms), `easy` a slow, clumsy one.
 - Everything stays deterministic for a seed, and cheap (a phone hosts the game).
 
@@ -229,10 +231,44 @@ turns the other way until the bot notices.
 
 ### Disorientation
 
-When a bot's own position jumps (the *Swap* item, or a portal), it needs time to find
-itself again: for `disorient` ticks (half of that for a portal, which is at least
-expected) it does not react to anything and does not fire. A steering key that was down
-stays down for a startled moment (5 ticks) and is then let go.
+A bot whose bike is suddenly somewhere else, or whose colours are no longer what they
+were, has to find itself again. `HumanBot` notices two things: its own position jumping
+(more than 8 px in a tick: the *Swap* item, or a portal) and the game's colour blindness
+(`TronGameState.colorBlindnessFrames`, the "daltonismo" that one Swap in ten sets off for
+4 s, sometimes without moving anybody). Every profile goes through it, `easy` included;
+only strength 0, which is the planner alone, does not.
+
+It happens in two phases:
+
+1. **Lost.** The bot does not react to anything and does not fire. A steering key that
+   was down stays down for a startled moment (5 ticks) and is then let go.
+2. **Dazed**, for three times as long as it was lost (4 s at most): the bot drives again,
+   but in a place it has not looked at yet. It has tunnel vision as in a panic (no
+   glances at unattended enemies, no new items or shots noticed), and every change of
+   steering reaches the key `dazeLag` ticks later than usual, so its turns come late and
+   overshoot. The planner also drops the item it was heading for: that was where it used
+   to be.
+
+How long it is lost depends on what happened (`disorient` is drawn once per event):
+
+| What happened | Lost for | |
+|---------------|----------|-|
+| Through a portal | `disorient` / 2 | It was at least expected; no daze |
+| Swapped | `disorient` | It knows its colour and has to find where it is now |
+| Colours scrambled, nobody moved | `disorient` / 2, **wiggling** | "Is that still me?" |
+| Swapped while the colours are scrambled (by this Swap or an earlier one) | `disorient` × 2.5, **wiggling**; with probability `wrongBike` as long again | It cannot look for its colour: it has to find out which bike answers its keys, and may watch the wrong one first |
+
+**Wiggling**: under colour blindness a person finds their bike by tapping a key and
+watching which one answers. While lost, after the startled moment, the bot taps left and
+right in turn (presses of `minPress` ticks, 6 ticks apart; 12–16° each way, so the heading
+is kept on average). These taps do not look at the arena at all.
+
+A swap or colour change that comes while the bot is still lost or dazed starts again
+from the top (the longer of the two times counts). Everything is drawn from the bot's
+own seeded stream, and only when one of these events happens, so rounds without them
+play exactly as before.
+
+What this costs the bots is measured under *Results → Swap*.
 
 ### Trigger
 
@@ -276,7 +312,9 @@ Ranges are uniform, in ticks unless noted (1 tick = 14.3 ms).
 | `reverse.adapt` (time constant) | 300 (4.3 s) | 150 (2.1 s) | 50 (0.7 s) |
 | `reverse.catch` | 12–20 | 10–16 | 7–11 |
 | `reverse.overCorrect` | 0.6 | 0.6 | 0.3 |
-| `disorient` | 30–50 | 18–28 | 10–16 |
+| `disorient` (lost after a Swap) | 30–50 (430–710 ms) | 18–28 (260–400 ms) | 10–16 (140–230 ms) |
+| `dazeLag` (extra steering lag while dazed) | 3–6 | 2–4 | 1–3 |
+| `wrongBike` (probability, swapped under colour blindness) | 0.5 | 0.35 | 0.2 |
 
 (Control Reversal lasts 700 ticks: `hard` is fluent after about two seconds, `normal`
 makes mistakes for most of the first half, `easy` still slips now and then at the end.)
@@ -312,8 +350,8 @@ numbers are in the results section.
 ## What is not modelled
 
 - Late perception of *trail* pixels (see the table above).
-- Colour blindness after a Swap (bots still know which bike is theirs once the
-  disorientation is over).
+- Under colour blindness, mixing up the *other* players (who holds which weapon): once
+  a bot has found its own bike again it knows everybody else too.
 - Fatigue, tilt, learning between rounds.
 - Dodging projectiles (the planner does not do it yet either; see TODO.md).
 
@@ -344,6 +382,9 @@ Unit tests (`tests/bot-human.test.ts`) pin each mechanism:
 - Control Reversal produces wrong-way steering at onset, recovery afterwards, a smaller
   disturbance at the end, and `hard` adapts faster than `easy`;
 - trigger hesitation and tap rate;
+- every profile is lost and then dazed after a Swap (also one made by the real item),
+  for longer and wiggling under colour blindness, briefly when only the colours change,
+  the same way for the same seed; and strength 0 is not;
 - strength 0 reproduces the old bot input-for-input; a seed reproduces a match.
 
 - the planner threads a 3-pixel gap on its own and refuses it with the side margin.
@@ -430,6 +471,50 @@ the same rounds without the effect:
 
 The old bots did not care about the item at all. Now it kills `easy` three times out of
 four, `normal` four times out of ten and `hard` hardly more often than usual.
+
+### Swap
+
+`HUMAN_REPORT=swap npm run sim:human`: two calm bots of the same profile are made to
+change places 2 s into the round (bricks and blank, 240 bots per cell). Bots dead within
+3 s, out of those alive when it happened. "Colours" is colour blindness without a swap,
+"both" a swap under colour blindness; "before" is the layer as it was (lost for
+`disorient` ticks and nothing else; colour blindness ignored), measured on the same seeds.
+
+| | Nothing happens | Swap: before | Swap | Colours | Both |
+|-|-----------------|--------------|------|---------|------|
+| easy | 16–23 / 238 | 31 / 236 | 40 / 234 | 26 / 238 | 59 / 240 |
+| normal | 6–10 / 238 | 11 / 240 | 10 / 240 | 9 / 240 | 36 / 240 |
+| hard | 7–9 / 240 | 6 / 240 | 7 / 240 | 8 / 240 | 13 / 240 |
+
+("Nothing happens" is a range because the two runs differ: the rounds contain Swap items
+of their own, and bots that react differently to them play different rounds afterwards.
+That spread, about ±4 of 240, is the noise of every cell.)
+
+A plain swap kills `easy` about twice as often as nothing at all (17 % within 3 s) and
+does not measurably kill `normal` or `hard`: they are lost for a quarter of a second,
+drive on with late hands, and live. A swap under colour blindness kills a quarter of the
+`easy` bots, 15 % of `normal` and 5 % of `hard`. Colours alone do next to nothing.
+
+The planner alone (strength 0) for comparison, same test: easy 16 → 20 of 240, normal
+7 → 7, hard 3 → 8.
+
+The order of the profiles in ordinary play, where a Swap is one item among many (640
+rounds per match-up: 8 levels × 80, seats rotated, the same seeds before and after; ±4):
+
+| Match-up | Before | After |
+|----------|--------|-------|
+| hard – easy | 74.5 – 24.4 | 76.7 – 22.7 |
+| normal – easy | 75.6 – 23.4 | 75.5 – 23.8 |
+| hard – normal | 50.3 – 49.2 | 55.8 – 43.6 |
+
+Nothing moved beyond the noise (hard against normal comes nearest: +5.5 points with ±4 on
+each figure).
+
+`tests/bots.test.ts`, "hard beats easy": the 28 rounds it played (hard always in the same
+seat, on Blank) gave 21 wins before this change and 16 after, under its floor of 60 %.
+Over six seeds the same match gives 57 of 84 before and 51 of 84 after, a difference
+inside what 84 rounds can tell (±10 points), and the 640 rounds above show no loss. The
+test now plays those 84 rounds with a floor of 55 %.
 
 ### Weapons
 
@@ -563,6 +648,6 @@ away from the 5 % ceiling.
   31 % of the wins against its old self). If it turns out too weak to be fun, lower
   the strength for easy only, or relax its planner a little (its 6-tick re-plan interval
   was itself a crude reaction time).
-- **Noise in the regression tests.** `hard beats easy` runs 28 rounds against a 60 %
-  floor with a true rate near 73 %; it will fail by chance one day (it would have for
-  the old bots too, a little later). More rounds cost test time.
+- **Noise in the regression tests.** `hard beats easy` ran 28 rounds against a 60 %
+  floor with a true rate near 70 %, and did fail by chance (*Results → Swap*); it now
+  runs 84 rounds against 55 %, which costs half a minute of test time.

@@ -2,7 +2,7 @@
 // (design/bots-human.md). Not part of the regular test run.
 //
 //   HUMAN_REPORT=1            all sections (slow: about an hour), or a comma-separated list of
-//                             survival,early,straight,ladder,versus,weapons,range,reversal,cost,strength
+//                             survival,early,straight,ladder,versus,weapons,range,reversal,swap,cost,strength
 //   LADDER_LEVELS=<a,b>       levels of the `ladder` section (default blank,bricks,selva)
 //   OUT=<file>                also write the report there
 //   ROUNDS=<n>                scale the number of rounds (default 1 = as documented)
@@ -292,6 +292,51 @@ describe.runIf(!!process.env.HUMAN_REPORT)('human bots report', () => {
         }
       }
       say(`${d.padEnd(7)} |   ${cells[0]}  ${cells[1]}   |   ${cells[2]}  ${cells[3]}`);
+    }
+    say();
+  }, 3_600_000);
+
+  it.runIf(want('swap'))('Swap and colour blindness', () => {
+    say('## Swap: two calm bots of a profile change places 2 s into the round (bricks and blank)');
+    say('   bots dead within 3 s of it / bots alive when it happened; "none" = same rounds without it;');
+    say('   "colours" = colour blindness without a swap; "both" = a swap under colour blindness');
+    say('profile |  raw: none     swap     |  human: none     swap    colours     both');
+    type Blindable = { colorBlindnessRemainingFrames: number };
+    for (const d of DIFFS) {
+      const cells: string[] = [];
+      for (const v of VARIANTS) {
+        for (const what of v === 'raw-' ? ['none', 'swap'] : ['none', 'swap', 'colours', 'both']) {
+          let deaths = 0;
+          let n = 0;
+          for (const level of ['bricks', 'blank']) {
+            for (const seed of [51, 52, 53, 54, 55]) {
+              const spec = `${v}calm-${d}` as DriverSpec;
+              const r = runMatch({
+                level, drivers: [spec, spec], rounds: rounds(12), seed, maxRoundSeconds: 6,
+                during: (game, tick) => {
+                  const [a, b] = game.players;
+                  if (tick !== 140 || !a!.alive || !b!.alive) return;
+                  if (what === 'colours' || what === 'both') (game as unknown as Blindable).colorBlindnessRemainingFrames = 280;
+                  if (what === 'swap' || what === 'both') {
+                    const was = { x: a!.x, y: a!.y, direction: a!.direction };
+                    a!.x = b!.x; a!.y = b!.y; a!.direction = b!.direction;
+                    b!.x = was.x; b!.y = was.y; b!.direction = was.direction;
+                  }
+                },
+              });
+              for (const x of r) {
+                if (x.deathTick.some(t => t !== null && t <= 140) || x.ticks <= 140) continue;
+                for (const died of x.deathTick) {
+                  n++;
+                  if (died !== null && died <= 350) deaths++;
+                }
+              }
+            }
+          }
+          cells.push(`${String(deaths).padStart(3)}/${String(n).padEnd(3)}`);
+        }
+      }
+      say(`${d.padEnd(7)} |   ${cells[0]}  ${cells[1]}   |   ${cells[2]}  ${cells[3]}  ${cells[4]}  ${cells[5]}`);
     }
     say();
   }, 3_600_000);

@@ -14,6 +14,7 @@ const MIN_HOLD = 6;           // ...and a hold-weapon is then held at least this
 const SAME_ENGAGEMENT = 15;   // Wanting to fire again this soon is the same engagement
 const TAP_TICKS = 3;         // How long a tap keeps the button down
 const STARTLE = 5;            // A key held when disoriented is let go after this long
+const PROBE_GAP = 6;          // Between the test taps of a bot looking for its bike
 const PANIC_SLIP_FACTOR = 1.5;
 const ON_GUARD = 60;          // Right after catching a slip the player is careful...
 const ON_GUARD_FACTOR = 0.25; // ...and slips this much less
@@ -34,6 +35,11 @@ export class Motor {
   private key = 0;              // Last output
   private frozenUntil = 0;
   private letGoAt = 0;
+  private dazedUntil = 0;
+  private searching = false;    // Lost and tapping the keys to see which bike answers
+  private probe = 0;            // The test tap being made
+  private probeSide = 1;
+  private probeAt = 0;
 
   // Control mapping: +1 = the usual one, -1 = reversed
   private reversed = false;     // Is Control Reversal on?
@@ -78,6 +84,9 @@ export class Motor {
     this.holdExtra = 0;
     this.key = 0;
     this.frozenUntil = 0;
+    this.dazedUntil = 0;
+    this.searching = false;
+    this.probe = 0;
     this.reversed = false;
     this.mapping = 1;
     this.noticed = true;
@@ -91,13 +100,33 @@ export class Motor {
    * Disorientation: for `ticks` the bot does nothing useful. A key that is down stays
    * down for a startled moment, then the hands let go.
    */
-  freeze(ticks: number): void {
+  freeze(ticks: number, searching = false): void {
     if (!this.frozen) this.letGoAt = this.tick + Math.min(ticks, STARTLE);
     this.frozenUntil = Math.max(this.frozenUntil, this.tick + ticks);
+    // Which bike is mine? Tap left and right and see which one answers
+    if (searching && !this.searching) {
+      this.searching = true;
+      this.probe = 0;
+      this.probeSide = this.rng() < 0.5 ? -1 : 1;
+      this.probeAt = this.letGoAt + PROBE_GAP;
+    }
   }
 
   get frozen(): boolean {
     return this.tick < this.frozenUntil;
+  }
+
+  /**
+   * Dazed: for `ticks` after the freeze is over the bot drives again, but its hands are
+   * late (`dazeLag`).
+   */
+  daze(ticks: number): void {
+    this.dazedUntil = Math.max(this.dazedUntil, this.frozenUntil + ticks);
+  }
+
+  /** Lost or dazed: not yet at home where it is now. */
+  get dazed(): boolean {
+    return this.tick < this.dazedUntil;
   }
 
   /**
@@ -137,7 +166,26 @@ export class Motor {
         this.lastChange = tick;
         this.catchAt = Infinity;
       }
-      return this.key;
+      if (this.key !== 0 || !this.searching) return this.key;
+      // Test taps: a press of the usual shortest length, one side and then the other
+      if (this.probe !== 0) {
+        if (tick >= this.probeAt) {
+          this.probe = 0;
+          this.probeSide = -this.probeSide;
+          this.probeAt = tick + PROBE_GAP;
+        }
+      } else if (tick >= this.probeAt) {
+        const press = Math.max(2, profile.minPress);
+        if (tick + press < this.frozenUntil) {
+          this.probe = this.probeSide;
+          this.probeAt = tick + press;
+        }
+      }
+      return this.probe;
+    }
+    if (this.searching) {
+      this.searching = false;
+      this.probe = 0;
     }
 
     // Catching a wrong-way press: flip it, and hold the correction too long
@@ -168,6 +216,7 @@ export class Motor {
           lag += this.holdExtra;
           this.holdExtra = 0;
         }
+        if (tick < this.dazedUntil) lag += drawTicks(profile.dazeLag, rng);
         this.changeAt = tick + lag;
       }
     }

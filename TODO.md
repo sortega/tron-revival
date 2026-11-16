@@ -65,7 +65,10 @@ Design: `design/local-and-ai.md`, `design/bots-territory.md`, `design/bots-human
       territory map too)
 - [ ] Human-like bots build their own map on the first tick of a round (2–3 ms once):
       build it during the countdown instead
-- [ ] Colour blindness after a Swap does not confuse bots
+- [ ] Under colour blindness a bot still knows who is who among the *others* (which
+      bike holds which weapon); only finding its own bike is modelled
+- [ ] Watch a Swap under colour blindness in a real game: `easy` is lost for 1–3.6 s
+      (a quarter of them die within 3 s); too much, or just right?
 - [ ] Bots that know they see late could also *lead* their shots; today the aim error only
       ever hurts
 - [ ] Setting in the local set-up screen for the human-like strength (now only `?human=`)
