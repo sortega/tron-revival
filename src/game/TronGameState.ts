@@ -194,6 +194,9 @@ export class TronGameState {
   private readonly TRACER_LIFESPAN = 120;       // Frames before tracer expires
   private readonly TRACER_KILL_REACH = 1;       // Kills within 1 px on both axes: the 3x3 box of the original
   private readonly TRACER_CLEAR_RADIUS = 1;     // 3x3 area on death
+  // EXPERIMENT: true = a tracer stops at the first thing on its path; false = it acts only
+  // where it lands, as in the original (design/projectiles.md)
+  private readonly TRACER_SWEEPS = true;
 
   // Uzi weapon constants
   private readonly UZI_TRACERS_PER_FRAME = 20;  // Spray 20 bullets per frame
@@ -1254,6 +1257,11 @@ export class TronGameState {
       return;
     }
 
+    if (this.TRACER_SWEEPS) {
+      this.sweepTracer(proj, prevX, prevY, unwrappedX, unwrappedY, skipOwner);
+      return;
+    }
+
     // Where it lands
     proj.remainingFrames = (proj.remainingFrames ?? 1) - 1;
     if (this.pixels.has(newX, newY)) proj.remainingFrames = 0;
@@ -1265,6 +1273,37 @@ export class TronGameState {
       this.killPlayerWithSound(player, player.slotIndex === proj.ownerSlot, 'tracer', proj.ownerSlot);
       proj.remainingFrames = 0;
     }
+  }
+
+  /**
+   * EXPERIMENT (design/projectiles.md, "Swept tracers"): the tracer does not jump. It stops
+   * at the first solid pixel or head on its path, kills that head, and is spent there, so
+   * that its 3x3 hole opens in the first trail it meets.
+   */
+  private sweepTracer(
+    proj: Projectile, x0: number, y0: number, x1: number, y1: number, skipOwner: boolean
+  ): void {
+    proj.remainingFrames = (proj.remainingFrames ?? 1) - 1;
+    const length = Math.hypot(x1 - x0, y1 - y0);
+    const wall = this.checkLineCollision(x0, y0, x1, y1);
+    let stopT = wall && length > 0 ? Math.hypot(wall.rawX - x0, wall.rawY - y0) / length : wall ? 0 : Infinity;
+    let victim: TronPlayer | null = null;
+    if (this.phase !== 'waiting_ready') {
+      for (const player of this.players) {
+        if (!player.alive || (skipOwner && player.slotIndex === proj.ownerSlot)) continue;
+        const closest = this.closestOnPath(player.getScreenX(), player.getScreenY(), x0, y0, x1, y1);
+        if (closest.dist > this.TRACER_KILL_REACH * Math.SQRT2 || closest.t > stopT) continue;
+        stopT = closest.t;
+        victim = player;
+      }
+    }
+    if (stopT === Infinity) return;
+    const stopX = victim ? Math.round(x0 + (x1 - x0) * stopT) : wall!.rawX;
+    const stopY = victim ? Math.round(y0 + (y1 - y0) * stopT) : wall!.rawY;
+    proj.x = (((stopX % PLAY_WIDTH) + PLAY_WIDTH) % PLAY_WIDTH) * 1000;
+    proj.y = (((stopY % PLAY_HEIGHT) + PLAY_HEIGHT) % PLAY_HEIGHT) * 1000;
+    proj.remainingFrames = 0;
+    if (victim) this.killPlayerWithSound(victim, victim.slotIndex === proj.ownerSlot, 'tracer', proj.ownerSlot);
   }
 
   // Teleport a projectile to exit portal position

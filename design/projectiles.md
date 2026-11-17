@@ -70,6 +70,28 @@ Kept swept on purpose, so that the match-ups below hold and satellites protect: 
 against tracers (path against path), satellites against tracers (anything passing within
 5 px), tracers against flying bombs and items.
 
+### Swept tracers (experiment, 16 November 2026, not committed)
+
+Playing with landing-point tracers, the rifle frustrates: a burst often jumps over the
+trail right in front of the shooter, who then crashes into a trail "that should have been
+destroyed". Under test, switched by `TRACER_SWEEPS` in `TronGameState`:
+
+- A tracer checks its whole path each tick. It stops at the **first** solid pixel or head
+  on it, kills that head, and is spent there: it stays lit a tick and then takes the 3x3
+  pixels around that point. Nothing is jumped over.
+- Everything else is as above (satellites, bombs and items on the path; Uzi range).
+
+Consequences seen in the tests: a rifle burst now always opens the first wall it meets (the
+five tracers of a burst hit the same spot, so one burst opens one 3 px hole per wall and
+the next burst goes through it to the next wall); the Uzi no longer reaches over a thin
+wall, it eats the nearest surface instead (73 px in four ticks where it ate more than 150
+behind the wall); shotgun fire gets past a lone satellite a little more often (21 of the
+sample against the limit of 18). The rate of kills on players crossing a rifle's line
+stays within the 20–45 % of the test.
+
+If kept: adjust the two tests that fail ("Uzi fire goes over a thin wall", "sustained fire
+gets past a lone satellite"), rename the section above and let the bots know.
+
 ## Weapon match-ups
 
 The firearms keep the original's rock-paper-scissors, which follows from four numbers
