@@ -9,7 +9,7 @@ import type { SmoothLinesData } from '../display/SmoothLines';
 import type { Rng } from '../rng';
 import { encodeSnapshot, eventsOf, serializeState, toRoster } from '../../network/serialization';
 import type { WireState } from '../../network/serialization';
-import { PLAY_HEIGHT, PLAY_WIDTH, TICK_RATE } from '../constants';
+import { PLAY_HEIGHT, PLAY_WIDTH, SPEED_UP_FACTOR, SPEED_UP_LOCK_TICKS, TICK_RATE } from '../constants';
 import { SmoothLineKeeper } from '../display/SmoothLines';
 import { packCss } from '../display/shade';
 import { createBot } from '../ai/HumanBot';
@@ -52,6 +52,12 @@ export class HostSession implements GameSession {
   private players: GamePlayer[];
   private pendingPlayers: GamePlayer[] | null = null;
   private rosterVersion = 0;
+  // Frames not yet sent to the players: more than one only while sped up
+  private outbox: (TronGameStateData & { tick: number })[] = [];
+  // Speeding up while only bots are alive (design/local-and-ai.md)
+  private botsOnlyTicks = 0;
+  private speedUpOffered = false;
+  private speedUpHeld = false;
   // Reduced stream: frames not yet sent to the watchers
   private backlog: (TronGameStateData & { tick: number })[] = [];
   private readonly spectatorBytesOut = new ByteRate();
@@ -197,6 +203,25 @@ export class HostSession implements GameSession {
     return this.transport !== null;
   }
 
+  get timeScale(): number {
+    return this.speedUpOffered && this.speedUpHeld ? SPEED_UP_FACTOR : 1;
+  }
+
+  setSpeedUp(held: boolean): void {
+    this.speedUpHeld = held;
+  }
+
+  // Whether time may be ('offered'), or is being ('on'), sped up after this tick
+  private speedUpState(round: TronGameStateData['round']): 'offered' | 'on' | undefined {
+    const alive = round.players.filter(p => p.alive);
+    const botsOnly = round.phase === 'playing' && alive.length > 0 &&
+      alive.every(p => this.bots.some(b => b.slot === p.slotIndex));
+    this.botsOnlyTicks = botsOnly ? this.botsOnlyTicks + 1 : 0;
+    this.speedUpOffered = this.botsOnlyTicks > SPEED_UP_LOCK_TICKS;
+    if (!this.speedUpOffered) return undefined;
+    return this.speedUpHeld ? 'on' : 'offered';
+  }
+
   step(localInputs: ReadonlyMap<SlotIndex, TronInput>): void {
     if (this.pendingInitialFrame) {
       const initial = this.pendingInitialFrame;
@@ -234,6 +259,8 @@ export class HostSession implements GameSession {
     t0 = perfStart();
     const frame = this.game.serialize();
     perfEnd('serialize', t0);
+    const speedUp = this.speedUpState(frame.round);
+    if (speedUp) frame.round.speedUp = speedUp;
     this.lastFrame = frame;
     this.emit(frame);
   }
@@ -248,30 +275,15 @@ export class HostSession implements GameSession {
 
     if (this.transport) {
       t0 = perfStart();
-      // Echo each guest's newest timestamp, advanced by the time it waited here
-      const now = this.now();
-      const pongs: Partial<Record<SlotIndex, number>> = {};
-      for (const [slot, ping] of this.pings) pongs[slot] = ping.t + (now - ping.receivedAt);
-      // Slow-changing parts are only sent when they change (and once a second, as a
-      // safety net); guests keep the last value they received
-      const refresh = this.framesSent++ % TICK_RATE === 0;
-      const wire: WireState = { ...frame, tick, pongs, acks: this.acks };
-      const round: WireState['round'] = { ...frame.round };
-      wire.round = round;
-      if (!this.changed('match', frame.match) && !refresh) delete wire.match;
-      if (!this.changed('items', frame.round.items) && !refresh) delete round.items;
-      if (!this.changed('portals', frame.round.portals) && !refresh) delete round.portals;
-      const roster = toRoster(this.players);
-      if (this.changed('roster', roster) || refresh) wire.roster = roster;
-      const packed = serializeState(wire);
-      this.bytesOut.add(packed.length, now);
-      this.transport.broadcastState(packed);
+      // One message per tick; while sped up, one for every `timeScale` ticks
+      this.outbox.push({ ...frame, tick });
+      if (this.outbox.length >= this.timeScale) this.flushPlayers();
 
       // Reduced stream for those who only watch
       if (this.transport.sendSpectatorState) {
         if (this.transport.hasSpectators?.() ?? true) {
           this.backlog.push({ ...frame, tick });
-          if (this.backlog.length >= SPECTATOR_SEND_EVERY) this.flushSpectators();
+          if (this.backlog.length >= SPECTATOR_SEND_EVERY * this.timeScale) this.flushSpectators();
         } else if (this.spectatorMessages > 0 || this.backlog.length > 0) {
           // Nobody watching: whoever comes next starts from a snapshot and a full message
           this.backlog = [];
@@ -281,6 +293,35 @@ export class HostSession implements GameSession {
       }
       perfEnd('net', t0);
     }
+  }
+
+  // Send the players the latest state, plus the events of the ticks before it that were
+  // not sent (only while sped up)
+  private flushPlayers(): void {
+    const frames = this.outbox;
+    const last = frames[frames.length - 1];
+    if (!last || !this.transport) return;
+    this.outbox = [];
+
+    // Echo each guest's newest timestamp, advanced by the time it waited here
+    const now = this.now();
+    const pongs: Partial<Record<SlotIndex, number>> = {};
+    for (const [slot, ping] of this.pings) pongs[slot] = ping.t + (now - ping.receivedAt);
+    // Slow-changing parts are only sent when they change (and once a second, as a
+    // safety net); guests keep the last value they received
+    const refresh = this.framesSent++ % TICK_RATE === 0;
+    const earlier: FrameEvents[] = frames.slice(0, -1).map(eventsOf);
+    const wire: WireState = { ...last, pongs, acks: this.acks, ...(earlier.length > 0 && { earlier }) };
+    const round: WireState['round'] = { ...last.round };
+    wire.round = round;
+    if (!this.changed('match', last.match) && !refresh) delete wire.match;
+    if (!this.changed('items', last.round.items) && !refresh) delete round.items;
+    if (!this.changed('portals', last.round.portals) && !refresh) delete round.portals;
+    const roster = toRoster(this.players);
+    if (this.changed('roster', roster) || refresh) wire.roster = roster;
+    const packed = serializeState(wire);
+    this.bytesOut.add(packed.length, now);
+    this.transport.broadcastState(packed);
   }
 
   // Send the watchers the latest state plus the events of the ticks since the last message

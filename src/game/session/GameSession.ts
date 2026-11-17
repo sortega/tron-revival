@@ -50,6 +50,13 @@ export interface GameSession {
   getNetworkStats(): NetworkStats | null;
   /** True if the simulation must keep running while the tab is hidden. */
   readonly runsInBackground: boolean;
+  /**
+   * How many times faster than real time `step` wants to be called: more than 1 while
+   * the round is sped up (design/local-and-ai.md). Absent = 1.
+   */
+  readonly timeScale?: number;
+  /** Whether action is being held to speed the round up. Absent on a guest. */
+  setSpeedUp?(held: boolean): void;
   /** The session cannot continue (e.g. the host left). */
   onEnded: ((reason: string) => void) | null;
   destroy(): void;

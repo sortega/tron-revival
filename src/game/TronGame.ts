@@ -2,10 +2,10 @@
 // All game logic lives behind the GameSession it is given.
 
 import type { GameScreenOptions, Screen, ScreenManager } from '../screens/ScreenManager';
-import type { GameConfig, TronGameStateData, SoundEvent, RoundPhase } from '../types/game';
+import type { GameConfig, TronGameStateData, TronInput, SoundEvent, RoundPhase } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
 import { LEVELS } from '../types/game';
-import { TICK_RATE } from './constants';
+import { SPEED_UP_FACTOR, TICK_RATE } from './constants';
 import { CANVAS_ASPECT, TronRenderer } from './TronRenderer';
 import { InputManager, isTouchDevice, isIOS } from './input/InputManager';
 import { CONTROL_SCHEMES } from './input/controlSchemes';
@@ -42,6 +42,15 @@ export class TronGame implements Screen {
   // `?perf=1`: on-screen readout of the phase timers, for devices without a console
   private perfHud: HTMLElement | null = null;
   private perfHudTimer: ReturnType<typeof setInterval> | null = null;
+
+  // Speeding up when only bots are left (design/local-and-ai.md): while action is held,
+  // from a press that began during the offer
+  private actionWasPressed = false;
+  private speedingUp = false;
+  private watcherHolds = false;   // Space or the arena, for a user without a player here
+  private readonly watcherRelease = (e: Event): void => {
+    if (e.type !== 'keyup' || (e as KeyboardEvent).code === 'Space') this.watcherHolds = false;
+  };
 
   // Double-tap detection for mobile FPS toggle
   private lastTapTime: number = 0;
@@ -243,8 +252,11 @@ export class TronGame implements Screen {
         this.dirty = true;
         localStorage.setItem('showFps', this.showFps ? 'true' : 'false');
       }
+      if (e.code === 'Space') this.watcherHolds = true;
     };
     document.addEventListener('keydown', this.fpsKeyHandler);
+    document.getElementById('gameCanvas')?.addEventListener('pointerdown', () => { this.watcherHolds = true; });
+    for (const type of ['keyup', 'pointerup', 'pointercancel', 'blur']) window.addEventListener(type, this.watcherRelease);
 
     // Double-tap on game canvas to toggle FPS on mobile
     if (isTouch) {
@@ -285,7 +297,7 @@ export class TronGame implements Screen {
     this.ticker = new Ticker(
       () => this.step(),
       () => this.draw(),
-      { runInBackground: this.session.runsInBackground }
+      { runInBackground: this.session.runsInBackground, timeScale: () => this.session.timeScale ?? 1 }
     );
     this.ticker.start();
   }
@@ -852,7 +864,32 @@ export class TronGame implements Screen {
       this.input.showTouchAction(view.match.playersReady.includes(slot) ? 'NOT READY' : 'READY', true);
     } else {
       const alive = view.round.players.find(p => p.slotIndex === slot)?.alive === true;
-      this.input.showTouchAction('ACTION', view.round.phase === 'playing' && alive);
+      const speedUp = view.round.speedUp !== undefined && !!this.session.setSpeedUp;
+      this.input.showTouchAction(speedUp ? 'SPEED UP' : 'ACTION', speedUp || (view.round.phase === 'playing' && alive));
+    }
+  }
+
+  // What the arena says about speeding up, if anything (design/local-and-ai.md)
+  private speedUpHint(speedUp: 'offered' | 'on' | undefined): string | null {
+    if (speedUp === 'on') return `▶▶ ×${SPEED_UP_FACTOR}`;
+    if (speedUp !== 'offered' || !this.session.setSpeedUp) return null;
+    if (this.localBindings().length > 0) return 'Hold action to speed up time';
+    return isTouchDevice() ? 'Hold the arena to speed up time' : 'Hold space to speed up time';
+  }
+
+  // Holding action (or, without a player here, space or the arena) speeds the round up
+  // while that is offered; the press must have begun during the offer
+  private checkSpeedUp(inputs: ReadonlyMap<SlotIndex, TronInput>): void {
+    if (!this.session.setSpeedUp) return;
+    let pressed = inputs.size === 0 && this.watcherHolds;
+    for (const input of inputs.values()) pressed ||= input.action;
+    const fresh = pressed && !this.actionWasPressed;
+    this.actionWasPressed = pressed;
+    const offered = this.session.getViewState()?.round.speedUp !== undefined;
+    const speedingUp = pressed && offered && (this.speedingUp || fresh);
+    if (speedingUp !== this.speedingUp) {
+      this.speedingUp = speedingUp;
+      this.session.setSpeedUp(speedingUp);
     }
   }
 
@@ -860,7 +897,9 @@ export class TronGame implements Screen {
   private step(): void {
     if (!this.input) return;
     const t0 = perfStart();
-    this.session.step(this.input.getInputs());
+    const inputs = this.input.getInputs();
+    this.session.step(inputs);
+    this.checkSpeedUp(inputs);
     perfEnd('step', t0);
     this.dirty = true;
 
@@ -910,6 +949,8 @@ export class TronGame implements Screen {
     // `?botdebug=1`: what the bots know of the arena (design/bots-territory.md)
     const game = (this.session as { game?: TronGameState }).game;
     if (this.botDebug && game && view.round.phase === 'playing') this.botDebug.draw(this.renderer.context, game);
+    const hint = this.speedUpHint(view.round.speedUp);
+    if (hint) this.renderer.renderHint(hint);
     const silentMs = stats?.silentMs ?? 0;
     if (silentMs > HOST_SILENCE_MS) {
       this.renderer.renderNotice('Connection to the host lost', `waiting… ${Math.floor(silentMs / 1000)}s`);
@@ -1050,6 +1091,7 @@ export class TronGame implements Screen {
       document.removeEventListener('keydown', this.fpsKeyHandler);
       this.fpsKeyHandler = null;
     }
+    for (const type of ['keyup', 'pointerup', 'pointercancel', 'blur']) window.removeEventListener(type, this.watcherRelease);
 
     this.input?.cleanup();
     this.input = null;

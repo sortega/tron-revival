@@ -1,7 +1,7 @@
 // Ticker - fixed-timestep driver for the game screen.
 // Calls `step` TICK_RATE times per second and `render` once per display frame.
 
-import { TICK_MS } from './constants';
+import { SPEED_UP_BUDGET_MS, TICK_MS } from './constants';
 import { perfCount, perfEnabled, perfEnd, perfSample, perfStart } from './perf';
 
 const MAX_STEPS_PER_WAKE = 10;
@@ -9,6 +9,8 @@ const MAX_STEPS_PER_WAKE = 10;
 export interface TickerOptions {
   /** Keep stepping (without rendering) while the tab is hidden. */
   runInBackground: boolean;
+  /** How many times faster than real time to step right now (default 1). */
+  timeScale?: () => number;
 }
 
 export class Ticker {
@@ -75,11 +77,14 @@ export class Ticker {
 
   private advance(): void {
     const now = performance.now();
-    this.accumulator += now - this.lastTime;
+    // Sped up (design/local-and-ai.md): time counts `scale` times, within a budget
+    const scale = this.options.timeScale?.() ?? 1;
+    this.accumulator += (now - this.lastTime) * scale;
     this.lastTime = now;
 
     let steps = 0;
-    while (this.accumulator >= TICK_MS && steps < MAX_STEPS_PER_WAKE) {
+    while (this.accumulator >= TICK_MS && steps < MAX_STEPS_PER_WAKE * scale) {
+      if (scale > 1 && (this.options.timeScale?.() === 1 || performance.now() - now > SPEED_UP_BUDGET_MS)) break;
       this.accumulator -= TICK_MS;
       this.step();
       steps++;

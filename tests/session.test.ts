@@ -78,3 +78,58 @@ describe('local setup', () => {
     expect(config.levelMode).toBe('bus');
   });
 });
+
+// design/local-and-ai.md, "Speeding up when only bots are left"
+describe('speeding up', () => {
+  it('speeds up while asked to once only bots are alive, and not after the round ends', () => {
+    const config = localConfig();
+    config.players.push({ slotIndex: 2, nickname: 'Bot 2', color: FFA_COLORS[2], control: { type: 'ai', difficulty: 'normal' } });
+    const session = new HostSession(config, { rng: createRng(5), now: () => 0 });
+    // The human circles into its own trail
+    const circling = new Map<SlotIndex, { steer: number; action: boolean }>([[0, { steer: -1, action: false }]]);
+    const speedUp = (): string | undefined => session.getViewState().round.speedUp;
+    while (session.game.players[0]!.alive || session.game.phase !== 'playing') {
+      session.step(circling);
+      expect(speedUp()).toBeUndefined();
+    }
+    expect(session.game.players.filter(p => p.alive).length).toBe(2);
+
+    // Not within the first second (the tick of the death was its first), even if held
+    session.setSpeedUp(true);
+    for (let i = 0; i < 69; i++) {
+      session.step(circling);
+      expect(speedUp()).toBeUndefined();
+      expect(session.timeScale).toBe(1);
+    }
+    session.setSpeedUp(false);
+    session.step(circling);
+    expect(speedUp()).toBe('offered');
+    expect(session.timeScale).toBe(1);
+
+    // Ten times faster while held, and no longer
+    session.setSpeedUp(true);
+    expect(session.timeScale).toBe(10);
+    session.step(circling);
+    expect(speedUp()).toBe('on');
+    session.setSpeedUp(false);
+    expect(session.timeScale).toBe(1);
+    session.step(circling);
+    expect(speedUp()).toBe('offered');
+
+    session.setSpeedUp(true);
+    for (let i = 0; i < 70 * 600 && session.game.phase === 'playing'; i++) session.step(circling);
+    expect(session.game.phase).toBe('waiting_ready');
+    expect(session.timeScale).toBe(1);
+    expect(speedUp()).toBeUndefined();
+  }, 60_000);
+
+  it('never offers to speed up while a human is alive', () => {
+    const session = new HostSession(localConfig(), { rng: createRng(6), now: () => 0 });
+    for (let i = 0; i < 70 * 20; i++) {
+      // Wavy steering keeps the human alive for a while
+      session.step(new Map([[0 as SlotIndex, { steer: i % 90 < 30 ? 1 : i % 90 < 60 ? -1 : 0, action: false }]]));
+      const { round } = session.getViewState();
+      if (round.players[0]!.alive || round.phase !== 'playing') expect(round.speedUp).toBeUndefined();
+    }
+  });
+});

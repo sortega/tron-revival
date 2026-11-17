@@ -350,6 +350,22 @@ export class TronRenderer {
     ctx.fillText(detail, PLAY_WIDTH / 2, midY + 18);
   }
 
+  /** A line at the bottom of the arena, over the running game. */
+  renderHint(text: string): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#000';
+    ctx.strokeText(text, PLAY_WIDTH / 2, PLAY_HEIGHT - 18);
+    ctx.fillStyle = '#ff0';
+    ctx.fillText(text, PLAY_WIDTH / 2, PLAY_HEIGHT - 18);
+    ctx.restore();
+  }
+
   /** The players changed at a round start (design/spectators.md). */
   setPlayers(players: GamePlayer[]): void {
     this.players = players;

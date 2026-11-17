@@ -5,7 +5,7 @@
 
 import type { SlotIndex } from '../../../types/lobby';
 import type { TronGameStateData, TronInput } from '../../../types/game';
-import { TICK_MS } from '../../constants';
+import { SPEED_UP_BUDGET_MS, TICK_MS } from '../../constants';
 import { PixelGrid } from '../../PixelGrid';
 import { perfCount, perfCounter, perfDump, perfEnable, perfEnd, perfSince, perfStart } from '../../perf';
 import { HostSession } from '../HostSession';
@@ -44,10 +44,13 @@ const summaryCursor = new Map<string, number>();
 function advance(): void {
   if (!session || paused) return;
   const now = performance.now();
-  accumulator += now - lastTime;
+  // Sped up (design/local-and-ai.md): time counts `timeScale` times, within a budget
+  const scale = session.timeScale;
+  accumulator += (now - lastTime) * scale;
   lastTime = now;
   let steps = 0;
-  while (accumulator >= TICK_MS && steps < MAX_STEPS_PER_WAKE) {
+  while (accumulator >= TICK_MS && steps < MAX_STEPS_PER_WAKE * scale) {
+    if (scale > 1 && (session.timeScale === 1 || performance.now() - now > SPEED_UP_BUDGET_MS)) break;
     accumulator -= TICK_MS;
     const t0 = perfStart();
     session.step(inputs);
@@ -92,6 +95,9 @@ scope.onmessage = (event) => {
       break;
     case 'spectators':
       spectators = message.present;
+      break;
+    case 'speedUp':
+      session?.setSpeedUp(message.held);
       break;
     case 'nextPlayers':
       session?.setNextPlayers(message.players);

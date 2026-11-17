@@ -59,6 +59,7 @@ press does now:
 | Between rounds, not ready yet | `READY` |
 | Between rounds, ready | `NOT READY` (a press takes it back) |
 | Countdown, or dead while the round goes on | `ACTION`, dimmed |
+| Dead, only bots left, on the machine that simulates | `SPEED UP`, while held (local-and-ai.md, "Speeding up when only bots are left") |
 
 | Mode | Label | How it works |
 |------|-------|--------------|

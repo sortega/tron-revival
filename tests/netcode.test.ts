@@ -351,3 +351,78 @@ describe('host silence', () => {
     expect(rig.guest.getNetworkStats().silentMs).toBeLessThan(HOST_SILENCE_MS / 10);
   });
 });
+
+// design/local-and-ai.md, "Speeding up when only bots are left"
+describe('speeding up', () => {
+  it('guests get one message per ten ticks, and still every event', () => {
+    const net = new SimNet(3);
+    const cfg = config({ type: 'local', scheme: 'solo' });
+    cfg.players.push(
+      { slotIndex: 2, nickname: 'Bot A', color: FFA_COLORS[2], control: { type: 'ai', difficulty: 'normal' } },
+      { slotIndex: 3, nickname: 'Bot B', color: FFA_COLORS[3], control: { type: 'ai', difficulty: 'normal' } },
+    );
+    const host = new HostSession(cfg, { transport: net.hostTransport, rng: createRng(3), now: net.now });
+    const guest = new GuestSession(net.addGuest(1, { delayMs: 40, jitterMs: 20 }), 1, cfg.players, { now: net.now });
+
+    const mirror = new PixelGrid();
+    let guestFrames = 0;
+    let guestSounds = 0;
+    let seenOn = false;
+    guest.onFrame = (f: TronGameStateData) => {
+      guestFrames++;
+      guestSounds += f.soundEvents.length;
+      if (f.round.speedUp === 'on') seenOn = true;
+      if (f.roundStarted || f.eraserUsed) mirror.clear();
+      for (const { slotIndex, segments } of f.newTrailSegments) {
+        for (const seg of segments) mirror.set(seg.x, seg.y, FFA_COLORS[slotIndex]);
+      }
+      const lines = f.clearedLines ?? [];
+      for (let i = 0; i + 3 < lines.length; i += 4) mirror.clearLine(lines[i]!, lines[i + 1]!, lines[i + 2]!, lines[i + 3]!);
+      for (const r of f.clearedAreas ?? []) mirror.clearRect(r.x, r.y, r.w, r.h);
+    };
+    let hostFrames = 0;
+    let hostSounds = 0;
+    host.onFrame = (f) => { hostFrames++; hostSounds += f.soundEvents.length; };
+
+    // Both humans circle into their own trails; the host holds action from the offer on
+    let fastTicks = 0;
+    let fastMessages = 0;
+    let stopped = false;
+    const circling = { steer: -1, action: false };
+    net.every(() => {
+      if (stopped) return;
+      // As the ticking loop does: `timeScale` ticks for one of real time
+      for (let i = host.timeScale; i > 0 && !stopped; i--) {
+        const fast = host.timeScale > 1;
+        const before = net.bytes.playerMessages;
+        host.step(new Map<SlotIndex, TronInput>([[0, circling]]));
+        if (fast && host.timeScale > 1) {
+          fastTicks++;
+          fastMessages += net.bytes.playerMessages - before;
+        }
+        if (host.getViewState().round.speedUp === 'offered') host.setSpeedUp(true);
+        // Stop a little into the pause after the round that was sped up
+        if (fastTicks > 0 && host.game.phase === 'waiting_ready' && host.timeScale === 1) stopped = true;
+      }
+    });
+    net.every(() => guest.step(new Map<SlotIndex, TronInput>([[1, circling]])), 5);
+    net.runUntil(120_000);
+    expect(stopped).toBe(true);
+    const messages = net.bytes.playerMessages;
+    net.runUntil(121_000);
+
+    expect(fastTicks).toBeGreaterThan(100);
+    expect(fastMessages).toBeLessThanOrEqual(Math.ceil(fastTicks / 10));
+    expect(fastMessages).toBeGreaterThanOrEqual(Math.floor(fastTicks / 10) - 1);
+    expect(messages).toBeLessThan(hostFrames - fastTicks * 0.85);
+    expect(seenOn).toBe(true);
+    expect(guest.getViewState()?.round.phase).toBe('waiting_ready');
+    expect(guest.getViewState()?.round.speedUp).toBeUndefined();
+    // Nothing was lost on the way
+    expect(guestFrames).toBe(hostFrames);
+    expect(guestSounds).toBe(hostSounds);
+    let diff = 0;
+    for (let y = 0; y < 600; y++) for (let x = 0; x < 750; x++) if (mirror.get(x, y) !== host.game.pixels.get(x, y)) diff++;
+    expect(diff).toBe(0);
+  }, 120_000);
+});

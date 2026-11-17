@@ -12,3 +12,10 @@ export const FIXED_POINT_SCALE = 1000;
 
 /** Ticks after a round ends during which action presses are not taken as "ready" (1 s). */
 export const READY_LOCK_TICKS = TICK_RATE;
+
+/** Speeding up while only bots are alive (design/local-and-ai.md, "Speeding up when only bots are left"). */
+export const SPEED_UP_FACTOR = 10;
+/** Ticks with only bots alive before the speed-up is offered (1 s). */
+export const SPEED_UP_LOCK_TICKS = TICK_RATE;
+/** While sped up, a wake-up of the ticking loop simulates for at most this long. */
+export const SPEED_UP_BUDGET_MS = 8;

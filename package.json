@@ -20,6 +20,7 @@
     "test:e2e:spectators": "node tests/e2e/spectators.e2e.mjs",
     "test:e2e:touch": "node tests/e2e/touch.e2e.mjs",
     "test:e2e:bots": "node tests/e2e/bots.e2e.mjs",
+    "test:e2e:speedup": "node tests/e2e/speedup.e2e.mjs",
     "lint": "eslint .",
     "bench:sim": "node scripts/bench/run-node.mjs scripts/bench/sim-bench.ts",
     "bench:fingerprint": "node scripts/bench/run-node.mjs scripts/bench/sim-bench.ts --fingerprint",

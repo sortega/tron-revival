@@ -21,6 +21,8 @@ export type ToWorker =
   | { type: 'inputs'; inputs: [SlotIndex, TronInput][] }
   | { type: 'level'; levelIndex: number; palette: string[]; runs: number[] }
   | { type: 'pause'; paused: boolean }
+  /** Whether action is held to speed the round up (design/local-and-ai.md). */
+  | { type: 'speedUp'; held: boolean }
   | { type: 'perf' }
   | { type: 'perfSummary' };
 

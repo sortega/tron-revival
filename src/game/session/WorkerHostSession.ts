@@ -81,6 +81,16 @@ export class WorkerHostSession implements AuthoritativeSession {
     return this.transport !== null;
   }
 
+  /** The worker keeps its own clock; only a session that fell back to this thread is paced by the page. */
+  get timeScale(): number {
+    return this.fallback?.timeScale ?? 1;
+  }
+
+  setSpeedUp(held: boolean): void {
+    if (this.fallback) this.fallback.setSpeedUp(held);
+    else this.post({ type: 'speedUp', held });
+  }
+
   private post(message: ToWorker): void {
     this.worker?.postMessage(message);
   }

@@ -158,6 +158,8 @@ export interface TronRoundState {
   bodyguards: Bodyguard[];     // Active bodyguards
   doorTick: number;            // Playing ticks elapsed this round (clock of the level's doors)
   hand?: HandView;             // The dentist's hand, on its level
+  /** Only bots are alive: the host may speed time up ('offered') or has done so ('on'). */
+  speedUp?: 'offered' | 'on';
 }
 
 // Match state (scores, ready status)

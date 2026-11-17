@@ -353,6 +353,66 @@ output after a fixed delay (`reverseReactionTicks`); with the human layer — th
 it never learns about the reversal and the bot's hands have to relearn the controls
 ([bots-human.md](./bots-human.md)).
 
+### Speeding up when only bots are left
+
+A human who died early would otherwise sit through the bots' endgame. While a round is being
+played and every player still alive is a bot, the host can make time run faster.
+
+- **Offer.** One second (`SPEED_UP_LOCK_TICKS`) after the last human died, the game screen
+  of the machine that simulates (local game, network host) shows *Hold action to speed up
+  time* at the bottom of the arena. A user without a player there (an all-bot game, a host
+  who watches) is told *Hold space* / *Hold the arena* instead. Guests see nothing: the
+  decision is the host's.
+- **While action is held.** The simulation runs `SPEED_UP_FACTOR` = 10 times faster for as
+  long as any player of that machine holds action, and the screen shows `▶▶ ×10` to
+  everybody. Letting go brings normal speed back at once. The press must begin while the
+  offer is shown: a key held since before it (somebody who died shooting) does not count.
+  It ends by itself when the round ends or a human is alive again.
+- **How.** The rules do not change: the same ticks are simulated, more of them per wake-up.
+  `HostSession.timeScale` (1 or 10) multiplies the time that the ticking loop (worker
+  clock, or the `Ticker` when the simulation runs on the page) credits to its accumulator;
+  `round.speedUp` (`'offered'` | `'on'`, absent otherwise) in each frame tells the screen
+  what to show, and `GameSession.setSpeedUp(held)` (absent on a guest) says whether action
+  is being held for it.
+- **Never more than the machine can do.** While sped up, a wake-up stops simulating after
+  `SPEED_UP_BUDGET_MS` = 8 ms and forgets the ticks it owes, so that a slow device runs as
+  fast as it can instead of piling up work. The speed shown stays ×10.
+- **Network.** Guests are not sent 700 states a second: while sped up, the host sends one
+  message every 10 ticks, the latest state plus the events of the ticks in between
+  (`earlier`, as in the reduced stream of [spectators.md](./spectators.md)), and the
+  watchers one every 30. Guests draw them as they come; nobody is steering, so prediction
+  has nothing to do.
+- Sounds are played as they happen, ten times as close together.
+
+#### Cost of ×10
+
+`npm run test:e2e:speedup` (headless Chrome on the development laptop, a human and three
+hard bots on Bricks, `?perf=1`; it also checks the behaviour above). A tick is the same
+work as at normal speed, there are ten times as many:
+
+| | Normal speed | ×10 |
+|-|--------------|-----|
+| Ticks a second | 70 | 700 |
+| A tick, mean / 99th percentile (two or three hard bots alive) | – | 0.39 / 1.3 ms |
+| Simulation, share of one core (in the worker) | about 3 % | 28 % |
+| Page: applying the frames' events | 0.3 % | 0.4 % |
+| Page: a display frame, mean | 0.21 ms | 0.24 ms |
+| Display frames | 60 a second | 60 a second |
+
+- Nearly all of a tick is the bots (0.37 of the 0.39 ms); the rules take 0.01–0.02 ms. The
+  page hardly notices: it draws as often as before, and the trail of ten ticks costs little
+  more than the trail of one.
+- With the simulation on the page's thread (`?worker=0`): 29 % of the main thread, a
+  display frame of 5 ms on average (10 ms worst), still 60 frames a second.
+- The same with the page's processor slowed down six times (`E2E_THROTTLE=6`), as a guess
+  at a slow phone without a worker: the budget holds the display at 60 frames a second
+  (gap between frames 16.7 ms mean, 19.6 ms at the 99th percentile) and time runs at ×3.3
+  instead of ×10. Not measured on a real phone.
+- Network (tests, "speeding up" in `netcode.test.ts`): one message per ten ticks, each
+  with the events of all ten; a guest rebuilds the arena exactly and hears every sound.
+- ×20 would be within reach of a laptop (about 55 % of a core) and beyond most phones;
+  ×10 already ends a round between bots in a few seconds.
+
 ### Difficulty
 
 | | easy | normal | hard |
