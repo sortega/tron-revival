@@ -814,6 +814,14 @@ export class TronRenderer {
       const player = this.players.find(p => p.slotIndex === slotIndex);
       const playerState = playerStates.find(p => p.slotIndex === slotIndex);
 
+      // A ridiculous death covers the slot (50x150) and replaces what it showed, except
+      // the robot head, which goes on top of it
+      const ridiculous = !!player && !!playerState && this.ridiculousDeathSlots.has(slotIndex) &&
+        !!this.spriteAtlas?.isLoaded();
+      if (ridiculous) {
+        this.spriteAtlas!.draw(ctx, 'ridiculous_death', panelX + STATUS_WIDTH / 2, y + slotHeight / 2);
+      }
+
       // A robot head marks a bot, one face per difficulty; it goes grey with the panel
       const bot = player && botOf(player);
       if (bot && playerState && this.spriteAtlas?.isLoaded()) {
@@ -834,17 +842,7 @@ export class TronRenderer {
       if (player && playerState) {
         const centerX = panelX + STATUS_WIDTH / 2;
 
-        // Check if ridiculous death should be shown (overrides other displays)
-        if (this.ridiculousDeathSlots.has(slotIndex) && this.spriteAtlas?.isLoaded()) {
-          // Draw ridiculous death sprite covering the slot (50x150)
-          this.spriteAtlas.draw(
-            ctx,
-            'ridiculous_death',
-            centerX,
-            y + slotHeight / 2
-          );
-          continue; // Skip normal rendering for this slot
-        }
+        if (ridiculous) continue;   // Nothing else is shown in this slot
 
         const hasWeapon = !!playerState.equippedWeapon;
         const hasEffect = playerState.activeEffects && playerState.activeEffects.length > 0;
