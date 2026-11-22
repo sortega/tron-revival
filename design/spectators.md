@@ -185,6 +185,11 @@ role sees every tick exactly once. Guests also drop any frame whose tick they al
 
 #### Measured
 
+(Before the compact wire format of 22 November 2026, which made every payload below
+some three times smaller — [networking.md](./networking.md), "Wire format"; the framing
+per message and the proportions between the streams are as they were. Not measured again
+in real browsers.)
+
 `tests/e2e/spectators.e2e.mjs`, real Chrome instances on one machine, direct connections,
 free-for-all with a guest and a bot, first seconds of a round. Bytes are what
 `RTCPeerConnection.getStats()` reports as sent on each of the host's connections, so they

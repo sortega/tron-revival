@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { HostSession } from '../src/game/session/HostSession';
 import { GuestSession } from '../src/game/session/GuestSession';
 import { HOST_SILENCE_MS } from '../src/game/session/GameSession';
+import { decode } from '@msgpack/msgpack';
+import { deserializeState, serializeState } from '../src/network/serialization';
+import { makeGame, skipCountdown } from './helpers';
 import { PixelGrid } from '../src/game/PixelGrid';
 import { createRng } from '../src/game/rng';
 import { FFA_COLORS } from '../src/types/lobby';
@@ -255,8 +258,8 @@ describe('event delivery', () => {
     expect(diff).toBe(0);
     expect(rig.host.game.currentRound).toBeGreaterThan(1);
     // Bandwidth budget: average and worst frame
-    expect(bytes / frames).toBeLessThan(350);
-    expect(maxBytes).toBeLessThan(6000);
+    expect(bytes / frames).toBeLessThan(150);
+    expect(maxBytes).toBeLessThan(2000);
   }, 120_000);
 });
 
@@ -425,4 +428,114 @@ describe('speeding up', () => {
     for (let y = 0; y < 600; y++) for (let x = 0; x < 750; x++) if (mirror.get(x, y) !== host.game.pixels.get(x, y)) diff++;
     expect(diff).toBe(0);
   }, 120_000);
+});
+
+// design/networking.md, "Wire format"
+describe('wire format', () => {
+  const frame = (): TronGameStateData => {
+    const g = makeGame(2, 1);
+    skipCountdown(g);
+    g.tick(new Map());
+    return g.serialize();
+  };
+
+  it('carries what is drawn of projectiles, explosions and satellites, in a few bytes each', () => {
+    const state = frame();
+    state.round.projectiles = [
+      { id: 7, x: 749_900, y: 599_900, direction: 33.3, ownerSlot: 1, speed: 20000, type: 'tracer', remainingFrames: 3 },
+      { id: 8, x: 12_345, y: 0, direction: 270, ownerSlot: 0, speed: 5000, type: 'bullet' },
+      { id: 9, x: 300_000, y: 200_999, direction: 359.9, ownerSlot: 0, speed: 2000, type: 'bomb', hp: 100 },
+      // A little outside the arena: wrapped in
+      { id: 10, x: -1_500, y: 600_200, direction: 0, ownerSlot: 0, speed: 2000, type: 'tracer' },
+    ];
+    state.round.explosions = [
+      { id: 1, x: 749, y: 599, frame: 38 },
+      { id: 2, x: 0, y: 300, frame: 0, scale: 2 },
+      { id: 3, x: 10, y: 20, frame: 5, scale: 4 },
+    ];
+    state.round.bodyguards = [{ id: 4, ownerSlot: 1, x: 100_700, y: 50_200, phaseOffset: 180 }];
+    const plain = serializeState({ ...state, round: { ...state.round, projectiles: [], explosions: [], bodyguards: [] } }).length;
+    const data = serializeState(state);
+    // 3 bytes a tracer, 4 a bullet or a bomb, 5 an explosion, about 5 a satellite
+    expect(data.length - plain).toBeLessThanOrEqual(3 + 4 + 4 + 3 + 3 * 5 + 6);
+
+    const copy = deserializeState(data, state.round.players);
+    expect(copy.round.projectiles.map(p => [p.type, p.x, p.y])).toEqual([
+      ['tracer', 749_000, 599_000], ['bullet', 12_000, 0], ['bomb', 300_000, 200_000], ['tracer', 1022_000, 600_000],
+    ]);
+    expect(copy.round.projectiles[1]!.direction).toBeCloseTo(270, 0);
+    expect(Math.abs(copy.round.projectiles[2]!.direction - 359.9) % 360).toBeLessThan(1.5);
+    expect(copy.round.explosions.map(e => [e.x, e.y, e.frame, e.scale])).toEqual([[749, 599, 38, undefined], [0, 300, 0, 2], [10, 20, 5, 4]]);
+    expect(copy.round.bodyguards.map(b => [b.x, b.y, b.ownerSlot])).toEqual([[100_000, 50_000, 1]]);
+  });
+
+  it('carries every new trail pixel, however many', () => {
+    const state = frame();
+    const long = Array.from({ length: 600 }, (_, i) => ({ x: i % 750, y: (i * 7) % 600 }));
+    state.newTrailSegments = [
+      { slotIndex: 0, segments: long },
+      { slotIndex: 1, segments: [] },
+      { slotIndex: 3, segments: Array.from({ length: 255 }, (_, i) => ({ x: 749 - i, y: 599 })) },
+      { slotIndex: 2, segments: [{ x: 0, y: 0 }, { x: 749, y: 599 }] },
+    ];
+    const copy = deserializeState(serializeState(state), state.round.players);
+    expect(copy.newTrailSegments).toEqual(state.newTrailSegments);
+  });
+
+  it('carries weapons, effects, the phase and the winner', () => {
+    const state = frame();
+    state.round.players[0]!.equippedWeapon = { sprite: 'uzi', remainingFrames: 120 };
+    state.round.players[1]!.equippedWeapon = { sprite: 'rifle', ammo: 45 };
+    state.round.players[1]!.activeEffects = [{ sprite: 'shield', remainingFrames: 2000 }, { sprite: 'crossing', remainingFrames: 7 }];
+    for (const [phase, winner, speedUp] of [['playing', null, 'on'], ['waiting_ready', 'draw', undefined], ['waiting_ready', 1, undefined], ['playing', null, 'offered']] as const) {
+      state.round.phase = phase;
+      state.round.roundWinner = winner;
+      state.round.speedUp = speedUp;
+      const copy = deserializeState(serializeState(state), state.round.players);
+      expect(copy.round.players).toEqual(state.round.players.map(p => ({ ...p, x: Math.round(p.x), y: Math.round(p.y) })));
+      expect([copy.round.phase, copy.round.roundWinner, copy.round.speedUp]).toEqual([phase, winner, speedUp]);
+    }
+  });
+
+  it('a quiet frame of four players is small', () => {
+    const g = makeGame(4, 2);
+    skipCountdown(g);
+    let bytes = 0;
+    for (let i = 0; i < 70; i++) {
+      g.tick(new Map());
+      const state = g.serialize();
+      const { items: _items, portals: _portals, ...round } = state.round;
+      bytes += serializeState({ ...state, round, match: undefined, tick: 5000 + i }).length;
+    }
+    // It was about 330 with field names and one number per coordinate
+    expect(bytes / 70).toBeLessThan(140);
+  });
+
+  it('portals travel when they change; in between only their animation frames do', () => {
+    const rig = makeRig({ delayMs: 20 }, { seed: 4, level: 'portals' });
+    let whole = 0;
+    let frames = 0;
+    let messages = 0;
+    const broadcast = rig.net.hostTransport.broadcastState;
+    rig.net.hostTransport.broadcastState = (data) => {
+      const extras = (decode(data) as unknown[])[12] as { portals?: unknown; portalFrames?: unknown } | undefined;
+      messages++;
+      if (extras?.portals) whole++;
+      if (extras?.portalFrames) frames++;
+      broadcast(data);
+    };
+    rig.net.runUntil(8_000);
+    // Stop the host and let everything arrive: the guest's portals are the host's, frames included
+    const truth = rig.host.getViewState().round.portals;
+    rig.host.step = () => {};
+    rig.net.runUntil(8_500);
+    expect(truth.length).toBeGreaterThan(0);
+    expect(rig.guest.getViewState()?.round.portals).toEqual(truth);
+    expect(messages).toBeGreaterThan(500);
+    // Once a second as a safety net, and when a round sets new ones up
+    expect(whole).toBeLessThan(messages / 50);
+    // The animation advances every third tick, while a round is on
+    expect(frames).toBeGreaterThan(messages / 10);
+    expect(frames).toBeLessThan(messages / 2.9);
+  });
 });

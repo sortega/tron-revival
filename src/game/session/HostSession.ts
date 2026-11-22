@@ -7,7 +7,7 @@ import { TronGameState } from '../TronGameState';
 import type { PixelGrid } from '../PixelGrid';
 import type { SmoothLinesData } from '../display/SmoothLines';
 import type { Rng } from '../rng';
-import { encodeSnapshot, eventsOf, serializeState, toRoster } from '../../network/serialization';
+import { encodeSnapshot, eventsOf, portalsKey, serializeState, toRoster } from '../../network/serialization';
 import type { WireState } from '../../network/serialization';
 import { PLAY_HEIGHT, PLAY_WIDTH, SPEED_UP_FACTOR, SPEED_UP_LOCK_TICKS, TICK_RATE } from '../constants';
 import { SmoothLineKeeper } from '../display/SmoothLines';
@@ -316,7 +316,7 @@ export class HostSession implements GameSession {
     wire.round = round;
     if (!this.changed('match', last.match) && !refresh) delete wire.match;
     if (!this.changed('items', last.round.items) && !refresh) delete round.items;
-    if (!this.changed('portals', last.round.portals) && !refresh) delete round.portals;
+    this.trimPortals('portals', round, refresh);
     const roster = toRoster(this.players);
     if (this.changed('roster', roster) || refresh) wire.roster = roster;
     const packed = serializeState(wire);
@@ -338,7 +338,7 @@ export class HostSession implements GameSession {
     wire.round = round;
     if (!this.changed('w:match', last.match) && !refresh) delete wire.match;
     if (!this.changed('w:items', last.round.items) && !refresh) delete round.items;
-    if (!this.changed('w:portals', last.round.portals) && !refresh) delete round.portals;
+    this.trimPortals('w:portals', round, refresh);
     const roster = toRoster(this.players);
     if (this.changed('w:roster', roster) || refresh) wire.roster = roster;
     const packed = serializeState(wire);
@@ -371,6 +371,19 @@ export class HostSession implements GameSession {
       tick: this.tick - 1, ...this.game.pixels.toRuns(), state,
       smoothLines: this.smoothLines?.lines.encode(),
     });
+  }
+
+  // Portals travel when they change; in between only their animation frames do, when
+  // those change (every few ticks)
+  private trimPortals(key: string, round: WireState['round'], refresh: boolean): void {
+    const portals = round.portals ?? [];
+    const frames = portals.map(p => p.animFrame);
+    if (this.changed(key, portalsKey(portals)) || refresh) {
+      this.changed(`${key}:frames`, frames);
+      return;
+    }
+    delete round.portals;
+    if (portals.length > 0 && this.changed(`${key}:frames`, frames)) round.portalFrames = frames;
   }
 
   // True if `value` differs from what was last recorded under `key`

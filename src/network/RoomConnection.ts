@@ -18,7 +18,7 @@ import type { Audience, Profile, SharedRoom, SlotEntry } from './roomLogic';
 export type { Audience } from './roomLogic';
 
 // Includes a protocol version: incompatible builds never meet in a room
-const APP_ID = 'teratron/v3';
+const APP_ID = 'teratron/v4';
 
 const IDENTITY_KEY = 'teratron-identity';
 const ROOM_KEY = 'teratron-room';

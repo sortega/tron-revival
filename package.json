@@ -23,6 +23,7 @@
     "test:e2e:speedup": "node tests/e2e/speedup.e2e.mjs",
     "lint": "eslint .",
     "bench:sim": "node scripts/bench/run-node.mjs scripts/bench/sim-bench.ts",
+    "bench:net": "node scripts/bench/run-node.mjs scripts/bench/net-bench.ts",
     "bench:fingerprint": "node scripts/bench/run-node.mjs scripts/bench/sim-bench.ts --fingerprint",
     "bench:browser": "node scripts/bench/browser-bench.mjs",
     "bench:render": "node scripts/bench/render-bench.mjs",

@@ -3,11 +3,11 @@
 
 import { encode, decode } from '@msgpack/msgpack';
 import type {
-  ActiveEffect, EquippedWeapon, FrameEvents, GameItem, GamePlayer, Projectile, ProjectileType, RosterEntry, TrailSegment,
-  TronGameStateData, TronMatchState, TronPlayerState, TronRoundState,
+  ActiveEffect, Bodyguard, ClearedRect, EquippedWeapon, Explosion, FrameEvents, GameItem, GamePlayer, Projectile, ProjectileType,
+  RosterEntry, RoundPhase, TrailSegment, TronGameStateData, TronMatchState, TronPlayerState, TronRoundState,
 } from '../types/game';
 import type { SlotIndex } from '../types/lobby';
-import { botOf } from '../types/game';
+import { botOf, NO_OWNER } from '../types/game';
 import type { BotDifficulty } from '../types/game';
 import type { SmoothLinesData } from '../game/display/SmoothLines';
 
@@ -18,9 +18,10 @@ export interface PlayerIdentity {
   nickname: string;
 }
 
+// weapon: [sprite, ammo, remainingFrames] (NONE = absent); effects: [sprite, remainingFrames, ...]
 type PackedPlayer = [
   slot: number, x: number, y: number, direction: number, alive: boolean,
-  weapon: EquippedWeapon | null, effects: ActiveEffect[],
+  weapon: [string, number, number] | null, effects: (string | number)[],
   speed: number, moveCounter: number, tpCooldown: number, steer: number, action: boolean,
 ];
 
@@ -31,25 +32,54 @@ interface PackedTrail {
   segments: number[];  // [x1, y1, x2, y2, ...]
 }
 
-interface PackedRound extends Omit<TronRoundState, 'players' | 'projectiles' | 'items' | 'portals'> {
-  players: PackedPlayer[];
-  projectiles: number[];  // PROJECTILE_FIELDS numbers per projectile
-  items?: PackedItem[];
-  portals?: TronRoundState['portals'];
-}
-
 interface PackedEvents extends Omit<FrameEvents, 'newTrailSegments' | 'borderSegments'> {
   newTrailSegments: PackedTrail[];
   borderSegments?: { color: string; segments: number[] }[];
 }
 
-interface PackedGameState extends Omit<TronGameStateData, 'newTrailSegments' | 'round' | 'borderSegments' | 'match' | 'earlier'> {
+// What a frame has now and then, by name. Everything it has on every tick is in the
+// positional part of the message (`PackedGameState`).
+interface PackedExtras {
   match?: TronMatchState;
-  round: PackedRound;
-  newTrailSegments: PackedTrail[];
+  items?: PackedItem[];
+  portals?: TronRoundState['portals'];
+  portalFrames?: number[];
+  hand?: TronRoundState['hand'];
+  speedUp?: number;          // 1 = offered, 2 = on
+  soundEvents?: FrameEvents['soundEvents'];
   borderSegments?: { color: string; segments: number[] }[];
+  eraserUsed?: boolean;
+  ridiculousDeathSlots?: SlotIndex[];
+  clearedAreas?: number[];   // [x, y, w, h, ...]
+  clearedLines?: number[];
+  roundStarted?: boolean;
+  deaths?: FrameEvents['deaths'];
+  colorBlindnessFrames?: number;
+  whiteFlashFrames?: number;
+  roster?: RosterEntry[];
   earlier?: PackedEarlier[];
 }
+
+// A frame on the wire (design/networking.md, "Wire format"): no field names for what
+// every frame has, and bytes rather than numbers for what there is most of
+type PackedGameState = [
+  tick: number,              // NONE = absent
+  phase: number,             // Index into PHASES
+  countdown: number,
+  roundWinner: number,       // Slot, NONE = nobody yet, DRAW
+  doorTick: number,
+  players: PackedPlayer[],
+  trails: Uint8Array,        // packTrailBytes
+  projectiles: Uint8Array,   // packProjectiles
+  explosions: Uint8Array,    // packExplosions
+  bodyguards: number[],      // [x, y, owner, ...] in pixels
+  pongs: TronGameStateData['pongs'] | null,
+  acks: TronGameStateData['acks'] | null,
+  extras?: PackedExtras,
+];
+
+const PHASES: RoundPhase[] = ['countdown', 'playing', 'waiting_ready'];
+const DRAW = -2;
 
 // Events of a skipped tick, as compact as they get: most ticks only have trail pixels.
 // trails: [slot, pixelCount, x, y, x, y, ..., slot, pixelCount, ...]
@@ -136,14 +166,6 @@ export function eventsOf(frame: FrameEvents): FrameEvents {
   };
 }
 
-function packEvents<T extends FrameEvents>(events: T): Omit<T, 'newTrailSegments' | 'borderSegments'> & Pick<PackedEvents, 'newTrailSegments' | 'borderSegments'> {
-  return {
-    ...events,
-    newTrailSegments: events.newTrailSegments.map(t => ({ slotIndex: t.slotIndex, segments: packTrails(t.segments) })),
-    borderSegments: events.borderSegments?.map(b => ({ color: b.color, segments: packTrails(b.segments) })),
-  };
-}
-
 function unpackEvents(packed: PackedEvents): FrameEvents {
   return {
     ...packed,
@@ -161,8 +183,18 @@ const EMPTY_MATCH: TronMatchState = {
 };
 
 const PROJECTILE_TYPES: ProjectileType[] = ['bullet', 'tracer', 'bomb'];
-const PROJECTILE_FIELDS = 10;
+const TRACER = PROJECTILE_TYPES.indexOf('tracer');
 const NONE = -1; // Marks an absent optional number
+
+// A pixel of the arena (750 x 600: 10 bits each way) and 4 more bits, in 3 bytes
+function putPixel(out: number[], x: number, y: number, extra = 0): void {
+  out.push(x & 0xff, ((x >> 8) & 0x03) | ((y & 0x3f) << 2), ((y >> 6) & 0x0f) | ((extra & 0x0f) << 4));
+}
+const pixelX = (b: Uint8Array, i: number): number => b[i]! | ((b[i + 1]! & 0x03) << 8);
+const pixelY = (b: Uint8Array, i: number): number => (b[i + 1]! >> 2) | ((b[i + 2]! & 0x0f) << 6);
+const pixelExtra = (b: Uint8Array, i: number): number => b[i + 2]! >> 4;
+// Positions of things that fly may be a little outside the arena: bring them in
+const wrap = (v: number, size: number): number => ((Math.floor(v) % size) + size) % size;
 
 // Pack trail segments as flat arrays [x1, y1, x2, y2, ...]
 function packTrails(segments: TrailSegment[]): number[] {
@@ -181,47 +213,150 @@ function unpackTrails(packed: number[]): TrailSegment[] {
   return segments;
 }
 
-function packProjectiles(projectiles: Projectile[]): number[] {
+// The new trail pixels of a tick: [slot, count, count x pixel] per player. A player with
+// more than 255 goes on in a second group (a group of 255 is always followed by one of
+// the same slot, even if empty).
+function packTrailBytes(trails: FrameEvents['newTrailSegments']): Uint8Array {
   const out: number[] = [];
-  for (const p of projectiles) {
-    out.push(
-      p.id, Math.round(p.x), Math.round(p.y),
-      // Directions and speeds only need a fraction of a unit of precision
-      Math.round(p.direction * 100), p.ownerSlot, Math.round(p.speed),
-      PROJECTILE_TYPES.indexOf(p.type),
-      p.remainingFrames ?? NONE, p.ownerCooldown ?? NONE, p.hp ?? NONE
-    );
+  for (const { slotIndex, segments } of trails) {
+    let from = 0;
+    let count: number;
+    do {
+      count = Math.min(255, segments.length - from);
+      out.push(slotIndex, count);
+      for (let i = from; i < from + count; i++) putPixel(out, segments[i]!.x, segments[i]!.y);
+      from += count;
+    } while (count === 255);
   }
-  return out;
+  return Uint8Array.from(out);
 }
 
-function unpackProjectiles(packed: number[]): Projectile[] {
+function unpackTrailBytes(bytes: Uint8Array): FrameEvents['newTrailSegments'] {
+  const trails: FrameEvents['newTrailSegments'] = [];
+  let continued = false;
+  for (let i = 0; i + 1 < bytes.length;) {
+    const slotIndex = bytes[i]! as SlotIndex;
+    const count = bytes[i + 1]!;
+    i += 2;
+    const last = trails[trails.length - 1];
+    const segments = continued && last?.slotIndex === slotIndex ? last.segments : [];
+    if (segments !== last?.segments) trails.push({ slotIndex, segments });
+    for (let k = 0; k < count && i + 2 < bytes.length; k++, i += 3) segments.push({ x: pixelX(bytes, i), y: pixelY(bytes, i) });
+    continued = count === 255;
+  }
+  return trails;
+}
+
+// Guests only draw projectiles (they are "shown as received", design/networking.md):
+// the pixel and the type, plus the heading for those drawn as a sprite. 3 bytes for a
+// tracer, 4 for a bullet or a bomb.
+function packProjectiles(projectiles: Projectile[]): Uint8Array {
+  const out: number[] = [];
+  for (const p of projectiles) {
+    const type = Math.max(0, PROJECTILE_TYPES.indexOf(p.type));
+    putPixel(out, wrap(p.x / 1000, 1024), wrap(p.y / 1000, 1024), type);
+    if (type !== TRACER) out.push(Math.round((wrap(p.direction, 360) * 256) / 360) & 0xff);
+  }
+  return Uint8Array.from(out);
+}
+
+// What does not travel is made up: the id is the position in the list, nobody owns it
+function unpackProjectiles(bytes: Uint8Array): Projectile[] {
   const projectiles: Projectile[] = [];
-  for (let i = 0; i + PROJECTILE_FIELDS <= packed.length; i += PROJECTILE_FIELDS) {
+  for (let i = 0; i + 2 < bytes.length;) {
+    const type = pixelExtra(bytes, i);
     const proj: Projectile = {
-      id: packed[i]!,
-      x: packed[i + 1]!,
-      y: packed[i + 2]!,
-      direction: packed[i + 3]! / 100,
-      ownerSlot: packed[i + 4]! as SlotIndex,
-      speed: packed[i + 5]!,
-      type: PROJECTILE_TYPES[packed[i + 6]!] ?? 'tracer',
+      id: projectiles.length,
+      x: pixelX(bytes, i) * 1000,
+      y: pixelY(bytes, i) * 1000,
+      direction: 0,
+      ownerSlot: NO_OWNER,
+      speed: 0,
+      type: PROJECTILE_TYPES[type] ?? 'tracer',
     };
-    if (packed[i + 7] !== NONE) proj.remainingFrames = packed[i + 7]!;
-    if (packed[i + 8] !== NONE) proj.ownerCooldown = packed[i + 8]!;
-    if (packed[i + 9] !== NONE) proj.hp = packed[i + 9]!;
+    i += 3;
+    if (type !== TRACER) proj.direction = ((bytes[i++] ?? 0) * 360) / 256;
     projectiles.push(proj);
   }
   return projectiles;
 }
 
+// Explosions: pixel, frame of the animation, scale in tenths (0 = the default). 5 bytes.
+function packExplosions(explosions: Explosion[]): Uint8Array {
+  const out: number[] = [];
+  for (const e of explosions) {
+    putPixel(out, wrap(e.x, 1024), wrap(e.y, 1024));
+    out.push(e.frame & 0xff, e.scale === undefined ? 0 : Math.min(255, Math.max(1, Math.round(e.scale * 10))));
+  }
+  return Uint8Array.from(out);
+}
+
+function unpackExplosions(bytes: Uint8Array): Explosion[] {
+  const explosions: Explosion[] = [];
+  for (let i = 0; i + 4 < bytes.length; i += 5) {
+    const scale = bytes[i + 4]!;
+    explosions.push({
+      id: explosions.length, x: pixelX(bytes, i), y: pixelY(bytes, i), frame: bytes[i + 3]!,
+      ...(scale > 0 && { scale: scale / 10 }),
+    });
+  }
+  return explosions;
+}
+
+// Satellites are only drawn too: where, and whose
+function packBodyguards(bodyguards: Bodyguard[]): number[] {
+  const out: number[] = [];
+  for (const b of bodyguards) out.push(Math.floor(b.x / 1000), Math.floor(b.y / 1000), b.ownerSlot);
+  return out;
+}
+
+function unpackBodyguards(packed: number[]): Bodyguard[] {
+  const bodyguards: Bodyguard[] = [];
+  for (let i = 0; i + 2 < packed.length; i += 3) {
+    bodyguards.push({ id: bodyguards.length, x: packed[i]! * 1000, y: packed[i + 1]! * 1000, ownerSlot: packed[i + 2]! as SlotIndex, phaseOffset: 0 });
+  }
+  return bodyguards;
+}
+
+function packAreas(areas: ClearedRect[]): number[] {
+  const out: number[] = [];
+  for (const r of areas) out.push(r.x, r.y, r.w, r.h);
+  return out;
+}
+
+function unpackAreas(packed: number[]): ClearedRect[] {
+  const areas: ClearedRect[] = [];
+  for (let i = 0; i + 3 < packed.length; i += 4) areas.push({ x: packed[i]!, y: packed[i + 1]!, w: packed[i + 2]!, h: packed[i + 3]! });
+  return areas;
+}
+
 function packPlayer(p: TronPlayerState): PackedPlayer {
   // Positions are rounded to 1/1000 px (integers encode far smaller than floats);
   // headings stay exact because guests replay movement from them
+  const weapon = p.equippedWeapon;
+  const effects: (string | number)[] = [];
+  for (const e of p.activeEffects ?? []) effects.push(e.sprite, e.remainingFrames);
   return [
-    p.slotIndex, Math.round(p.x), Math.round(p.y), p.direction, p.alive, p.equippedWeapon, p.activeEffects,
+    p.slotIndex, Math.round(p.x), Math.round(p.y), p.direction, p.alive,
+    weapon ? [weapon.sprite, weapon.ammo ?? NONE, weapon.remainingFrames ?? NONE] : null, effects,
     p.speed, p.moveCounter, p.tpCooldown, p.steer, p.action,
   ];
+}
+
+function unpackWeapon(packed: PackedPlayer[5]): EquippedWeapon | null {
+  if (!Array.isArray(packed)) return null;
+  const weapon: EquippedWeapon = { sprite: String(packed[0]) };
+  if (packed[1] !== NONE) weapon.ammo = packed[1];
+  if (packed[2] !== NONE) weapon.remainingFrames = packed[2];
+  return weapon;
+}
+
+function unpackEffects(packed: PackedPlayer[6]): ActiveEffect[] {
+  const effects: ActiveEffect[] = [];
+  for (let i = 0; Array.isArray(packed) && i + 1 < packed.length; i += 2) {
+    effects.push({ sprite: String(packed[i]), remainingFrames: Number(packed[i + 1]) });
+  }
+  return effects;
 }
 
 function packItem(i: GameItem): PackedItem {
@@ -260,22 +395,62 @@ export function decodeSnapshot(data: Uint8Array): Snapshot | null {
  */
 export type WireState = Omit<TronGameStateData, 'match' | 'round'> & {
   match?: TronGameStateData['match'];
-  round: Omit<TronRoundState, 'items' | 'portals'> & Partial<Pick<TronRoundState, 'items' | 'portals'>>;
+  round: Omit<TronRoundState, 'items' | 'portals'> & Partial<Pick<TronRoundState, 'items' | 'portals'>> & {
+    /** Sent without `portals`: only their animation frames, which is all that changed. */
+    portalFrames?: number[];
+  };
 };
+
+/** Portals without what changes all the time, to tell whether they must be sent again. */
+export function portalsKey(portals: TronRoundState['portals']): unknown {
+  return portals.map(p => [p.id, p.x1, p.y1, p.x2, p.y2]);
+}
 
 /** Serialize game state to a compact MessagePack binary. */
 export function serializeState(state: WireState): Uint8Array {
-  const packed = {
-    ...packEvents(state),
-    earlier: state.earlier?.map(packEarlier),
-    round: {
-      ...state.round,
-      players: state.round.players.map(packPlayer),
-      projectiles: packProjectiles(state.round.projectiles),
-      // Inactive items are of no interest to guests
-      items: state.round.items?.filter(i => i.active).map(packItem),
-    },
+  const { round } = state;
+  const extras: PackedExtras = {};
+  let hasExtras = false;
+  const extra = <K extends keyof PackedExtras>(key: K, value: PackedExtras[K] | undefined, present = value !== undefined): void => {
+    if (!present) return;
+    extras[key] = value;
+    hasExtras = true;
   };
+  extra('match', state.match);
+  // Inactive items are of no interest to guests
+  extra('items', round.items?.filter(i => i.active).map(packItem));
+  extra('portals', round.portals);
+  extra('portalFrames', round.portalFrames);
+  extra('hand', round.hand);
+  extra('speedUp', round.speedUp === 'on' ? 2 : 1, round.speedUp !== undefined);
+  extra('soundEvents', state.soundEvents, state.soundEvents.length > 0);
+  extra('borderSegments', state.borderSegments?.map(b => ({ color: b.color, segments: packTrails(b.segments) })), !!state.borderSegments?.length);
+  extra('eraserUsed', true, !!state.eraserUsed);
+  extra('ridiculousDeathSlots', state.ridiculousDeathSlots, !!state.ridiculousDeathSlots?.length);
+  extra('clearedAreas', state.clearedAreas && packAreas(state.clearedAreas), !!state.clearedAreas?.length);
+  extra('clearedLines', state.clearedLines, !!state.clearedLines?.length);
+  extra('roundStarted', true, !!state.roundStarted);
+  extra('deaths', state.deaths, !!state.deaths?.length);
+  extra('colorBlindnessFrames', state.colorBlindnessFrames, !!state.colorBlindnessFrames);
+  extra('whiteFlashFrames', state.whiteFlashFrames, !!state.whiteFlashFrames);
+  extra('roster', state.roster);
+  extra('earlier', state.earlier?.map(packEarlier), !!state.earlier?.length);
+
+  const packed: PackedGameState = [
+    state.tick ?? NONE,
+    Math.max(0, PHASES.indexOf(round.phase)),
+    round.countdown,
+    round.roundWinner === null ? NONE : round.roundWinner === 'draw' ? DRAW : round.roundWinner,
+    round.doorTick,
+    round.players.map(packPlayer),
+    packTrailBytes(state.newTrailSegments),
+    packProjectiles(round.projectiles),
+    packExplosions(round.explosions),
+    packBodyguards(round.bodyguards),
+    state.pongs ?? null,
+    state.acks ?? null,
+  ];
+  if (hasExtras) packed.push(extras);
   return encode(packed, { ignoreUndefined: true });
 }
 
@@ -283,40 +458,70 @@ export function serializeState(state: WireState): Uint8Array {
  * Deserialize a state produced by `serializeState`. `players` supplies the static
  * data (colour, nickname) that is not sent with every frame, and `previous` the
  * slow-changing parts when this frame left them out.
+ *
+ * Projectiles, explosions and satellites come back with what is needed to draw them
+ * and nothing else (design/networking.md, "Wire format").
  */
 export function deserializeState(
   data: Uint8Array, players: readonly PlayerIdentity[] = [], previous: TronGameStateData | null = null
 ): TronGameStateData {
   const packed = decode(data) as PackedGameState;
+  if (!Array.isArray(packed)) throw new Error('not a game state');
+  const extras: PackedExtras = packed[12] ?? {};
   // A frame that announces a roster is read with it
-  if (Array.isArray(packed.roster)) players = rosterIdentities(packed.roster);
-  const events = unpackEvents(packed);
+  if (Array.isArray(extras.roster)) players = rosterIdentities(extras.roster);
+  const winner = packed[3];
+  const bytes = (value: unknown): Uint8Array => (value instanceof Uint8Array ? value : new Uint8Array(0));
+  let portals = extras.portals ?? previous?.round.portals ?? [];
+  if (!extras.portals && Array.isArray(extras.portalFrames)) {
+    const frames = extras.portalFrames;
+    portals = portals.map((p, i) => (typeof frames[i] === 'number' ? { ...p, animFrame: frames[i] } : p));
+  }
   return {
-    ...packed,
-    newTrailSegments: events.newTrailSegments,
-    borderSegments: events.borderSegments,
-    earlier: Array.isArray(packed.earlier)
-      ? packed.earlier.map(unpackEarlier).filter((e): e is FrameEvents => e !== null) : undefined,
+    ...(packed[0] !== NONE && { tick: packed[0] }),
+    newTrailSegments: unpackTrailBytes(bytes(packed[6])),
+    soundEvents: extras.soundEvents ?? [],
+    borderSegments: extras.borderSegments?.map(b => ({ color: b.color, segments: unpackTrails(b.segments) })),
+    eraserUsed: extras.eraserUsed,
+    ridiculousDeathSlots: extras.ridiculousDeathSlots,
+    clearedAreas: extras.clearedAreas && unpackAreas(extras.clearedAreas),
+    clearedLines: extras.clearedLines,
+    roundStarted: extras.roundStarted,
+    deaths: extras.deaths,
+    colorBlindnessFrames: extras.colorBlindnessFrames,
+    whiteFlashFrames: extras.whiteFlashFrames,
+    roster: extras.roster,
+    ...(packed[10] && { pongs: packed[10] }),
+    ...(packed[11] && { acks: packed[11] }),
+    earlier: Array.isArray(extras.earlier)
+      ? extras.earlier.map(unpackEarlier).filter((e): e is FrameEvents => e !== null) : undefined,
     round: {
-      ...packed.round,
-      players: packed.round.players.map((p): TronPlayerState => {
+      phase: PHASES[packed[1]] ?? 'countdown',
+      countdown: packed[2],
+      roundWinner: winner === NONE ? null : winner === DRAW ? 'draw' : (winner as SlotIndex),
+      doorTick: packed[4],
+      players: (packed[5] ?? []).map((p): TronPlayerState => {
         const identity = players.find(i => i.slotIndex === p[0]);
         return {
           slotIndex: p[0] as SlotIndex,
           x: p[1], y: p[2], direction: p[3], alive: p[4],
           color: identity?.color ?? '#ffffff',
           nickname: identity?.nickname ?? '',
-          equippedWeapon: p[5], activeEffects: p[6] ?? [],
+          equippedWeapon: unpackWeapon(p[5]), activeEffects: unpackEffects(p[6]),
           speed: p[7], moveCounter: p[8], tpCooldown: p[9], steer: p[10], action: p[11],
         };
       }),
-      projectiles: unpackProjectiles(packed.round.projectiles ?? []),
-      items: packed.round.items?.map((i): GameItem => ({
+      projectiles: unpackProjectiles(bytes(packed[7])),
+      explosions: unpackExplosions(bytes(packed[8])),
+      bodyguards: unpackBodyguards(packed[9] ?? []),
+      items: extras.items?.map((i): GameItem => ({
         id: i[0], sprite: i[1], category: i[2] ? 'weapon' : 'automatic',
         x: i[3], y: i[4], active: i[5], hp: i[6], ...(i[7] && { mystery: true }),
       })) ?? previous?.round.items ?? [],
-      portals: packed.round.portals ?? previous?.round.portals ?? [],
+      portals,
+      ...(extras.hand && { hand: extras.hand }),
+      ...(extras.speedUp && { speedUp: extras.speedUp === 2 ? 'on' as const : 'offered' as const }),
     },
-    match: packed.match ?? previous?.match ?? EMPTY_MATCH,
+    match: extras.match ?? previous?.match ?? EMPTY_MATCH,
   };
 }

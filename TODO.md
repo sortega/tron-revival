@@ -142,6 +142,10 @@ devices.
 - [ ] **Try it with real phones**: joining by QR from somebody's screen, asking to play,
       stepping down; what a spectator costs a phone that hosts (CPU, battery) was not
       measured
+- [ ] Bandwidth, if it matters again (`design/networking.md`, "Considered and not done"):
+      a state every second tick; players as differences; tracers from a seed if swept
+      tracers are dropped. The stream to a player is 6–11 KB/s in a normal game, measured
+      in Node only (`npm run bench:net`), not in real browsers since the new format
 - [ ] Team mode with seat changes is unit-tested only
 - [ ] Trystero's `scale` plug-in or `maxUsers` if rooms with many phones prove unstable
 

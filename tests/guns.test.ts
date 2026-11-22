@@ -77,7 +77,8 @@ describe('level guns', () => {
     // Survives the wire
     const state = deserializeState(serializeState(g.serialize()));
     expect(state.round.projectiles.length).toBe(pellets.length);
-    expect(state.round.projectiles[0]!.ownerSlot).toBe(NO_OWNER);
+    expect(state.round.projectiles[0]!.type).toBe('tracer');
+    expect(state.round.projectiles[0]!.x).toBe(Math.floor(pellets[0]!.x / 1000) * 1000);
   });
 
   it('fire at about the original rate, with a sound, and only on their level', () => {

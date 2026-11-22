@@ -262,20 +262,91 @@ median one-way lag, bitrate, and the number of predicted ticks.
 
 ### Wire format
 
-A frame is MessagePack with positional arrays for the hot parts (`network/serialization.ts`):
+A frame is MessagePack (`network/serialization.ts`), laid out so that what every frame
+has costs no field names and what there is most of costs bytes rather than numbers:
 
-- players as tuples, positions rounded to 1/1000 px, no colour/nickname (static, from the
-  lobby),
-- projectiles as one flat number array, trails and border segments as flat `[x, y, ...]`,
-- tracer paths as line segments (`clearedLines`) rather than one entry per pixel, and only
-  the paths (and `clearedAreas`) that actually erased something: a tracer flying through
-  empty space is not reported,
+- **A positional array**, not a map: tick, phase (an index), countdown, round winner,
+  door tick, players, trails, projectiles, explosions, satellites, pongs, acks. What a
+  frame has only now and then follows as a map by name (`match`, `items`, `portals`,
+  sounds, cleared areas and lines, deaths, roster, `earlier`, ...), absent when empty.
+- **Players** as tuples, positions rounded to 1/1000 px, headings exact (guests replay
+  movement from them), no colour or nickname (static, from the roster); weapon and
+  effects as tuples too.
+- **New trail pixels** as bytes: per player `[slot, count, 3 bytes a pixel]` (10 bits
+  each way: the arena is 750 × 600).
+- **Projectiles** as bytes: guests only draw them ("shown as received", above), so
+  what travels is the pixel and the type (3 bytes), plus the heading in 1/256 of a turn
+  for bullets and bombs, which are drawn as rotated sprites (4 bytes). Id, owner, speed
+  and lifespan stay on the host; a guest's `Projectile` has made-up values for them.
+- **Explosions** as bytes: pixel, animation frame, scale in tenths (5 bytes).
+  **Satellites** as `[x, y, owner]` in pixels.
+- Tracer paths as line segments (`clearedLines`) rather than one entry per pixel, and only
+  the paths (and `clearedAreas`, as flat `[x, y, w, h]`) that actually erased something: a
+  tracer flying through empty space is not reported.
 - `match`, `items` and `portals` only when they changed (plus once a second); the guest keeps
-  the last value,
-- loop-sound start/stop events only on transitions.
+  the last value. A portal's animation frame changes every third tick: that is no reason
+  to send the portals again, only their frames (`portalFrames`).
+- Loop-sound start/stop events only on transitions.
 
-Typical bitrate is 15–25 KB/s per guest (it was 70+ KB/s, with spikes of several hundred
-during Uzi fire).
+Builds with different formats never meet: the format is part of the Trystero app id
+(`teratron/v4`).
+
+#### Measured
+
+`npm run bench:net`: a real `HostSession`, 60 s of rounds being played per scene, the
+payload of the stream to one player in KB/s (WebRTC adds its own framing to each of the
+70 messages a second: about 6–8 KB/s on top, see [spectators.md](./spectators.md)).
+"Before" is the format with field names, one number per coordinate and ten numbers per
+projectile.
+
+| Scene | Before | Now | Bytes a message |
+|-------|--------|-----|-----------------|
+| 2 humans, nothing happening | 18.3 | 5.6 | 81 |
+| 4 humans, nothing happening | 23.8 | 9.2 | 135 |
+| A human and 3 hard bots | 27.7 | 11.2 | 164 |
+| One of four fires a rifle without pause | 79.9 | 21.4 | 313 |
+| One of four fires a shotgun | 137.4 | 32.7 | 478 |
+| One of four fires an Uzi | 90.2 | 23.9 | 350 |
+| All four fire Uzis | 175.5 | 29.7 | 435 |
+
+Where it went (4 humans, quiet): field names 10 KB/s, trail pixels 6.3 → 1.1, portals
+1.1 → 0.3. With weapons: projectiles took 22 bytes each on every tick they lived and
+explosions 38 (rifle scene: 30 and 23 KB/s; now 4.2 and 5.0). What is left is mostly the
+players (21–26 bytes each, two thirds of a quiet frame). Encoding is not slower: 13 µs a
+frame on the host where it was 18 (40 with four Uzis), 4 µs to decode.
+
+#### Considered and not done
+
+- **Tracers from a random seed.** The Uzi's 20 tracers a tick are random headings and
+  speeds; the host could send one seed and let guests draw the same numbers. After the
+  change above a firing Uzi costs about 4 KB/s in projectiles (17 with four), and that is
+  all a seed could save, for the few seconds an Uzi lasts. The price: guests would have to
+  compute where tracers are, which today only the host knows, and it is not only the
+  spread: under the swept tracers on trial ([projectiles.md](./projectiles.md)) a tracer
+  stops at the first thing on its path, which a guest could only know by simulating
+  collisions. A guest that drew them where they would have landed would show shots going
+  through walls. If the experiment is dropped (tracers act where they land) the idea
+  becomes exact and cheap, and is worth another look.
+- **Spawn and removal events instead of positions every tick** (rifle tracers, pellets,
+  bombs fly straight; explosions are a fixed animation). Would take most of what
+  projectiles and explosions still cost (about 9 of 21 KB/s in the rifle scene), at the
+  price of state on the guest that has to survive portals, satellites, joining late and
+  the reduced stream. The stateless form was preferred while the numbers are this low.
+- **General-purpose compression.** WebRTC data channels do not compress. Deflate on each
+  message by itself gains little, and less than before (frames are small and have few
+  repeats left): 2–12 % now. Deflate with the previous message as its dictionary gains
+  30–65 % (quiet 4 humans: 9.2 → 4.6 KB/s), because consecutive frames are alike, but it
+  needs every receiver to have decoded the previous message (a player joining late, the
+  reduced stream and its own sequence), a synchronous deflate in JavaScript (the browser's
+  `CompressionStream` is asynchronous and takes no dictionary: a library of some 10 KB)
+  and its processor time 70 times a second on a phone that hosts. Sending the players as
+  differences from the previous tick would get much of the same for the part that is
+  left, without a library. Neither is done: at 6–11 KB/s for a normal game the stream is
+  now smaller than the framing around it.
+- **Fewer, larger messages** (a state every second tick with the events of the one in
+  between, as the reduced stream does): halves the 6–8 KB/s of framing and nearly halves
+  the players' part, for 14 ms more latency on what others do and a change to how inputs
+  are acknowledged. The next thing to try if bandwidth matters again.
 
 ### Testing with artificial latency
 
