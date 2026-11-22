@@ -14,12 +14,12 @@ a real device
 - [ ] **Provision a TURN service and set the env vars for the deployed build** (Cloudflare
       Realtime TURN recommended; see `design/networking.md`). Until then players behind
       carrier-grade NAT cannot connect, and the lobby says so
-- [ ] **Verify across networks** (phone on mobile data ↔ laptop on Wi-Fi)
+- [x] **Verify across networks** (phone on mobile data ↔ laptop on Wi-Fi)
 - [ ] **Touch controls on a real phone**: pick a winner among BUTTONS, POINT and STICK,
       tune it, remove the losers (and nipplejs with the old stick)
 - [ ] **Display on the iPhone**: tune the opacities in `display/settings.ts` and the
       twinkle in `TronRenderer.drawPlayerHead`
-- [ ] **Menu, local set-up and lobby on the iPhone** (`design/screen-layout.md`; checked
+- [x] **Menu, local set-up and lobby on the iPhone** (`design/screen-layout.md`; checked
       only in headless Chrome at phone sizes): both orientations in Safari — nothing cut
       off beside the notch or under the tool bars, no zoom when a field gets the focus,
       the keyboard stays open while chat messages arrive and after SEND, the chat field
@@ -31,14 +31,21 @@ a real device
 - [ ] **Play against the bots**: wall-hugging endgames and no chasing from behind may feel
       different since the territory map; `easy` is weaker than before the human-like layer
       (78 % against 69 % dead within 20 s when left alone) — lower its strength?
-- [ ] **Laptop vs phone: both players died at the first instant of round 1.** Not
+- [x] **Laptop vs phone: both players died at the first instant of round 1.** Not
       reproduced with two headless browsers. Deaths are logged to the console
       (`[game] X died: <cause> at x,y`); need to know which device hosted, which browser,
       and whether it was the dev server or the deployed build
 
 ## Gameplay
 
-- [ ] Items can spawn hidden under a closed door (faithful, but maybe not fun)
+- [x] Items can spawn hidden under a closed door (faithful, but maybe not fun). It's fine. It's also a bonus for the shield item.
+- [ ] **Swept tracers** (`TRACER_SWEEPS`, `design/projectiles.md`): an experiment, switched
+      on. Keep or drop; meanwhile three tests fail ("Uzi fire goes over a thin wall",
+      "sustained fire gets past a lone satellite", "a watcher rebuilds exactly the host
+      arena")
+- [ ] **Satellites crossing the screen** kill whatever is on their way and turn round
+      mid-arena (`design/bodyguards.md`, "the orbiting bug, on purpose"): keep, make the
+      crossing harmless, or take the short way through the edge
 - [ ] Match length setting
 - [ ] Keep scores across "back to lobby" (optional setting)
 - [ ] Gamepad support
@@ -52,7 +59,7 @@ Design: `design/local-and-ai.md`, `design/bots-territory.md`, `design/bots-human
       (`bombThreat`) but only acts on it with a gun in hand: unarmed, or once the bomb
       is too near to shoot, it does nothing (30 of 168 die in the staged attack of
       `HUMAN_REPORT=bombs`)
-- [ ] `normal` keeps the old bomb rule: it fires at a bomb, or through one, from as near
+- [x] `normal` keeps the old bomb rule: it fires at a bomb, or through one, from as near
       as 75 px (`defusesBombs` is hard-only so far)
 - [ ] Shooting items an enemy gets to first (`deniesItems`, hard): no gain in 1280 rounds,
       and it fails more often than it works (68 items destroyed, 111 taken all the same).
@@ -70,7 +77,7 @@ Design: `design/local-and-ai.md`, `design/bots-territory.md`, `design/bots-human
       map's reach does not)
 - [ ] Tight places: `normal` threads gaps half as often as before the human-like layer,
       `hard` does not, and both spend more time squeezed; look at replays before tuning
-- [ ] Late perception of trail pixels (bots see every new trail pixel at once, on the
+- [x] Late perception of trail pixels (bots see every new trail pixel at once, on the
       territory map too)
 - [ ] Human-like bots build their own map on the first tick of a round (2–3 ms once):
       build it during the countdown instead
@@ -107,6 +114,7 @@ Design: `design/display-layer.md`.
 - [ ] Lock-border pixels in a rejoin snapshot are taken for trails (same colour as the player)
 - [ ] Smooth lines of two colours running side by side can over-saturate slightly
 - [ ] If tablets / ≥ 3 device px per logical px matter: a 2× `bold` with a two-step fringe
+- [ ] When the scenario changes, items and players are replaced first rather than at the same time
 
 ## Code and tooling
 
@@ -117,7 +125,7 @@ Design: `design/display-layer.md`.
       copy buttons; chat is a scroll away from the seats when upright
 - [ ] Split `TronGameState` into systems (weapons, bodyguards, portals)
 - [ ] Extract the game's HTML / CSS out of `TronGame`
-- [ ] nipplejs 0.10 → 1.0 (API changed; needs a real touch device) or replace it with a
+- [x] nipplejs 0.10 → 1.0 (API changed; needs a real touch device) or replace it with a
       small pointer-event joystick
 - [ ] Deploy from CI (GitHub Pages action, instead of `gh-pages`) with the TURN settings
       as repository secrets
@@ -135,16 +143,9 @@ devices.
       stepping down; what a spectator costs a phone that hosts (CPU, battery) was not
       measured
 - [ ] Team mode with seat changes is unit-tested only
-- [ ] No chat during a game
 - [ ] Trystero's `scale` plug-in or `maxUsers` if rooms with many phones prove unstable
 
 ## Ideas not yet decided
 
 - [ ] `design/research/ideas.md` and `gap-analysis.md`: proposals ranked by value for
       effort; nothing in them is approved. Pick what to specify next.
-
-## Done, documented nowhere else
-
-- [x] nanoid removed (`crypto.randomUUID()` is enough); `unique-names-generator` kept
-- [x] TypeScript 6.0, not 7: the native compiler works for `tsc` but breaks the
-      language-server plugin

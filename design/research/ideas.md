@@ -8,7 +8,12 @@ before code.
 done or changed: the item cap is gone (G2); the shield no longer stops tracers or saves from
 another head, and passes closed doors (G4, see `design/architecture.md`); tracers act where
 they land (`design/projectiles.md`); spectators, the mobile lobby and the countdown sign that
-shows your player (part of A1) are in. File and line references are those of `9dcb2b6`.
+shows your player are in. File and line references are those of `9dcb2b6`.
+
+**Taken out (22 November 2026)** by the owner: A1 (start markers), B1 (death explosion and
+scream), E2 (Torpedo and Tele) and the accessibility section (colour-blind palette, reduced
+flashing), with the sketch and the ranking entries that went with them. The remaining ideas
+keep their letters and numbers, so the series have gaps.
 
 Companion: [gap-analysis.md](./gap-analysis.md) (original vs rewrite, with line references;
 rows are cited below as G1…G21). Screenshots of the current build are in [`img/`](./img/).
@@ -60,8 +65,6 @@ that half of these ideas try to do for people on separate phones.
 
 Full table in [gap-analysis.md](./gap-analysis.md). The findings that matter most:
 
-- **Deaths lost their explosion and scream** (G10). The original marks every death on the
-  spot; the rewrite only plays a sound. Restore.
 - **The item table changed character** (G1-G3). Original: H-missile is the most common
   weapon (20 % of weapons; `old-tron-design.md` wrongly calls it rare), items are uncapped and
   pile up, mystery items are half duds. Rewrite: uniform weights, at most 6 on the field.
@@ -70,8 +73,6 @@ Full table in [gap-analysis.md](./gap-analysis.md). The findings that matter mos
 - **There is still no match**, as in the original (G9), but the original had one key to
   continue and the rewrite needs every player to ready up (G18).
 - **The author had started an options screen and a "start shielded" switch** (G8, G19).
-- **Player 4 had a mouse** (G20): the original already cared about getting a fourth person
-  onto one machine.
 
 ---
 
@@ -81,25 +82,6 @@ Each entry: what and why · spirit (and the purist's objection) · effort and wh
 dependencies · how to validate without a human.
 
 ### A. Onboarding and the first minute
-
-#### A1. "That one is you": start markers during the countdown
-
-- **What / why.** During the countdown every player is a single pixel
-  (`img/desktop-3-countdown.png`: the four heads are nearly invisible). Draw, for the 3 s of
-  countdown only, a ring in the player's colour around each start position with the nickname
-  and a short heading arrow; the local player's ring is larger and says "TÚ / YOU". On a
-  shared keyboard, also the key hint (`←/→`). The first death of every newcomer is currently
-  "I didn't know which one I was".
-- **Spirit.** Legibility, no rule change; disappears when play starts so the arena stays
-  pure pixels. Purist: the original had nothing; you learnt your corner (it was always the
-  same corner, PRG 692-750, and it still is).
-- **Effort.** S. `TronRenderer` countdown overlay (`TronRenderer.ts:~750`), needs the local
-  slots from `TronGame`.
-- **Risks.** Clutter with 4 rings on a phone; keep them thin.
-- **Depends.** Head shading branch (it makes heads visible *during* play; this is only the
-  countdown). Should use the same colours.
-- **Headless check.** Playwright screenshot at countdown; assert non-black pixels in a 40 px
-  box around each start position (currently ~1).
 
 #### A2. Attract mode and a one-tap first game
 
@@ -139,23 +121,6 @@ dependencies · how to validate without a human.
   slot; Playwright screenshot of the legend.
 
 ### B. Game feel
-
-#### B1. Give deaths back their explosion and scream
-
-- **What / why.** G10: the original runs `Puf()` and `uah.wav` on every death; the rewrite
-  only queues a sound. Add a small explosion at the death position (the same 39-frame
-  animation at scale 0.2, mirrored across edges as `Puf` does) and a brief ring in the dead
-  player's colour, and bring `UAH.WAV` back as the normal death sound. Today a normal death plays
-  `laughs` and a ridiculous one `panico` (`TronGameState.ts:321-328`); whether `uah` replaces
-  `laughs` or joins it is for the owner's ear.
-- **Spirit.** Straight restoration. No objection.
-- **Effort.** S. `killPlayerWithSound` (`TronGameState.ts:318`) pushes an `Explosion`
-  (already serialised and rendered); convert `old-tron/media/UAH.WAV` to mp3.
-- **Risks.** The explosion sprite briefly hides trail pixels near the crash; scale 0.2 is
-  what the original used.
-- **Depends.** None.
-- **Headless check.** `tests/rules.test.ts`: a wall crash yields a frame with one explosion
-  at the death coordinates and a `uah` sound event.
 
 #### B2. Web Audio sound manager
 
@@ -202,7 +167,7 @@ dependencies · how to validate without a human.
   point; the renderer just delays the summary overlay).
 - **Spirit.** Makes the chaos land. Purist: shake blurs the pixels that are the rules; so
   shake only the *presentation transform* of the whole canvas, never the simulation, cap it
-  at 3 px, and disable it under `prefers-reduced-motion` and in G2's reduced-flash mode.
+  at 3 px, and disable it under `prefers-reduced-motion`.
 - **Effort.** S. `TronRenderer` composite step, driven by the `explosions` scale it already
   receives.
 - **Risks.** Motion sickness on phones; hence the cap and the switch.
@@ -370,28 +335,6 @@ Covered by D1 (the *Clásico* preset) and G1-G3. Listed separately because it ca
 alone in an afternoon as a constant in `ItemLauncher.ts`, before any options UI exists, and
 play-tested with `?items=classic`.
 
-#### E2. Two new items with a pedigree: Torpedo and Tele
-
-- **What / why.** The original art folder has blank item templates named `Torpedoitem`,
-  `Teleitem` and `ofensivoitem` (gap analysis §5): planned, never made. Proposals that keep
-  the house style (strong, simple, can backfire):
-  - **Torpedo** (weapon, 1 shot): a slow missile (2 px/tick like the H-bomb) that *you* steer
-    with your left/right keys while your own vehicle keeps going straight. Blast as a Glock
-    bullet. Ten seconds of fuel. You will drive into a wall while aiming; that is the item.
-  - **Tele** (automatic): the next trail or wall you would hit, you pass through once (a
-    one-use, 3 s Crossing+Shield that announces itself with the flush sound). Simpler than a
-    targeted teleport and reads instantly.
-- **Spirit.** Torpedo is a ridiculous-death generator. Purist: new items are not Teratron.
-  They would be off in Classic, and satellites already set the precedent.
-- **Effort.** M each. `TronGameState` (weapon handling, projectile with owner-steer),
-  `movement.ts` and guest prediction (the owner's steering stops affecting the vehicle:
-  prediction must know), sprites, sidebar icons, bots (ignore the Torpedo at first).
-- **Risks.** Torpedo touches client-side prediction: highest technical risk in this list.
-  Balance unknown.
-- **Depends.** D1 (to switch them off). Human-like / territory bots would need to learn them.
-- **Headless check.** Rules tests per item; netcode rig: prediction error stays zero while a
-  torpedo is being steered at 150 ms.
-
 #### E3. Bring your own level (a PNG)
 
 - **What / why.** The original's levels are collages of clip-art and in-jokes about the
@@ -486,38 +429,6 @@ play-tested with `?items=classic`.
   gamepad players turn more precisely than keyboard players (as touch already does).
 - **Depends.** None.
 - **Headless check.** Unit test of the mapping with a fake `navigator.getGamepads()`.
-
-### G. Accessibility
-
-#### G1. Colour-blind-safe palette and shapes
-
-- **What / why.** FFA is red vs green (`FFA_COLORS`, `src/types/lobby.ts:10-15`), the classic
-  unreadable pair; teams are purple vs brown. Offer an alternative palette (for instance
-  orange / sky blue / white / magenta) as a per-device setting. Colours are render-side
-  (`PixelGrid` stores palette indices), so two players in the same room can see different
-  palettes.
-- **Spirit.** Purist: Rojo, Verde, Azul, Amarillo *are* the players' names. Keep the names
-  and the default.
-- **Effort.** S-M. `TronRenderer` trail painting by slot instead of by colour string; the
-  colour string travels in `TronPlayerState.color` today, so the mapping needs a look.
-- **Risks.** The colour-blindness *gag* effect (colour cycling after a Swap) is a joke about
-  exactly this; keep it, it scrambles any palette equally.
-- **Depends.** **Shading branch** is redoing how trails and heads are drawn; this must be a
-  parameter of that work, not a parallel change.
-- **Headless check.** Palette pairs pass a simulated deuteranopia/protanopia distance
-  threshold (pure function test); screenshot with the alternative palette.
-
-#### G2. Reduced flashing
-
-- **What / why.** The mega-bomb white flash lasts 308 ticks, 4.4 s (`WHITE_FLASH_DURATION`,
-  `TronGameState.ts:232`), and the colour-blindness gag cycles colours for 4 s. There is no
-  `prefers-reduced-motion` handling in `src/` (grep). Add a setting (default from the media
-  query): flash becomes a 150 ms fade to 30 % white, colour cycling becomes a single swap,
-  no shake (B4).
-- **Spirit.** Render-only. **Effort.** S (`TronRenderer.ts:260-270`, `166`, `233`).
-- **Risks.** The white flash also hides the arena on purpose; reduced mode keeps a dim veil.
-- **Depends.** Shading branch (same file). **Headless check.** Renderer test: with the flag,
-  peak overlay alpha ≤ 0.3.
 
 ### H. Network robustness
 
@@ -631,51 +542,41 @@ play-tested with `?items=classic`.
 
 ## 4. Ranking
 
-### Top 10 by value for effort
+### Top 9 by value for effort
 
-1. **B1 + A1: readable deaths and starts (S).** Two small renderer/simulation changes fix the
-   two moments a newcomer is most lost: "which one am I?" and "what just happened to me?".
-   One of them is a plain regression from the original (G10). Nothing else here buys as much
-   per hour.
-2. **C1: match, podium, awards, ¿Otra? (M).** Gives a session an ending and a punchline, and
+1. **C1: match, podium, awards, ¿Otra? (M).** Gives a session an ending and a punchline, and
    puts the rewrite's best original idea (the ridiculous-death counter) on stage. Everything
    in "coming back" (C2, J1) hangs from it.
-3. **D1 with E1: Opciones and the Classic preset (M; E1 alone is S).** Settles the fidelity
+2. **D1 with E1: Opciones and the Classic preset (M; E1 alone is S).** Settles the fidelity
    question (G1-G3) by letting both tables exist, finishes a screen the original started, and
    becomes the home for match length, handicap and sudden death.
-4. **F3: phones as controllers (M).** The only idea that restores property 1, the shared
-   picture, and it reuses the netcode instead of extending it. Ranked below the first three
+3. **F3: phones as controllers (M).** The only idea that restores property 1, the shared
+   picture, and it reuses the netcode instead of extending it. Ranked below the first two
    only because it depends on which touch mode survives and on the spectators work.
-5. **K1: Spanish with the original's words (S-M).** Cheap, makes the game recognisably
+4. **K1: Spanish with the original's words (S-M).** Cheap, makes the game recognisably
    itself, and is cheaper now than after A3/B3/C1 add fifty more strings.
-6. **F1 + F2: phone basics and PWA (S + S-M).** A dimming screen and browser chrome are the
+5. **F1 + F2: phone basics and PWA (S + S-M).** A dimming screen and browser chrome are the
    kind of friction that ends phone sessions; both fixes are small and invisible.
-7. **A3 + B3: call-outs, legend and kill feed (S-M).** Replaces the friends shouting next to
+6. **A3 + B3: call-outs, legend and kill feed (S-M).** Replaces the friends shouting next to
    you. Needs K1 to be worth reading.
-8. **H1: absent player becomes a bot (S-M).** Turns the most common network failure in a
+7. **H1: absent player becomes a bot (S-M).** Turns the most common network failure in a
    party (someone's phone locked, someone went for a drink) from "everybody waits" into a
    joke.
-9. **B2: Web Audio (M).** Sound is half of the original's humour and the current manager
-   cannot vary, place or mix it. Pure engineering, low risk, and the base for B1's scream and
-   C3's honks to sound right.
-10. **A2: attract mode and one-tap play (M).** First impressions; the menu currently says
-    nothing about what the game is. Lower because it leans on a refactor (T6) and on the
-    performance work.
+8. **B2: Web Audio (M).** Sound is half of the original's humour and the current manager
+   cannot vary, place or mix it. Pure engineering, low risk, and the base for C3's honks to
+   sound right.
+8. **A2: attract mode and one-tap play (M).** First impressions; the menu currently says
+   nothing about what the game is. Lower because it leans on a refactor (T6) and on the
+   performance work.
 
 Next in line: E3 (bring your own level; high spirit value, waits for the backgrounds branch),
-F4 (gamepads), C3 (honks), J1 (libreta), D2/D3, E4, G1/G2 (should ride along with the shading
-work), H2, D4, I1, E2, C2, C4, D5, J2.
+F4 (gamepads), C3 (honks), J1 (libreta), D2/D3, E4, H2, D4, I1, C2, C4, D5, J2.
 
 ### Quick wins this week
 
 All S, independent, no protocol redesign:
 
-- B1 death explosion and `uah` (one function).
-- A1 start rings during the countdown.
-- E1 Classic item table behind a constant or `?items=classic`, and correct the "rare"
-  H-missile note in `design/old-tron-design.md`.
 - F1 wake lock and vibration.
-- G2 shorten and soften the 4.4 s white flash under `prefers-reduced-motion`.
 - C4 names for local players and a score digit on each panel.
 - E4 level thumbnails.
 - A legend for the summary's unexplained **MR** column header
@@ -696,51 +597,15 @@ All S, independent, no protocol redesign:
 | Kill-cam / full replays | Feasible in principle (deterministic simulation with seeded RNG), but the summary already says who did it, and a replay delays the next round (property 5). Revisit only as "save last round as GIF" for sharing. |
 | Shrinking arena / battle-royale circle | A foreign mechanic. D3 gets the same effect with the original's own border lock. |
 | 90° grid turning "like real Tron" | Teratron's free-angle steering and diagonal pixel rules (`Ondia`, PRG 884-903) are its handling. |
-| A tutorial level | Longer than a round. A1 + A3 teach in place. |
+| A tutorial level | Longer than a round. The countdown sign and A3 teach in place. |
 | Shipping the original splash and intro | The splash is a Counter-Strike parody built on third-party art (G12), and the FLI is 3.8 MB. Keep them in `old-tron/` as history. |
 | A dedicated game server "to fix lag" | Contradicts principle 3 of `design/architecture.md`; prediction already makes steering immediate. TURN provisioning (open item in `TODO.md`) is the real connectivity fix. |
 
 ---
 
-## 5. Deeper sketches for the top 3 (and the controller mode)
+## 5. Deeper sketches for the top 2 (and the controller mode)
 
-### 5.1 Readable deaths and starts (B1 + A1)
-
-**Rules / UX.**
-- On any death: explosion animation at the death pixel, scale 0.2, 39 frames (as PRG
-  853-861), drawn also at the wrapped positions when within 20 px of an edge (PRG 815-851);
-  sound `uah` unless the death is ridiculous (`panico` as today). The existing `laughs` moves
-  to "someone else died ridiculously" or is dropped; owner's call, I could not listen to the
-  files.
-- Countdown: per player a 24 px ring in their colour, nickname above, a 12 px heading tick.
-  Local human seats: ring 36 px, label "TÚ" (or the key hint when several humans share the
-  machine). Rings fade out during the last 0.5 s. Nothing is drawn once `phase === 'playing'`.
-
-**Data / protocol.** None for A1 (positions, names and local slots are already known to the
-renderer). B1 reuses `Explosion {id, x, y, frame, scale}` (`src/types/game.ts:80-86`), which
-is already serialised each tick, and adds `'uah'` to `SOUND_NAMES`. The wire format does not
-change shape. Bump nothing.
-
-**Where.** `TronGameState.killPlayerWithSound` (line 318) and the two direct `p.kill()` sites
-in the crossing check (lines 562-563) → one helper that kills, records, explodes and queues
-the sound. `TronRenderer` countdown overlay. `public/assets/sounds/uah.mp3` from
-`old-tron/media/UAH.WAV`.
-
-**Test plan.**
-1. `tests/rules.test.ts`: scripted wall crash → the frame's `round.explosions` has one entry
-   at `deaths[0].x/y`; `soundEvents` contains `uah`; own-trail crash → `panico`, still one
-   explosion.
-2. Crash at x < 20: renderer draws the explosion twice (unit test on the draw-list helper).
-3. `tests/netcode.test.ts`: guest sees the same explosion id once (no duplicates from
-   reconciliation).
-4. Playwright (desktop and 844×390): screenshot at countdown t = 1.5 s; count coloured pixels
-   within 40 px of each start corner > threshold; at first playing tick the count drops back.
-5. `npm run sim`: bot results unchanged (the change is cosmetic; any difference is a bug).
-
-**Open question.** Bots read explosions? If `BotController` treats explosions as hazards, a
-death explosion would repel bots from corpses; check before merging (I did not).
-
-### 5.2 Match, podium and awards (C1)
+### 5.1 Match, podium and awards (C1)
 
 **Rules.**
 - `matchLength: number | null` (wins needed; `null` = endless, the original's behaviour and
@@ -808,7 +673,7 @@ libreta write (J1) hook in here.
 **Open questions for the owner.** Does a rematch rotate seats/colours (the corner is an
 advantage on some levels)? Should the network default be 5 or endless?
 
-### 5.3 Opciones: rule set with a Classic preset (D1 + E1)
+### 5.2 Opciones: rule set with a Classic preset (D1 + E1)
 
 **Rules.**
 ```ts
@@ -861,7 +726,7 @@ add/remove events. This is the one place this idea touches the performance branc
 6. Netcode rig: bytes/s with 30 items on the field.
 7. Playwright: preset buttons on both viewports; choice persists across reload.
 
-### 5.4 Bonus sketch: controller mode (F3)
+### 5.3 Bonus sketch: controller mode (F3)
 
 **Flow.** Host opens the game on the big screen, creates a room, ticks "esta pantalla es la
 tele" (the host then has no seat unless it also picks a keyboard scheme). Phones scan the QR;
@@ -903,9 +768,9 @@ converting BMPs (`splash`, `Inédito`, `Vicente`, `INICIO`, some item sprites).
 
 **Not checked.** I did not listen to any sound, play the intro FLI, run the original, play
 on a real phone, or run the unit tests / `npm run sim` for this document. Round-length claims
-(D3), bot behaviour around explosions (5.1), award frequencies (5.2), item payload size
-(5.3), Trystero's ability to hand over room authority (H2) and the double-create case (J2)
+(D3), award frequencies (5.1), item payload size (5.2), Trystero's ability to hand over
+room authority (H2) and the double-create case (J2)
 are flagged where they appear and need measuring or reading before a decision.
 
 **Opinion.** The spirit statement, every ranking, all effort estimates, the "don't do" list,
-and the proposed designs of new things (awards, Torpedo/Tele, honks, bot characters).
+and the proposed designs of new things (awards, honks, bot characters).
